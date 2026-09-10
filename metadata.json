@@ -1,0 +1,6 @@
+{
+  "name": "EduFeedback",
+  "description": "Academic survey & feedback platform with themed survey sections, multi-year historical analytics, Tagalog ML sentiment analysis & model training, trending surveys, and institutional news updates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

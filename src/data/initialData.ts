@@ -98,6 +98,79 @@ export const DEFAULT_USERS: UserProfile[] = [
   },
 ];
 
+export interface DemoAccountCredential {
+  email: string;
+  name: string;
+  password: string;
+  pos: "Superadmin" | "Faculty" | "Student Officer" | "Student";
+  role: "superadmin" | "user";
+  department: string;
+  program?: string;
+  description: string;
+  badgeLabel: string;
+  badgeColor: string;
+  accentColor: string;
+  permissions: string[];
+}
+
+export const DEMO_ACCOUNTS_CREDENTIALS: DemoAccountCredential[] = [
+  {
+    email: "admin@edufeedback.edu",
+    name: "System Administrator",
+    password: "admin123",
+    pos: "Superadmin",
+    role: "superadmin",
+    department: "Institutional Quality Assurance Office",
+    description: "Full administrative control: Moderate all surveys, inspect user directories, train Tagalog sentiment NLP models, and manage database snapshots & Prisma exports.",
+    badgeLabel: "System Administrator",
+    badgeColor: "bg-rose-50 text-rose-700 border-rose-200 ring-rose-500/20",
+    accentColor: "rose",
+    permissions: ["Full Administrative Control", "Audit Activity Logs", "Tagalog NLP Dataset Trainer", "Database Backup & Seeding", "User & Role Directory"],
+  },
+  {
+    email: "maria.reyes@school.edu",
+    name: "Dr. Maria Reyes",
+    password: "faculty123",
+    pos: "Faculty",
+    role: "user",
+    department: "College of Computer Studies",
+    program: "Faculty of Computer Science",
+    description: "Academic instructor evaluating curriculum efficacy, authoring mid-term course evaluations, and monitoring student feedback sentiments.",
+    badgeLabel: "Faculty Member",
+    badgeColor: "bg-purple-50 text-purple-700 border-purple-200 ring-purple-500/20",
+    accentColor: "purple",
+    permissions: ["Author Course & Faculty Surveys", "View Department Analytics", "Monitor Tagalog Feedback Sentiments", "Export Survey Reports"],
+  },
+  {
+    email: "clara.santos@school.edu",
+    name: "Clara Santos",
+    password: "officer123",
+    pos: "Student Officer",
+    role: "user",
+    department: "College of Business Administration",
+    program: "BSBA Major in Marketing Management",
+    description: "Student council leader conducting university student life evaluations, campus organization surveys, and student welfare feedback.",
+    badgeLabel: "Student Officer",
+    badgeColor: "bg-amber-50 text-amber-700 border-amber-200 ring-amber-500/20",
+    accentColor: "amber",
+    permissions: ["Author Student Organization Surveys", "View Student Welfare Sentiment", "Target College Batches", "Campus Affairs Polling"],
+  },
+  {
+    email: "juan.delacruz@school.edu",
+    name: "Juan Dela Cruz",
+    password: "student123",
+    pos: "Student",
+    role: "user",
+    department: "College of Computer Studies",
+    program: "Bachelor of Science in Computer Science",
+    description: "Enrolled university student responding to assigned academic evaluations, providing bilingual/Tagalog feedback, and reviewing announcements.",
+    badgeLabel: "University Student",
+    badgeColor: "bg-emerald-50 text-emerald-700 border-emerald-200 ring-emerald-500/20",
+    accentColor: "emerald",
+    permissions: ["Take Targeted Surveys", "Submit Multilingual/Tagalog Feedback", "View Campus Announcements", "Review My Completed Surveys"],
+  },
+];
+
 export const SAMPLE_USERS: UserProfile[] = DEFAULT_USERS;
 
 export const INITIAL_SURVEYS: Survey[] = [

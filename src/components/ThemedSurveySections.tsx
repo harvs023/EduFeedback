@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Survey, UserProfile, SurveyResponse } from "../types";
 import {
   Flame,
@@ -19,6 +19,10 @@ import {
   TrendingUp,
   Newspaper,
   ClipboardList,
+  Pencil,
+  Trash2,
+  UserCheck,
+  PlusCircle,
 } from "lucide-react";
 
 interface ThemedSurveySectionsProps {
@@ -30,6 +34,8 @@ interface ThemedSurveySectionsProps {
   onViewAnalytics: (surveyId: string | number) => void;
   onCreateSurvey?: () => void;
   onCreateNewSurvey?: () => void;
+  onEditSurvey?: (survey: Survey) => void;
+  onDeleteSurvey?: (surveyId: string | number, surveyTitle?: string) => void;
   searchQuery?: string;
   selectedCategory?: string;
 }
@@ -84,6 +90,8 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   onViewAnalytics,
   onCreateSurvey,
   onCreateNewSurvey,
+  onEditSurvey,
+  onDeleteSurvey,
   searchQuery = "",
   selectedCategory = "all",
 }) => {
@@ -103,6 +111,12 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
     return new Set(userResponses.map((r) => String(r.surveyId)));
   }, [userResponses]);
 
+  // Surveys created by the currently logged-in user
+  const myCreatedSurveys = useMemo(() => {
+    if (!currentUser?.email) return [];
+    return surveys.filter((s) => s.owner?.toLowerCase() === currentUser.email?.toLowerCase());
+  }, [surveys, currentUser]);
+
   // Target audience eligibility check
   const isEligible = (survey: Survey) => {
     if (!currentUser) return true;
@@ -116,9 +130,12 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
 
   const effectiveSearch = (searchQuery || internalSearch).trim().toLowerCase();
 
-  // Eligible active surveys for current user
+  // Eligible active surveys for current user (creators can always see their own surveys)
   const eligibleSurveys = useMemo(() => {
     return surveys.filter((s) => {
+      const isCreator = currentUser && s.owner?.toLowerCase() === currentUser.email?.toLowerCase();
+      if (isCreator) return true;
+
       if (s.status !== "published" && s.status !== "scheduled") return false;
       return isEligible(s);
     });
@@ -551,13 +568,13 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
           </div>
         </div>
 
-        {/* Row 2: Performance Evaluation Filter (Decoupled from Themes) */}
+        {/* Row 2: Performance Filters */}
         <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Performance Filter:
+              Quick Filter:
             </span>
-            <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200 text-xs">
+            <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200 text-xs flex-wrap">
               <button
                 onClick={() => setPerformanceFilter("all")}
                 className={`px-2.5 py-1 rounded-md font-medium transition-all ${
@@ -568,6 +585,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
               >
                 All Surveys ({eligibleSurveys.length})
               </button>
+
               <button
                 onClick={() => setPerformanceFilter("trending")}
                 className={`px-2.5 py-1 rounded-md font-medium transition-all flex items-center gap-1.5 ${
@@ -652,10 +670,15 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
             {filteredSurveys.map((survey) => {
               const isAnswered = answeredSurveyIds.has(String(survey.id));
               const perf = getSurveyPerformanceMetrics(survey);
+              const isCreator = currentUser && survey.owner?.toLowerCase() === currentUser.email?.toLowerCase();
+              const isOwnerOrAdmin = isSuperadmin || isCreator;
+
               return (
                 <div
                   key={survey.id}
-                  className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all flex flex-col justify-between"
+                  className={`bg-white p-5 rounded-xl border shadow-xs hover:shadow-sm transition-all flex flex-col justify-between ${
+                    isCreator ? "border-indigo-200 ring-1 ring-indigo-100" : "border-slate-200 hover:border-slate-300"
+                  }`}
                 >
                   <div className="space-y-2.5">
                     {/* Top tags & status */}
@@ -664,6 +687,19 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
                         <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md text-[11px] font-semibold">
                           {survey.cat}
                         </span>
+
+                        {/* Creator Identifier */}
+                        {isCreator && (
+                          <span className="px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-md text-[10px] font-bold">
+                            Your Survey
+                          </span>
+                        )}
+
+                        {survey.status === "draft" && (
+                          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-[10px] font-bold">
+                            Draft
+                          </span>
+                        )}
 
                         {/* Dynamically Earned Performance Badges */}
                         {perf.isTrending && (
@@ -719,10 +755,10 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => handleLaunchSurvey(survey)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                           isAnswered
                             ? "bg-slate-100 hover:bg-slate-200 text-slate-700"
                             : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
@@ -731,14 +767,44 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
                         {isAnswered ? "View Answers" : "Take Survey"}
                       </button>
 
-                      {(isSuperadmin || (currentUser && survey.owner?.toLowerCase() === currentUser.email?.toLowerCase())) && (
-                        <button
-                          onClick={() => onViewAnalytics(survey.id)}
-                          className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 cursor-pointer"
-                          title="View Survey Analytics (Creator & Admin Only)"
-                        >
-                          <BarChart3 className="w-4 h-4" />
-                        </button>
+                      {/* Creator and Admin Controls */}
+                      {isOwnerOrAdmin && (
+                        <div className="flex items-center gap-1">
+                          {onEditSurvey && (
+                            <button
+                              onClick={() => onEditSurvey(survey)}
+                              className="p-1.5 rounded-lg border border-slate-200 hover:bg-indigo-50 hover:border-indigo-200 text-slate-600 hover:text-indigo-600 cursor-pointer transition-colors"
+                              title="Edit Survey Questions & Settings"
+                              aria-label="Edit Survey"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => onViewAnalytics(survey.id)}
+                            className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 cursor-pointer transition-colors"
+                            title="View Survey Analytics (Creator & Admin)"
+                            aria-label="View Analytics"
+                          >
+                            <BarChart3 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {onDeleteSurvey && (
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete the survey "${survey.title}"? This cannot be undone.`)) {
+                                  onDeleteSurvey(survey.id, survey.title);
+                                }
+                              }}
+                              className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
+                              title="Delete Survey"
+                              aria-label="Delete Survey"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

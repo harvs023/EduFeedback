@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Survey, Question, UserProfile, TargetAudience } from "../types";
 import { DEPARTMENTS_DATA } from "../data/initialData";
 import {
   PlusCircle,
+  Pencil,
+  ArrowLeft,
   Trash2,
   Calendar,
   Layers,
@@ -20,45 +22,77 @@ import {
 interface SurveyBuilderProps {
   currentUser: UserProfile | null;
   categories: string[];
+  initialSurvey?: Survey | null;
   onSaveSurvey: (surveyData: Partial<Survey>, status: "draft" | "published" | "scheduled") => void;
+  onCancel?: () => void;
 }
 
 export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   currentUser,
   categories,
+  initialSurvey,
   onSaveSurvey,
+  onCancel,
 }) => {
-  const [title, setTitle] = useState<string>("");
-  const [cat, setCat] = useState<string>(categories[0] || "Course");
-  const [desc, setDesc] = useState<string>("");
-  const [themeSection, setThemeSection] = useState<Survey["themeSection"]>("academics");
-  const [academicYear, setAcademicYear] = useState<string>("2025-2026");
+  const isEditing = Boolean(initialSurvey);
+
+  const [title, setTitle] = useState<string>(initialSurvey?.title || "");
+  const [cat, setCat] = useState<string>(initialSurvey?.cat || categories[0] || "Course");
+  const [desc, setDesc] = useState<string>(initialSurvey?.desc || "");
+  const [themeSection, setThemeSection] = useState<Survey["themeSection"]>(initialSurvey?.themeSection || "academics");
+  const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || "2025-2026");
 
   // Scheduling
-  const [scheduleType, setScheduleType] = useState<"immediate" | "scheduled">("immediate");
-  const [openDate, setOpenDate] = useState<string>("");
-  const [closeDate, setCloseDate] = useState<string>("");
+  const [scheduleType, setScheduleType] = useState<"immediate" | "scheduled">(
+    initialSurvey?.status === "scheduled" || initialSurvey?.openDate ? "scheduled" : "immediate"
+  );
+  const [openDate, setOpenDate] = useState<string>(initialSurvey?.openDate || "");
+  const [closeDate, setCloseDate] = useState<string>(initialSurvey?.closeDate || "");
 
   // Target audience
-  const [targetType, setTargetType] = useState<TargetAudience["type"]>("all");
-  const [selectedRoles, setSelectedRoles] = useState<string[]>(["students", "faculty", "officers"]);
+  const [targetType, setTargetType] = useState<TargetAudience["type"]>(initialSurvey?.targetAudience?.type || "all");
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(
+    initialSurvey?.targetAudience?.filters?.roles || ["students", "faculty", "officers"]
+  );
 
   // Questions builder list
-  const [questions, setQuestions] = useState<Question[]>([
-    {
-      id: "q1",
-      type: "rating",
-      text: "How would you rate the overall effectiveness and delivery of the course/subject?",
-      min: 1,
-      max: 5,
-      labels: ["Poor", "Fair", "Satisfactory", "Very Good", "Outstanding"],
-    },
-    {
-      id: "q2",
-      type: "paragraph",
-      text: "What specific suggestions or comments (in Tagalog or English) do you have for improvement?",
-    },
-  ]);
+  const [questions, setQuestions] = useState<Question[]>(
+    initialSurvey?.questions && initialSurvey.questions.length > 0
+      ? initialSurvey.questions
+      : [
+          {
+            id: "q1",
+            type: "rating",
+            text: "How would you rate the overall effectiveness and delivery of the course/subject?",
+            min: 1,
+            max: 5,
+            labels: ["Poor", "Fair", "Satisfactory", "Very Good", "Outstanding"],
+          },
+          {
+            id: "q2",
+            type: "paragraph",
+            text: "What specific suggestions or comments (in Tagalog or English) do you have for improvement?",
+          },
+        ]
+  );
+
+  useEffect(() => {
+    if (initialSurvey) {
+      setTitle(initialSurvey.title || "");
+      setCat(initialSurvey.cat || categories[0] || "Course");
+      setDesc(initialSurvey.desc || "");
+      setThemeSection(initialSurvey.themeSection || "academics");
+      setAcademicYear(initialSurvey.academicYear || "2025-2026");
+      setScheduleType(initialSurvey.status === "scheduled" || initialSurvey.openDate ? "scheduled" : "immediate");
+      setOpenDate(initialSurvey.openDate || "");
+      setCloseDate(initialSurvey.closeDate || "");
+      setTargetType(initialSurvey.targetAudience?.type || "all");
+      setSelectedRoles(initialSurvey.targetAudience?.filters?.roles || ["students", "faculty", "officers"]);
+      if (initialSurvey.questions && initialSurvey.questions.length > 0) {
+        setQuestions(initialSurvey.questions);
+      }
+    }
+  }, [initialSurvey, categories]);
 
   const addRatingQuestion = () => {
     setQuestions((prev) => [
@@ -160,21 +194,22 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     }
 
     const surveyPayload: Partial<Survey> = {
+      ...(initialSurvey ? { id: initialSurvey.id } : {}),
       title: title.trim(),
       cat,
       desc: desc.trim() || "No description provided.",
       themeSection,
-      isTrending: false, // Determined automatically based on respondent velocity
+      isTrending: initialSurvey?.isTrending ?? false,
       academicYear,
       questions: questions.filter((q) => q.text.trim().length > 0),
       questionCount: questions.length,
-      responses: 0,
-      created: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-      openDate: scheduleType === "scheduled" ? openDate : new Date().toISOString(),
+      responses: initialSurvey?.responses ?? 0,
+      created: initialSurvey?.created || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      openDate: scheduleType === "scheduled" ? openDate : (initialSurvey?.openDate || new Date().toISOString()),
       closeDate: closeDate || null,
-      closes: closeDate ? new Date(closeDate).toLocaleDateString() : "Open",
-      owner: currentUser?.email || "anonymous@school.edu",
-      ownerName: currentUser?.name || "Anonymous Member",
+      closes: closeDate ? new Date(closeDate).toLocaleDateString() : (initialSurvey?.closes || "Open"),
+      owner: initialSurvey?.owner || currentUser?.email || "faculty@school.edu.ph",
+      ownerName: initialSurvey?.ownerName || currentUser?.name || "Campus Instructor",
       targetAudience: {
         type: targetType,
         filters: targetType === "custom" ? { roles: selectedRoles } : undefined,
@@ -189,15 +224,29 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     <div className="max-w-4xl mx-auto space-y-8 pb-12">
       {/* Header */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-2">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold uppercase tracking-wider border border-blue-200">
-          <PlusCircle className="w-3.5 h-3.5" />
-          <span>Interactive Survey Builder</span>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold uppercase tracking-wider border border-blue-200">
+            {isEditing ? <Pencil className="w-3.5 h-3.5" /> : <PlusCircle className="w-3.5 h-3.5" />}
+            <span>{isEditing ? "Edit Survey Instrument" : "Interactive Survey Builder"}</span>
+          </div>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Surveys</span>
+            </button>
+          )}
         </div>
         <h1 className="font-serif text-2xl sm:text-3xl font-extrabold text-slate-900">
-          Create New Themed Survey
+          {isEditing ? `Edit: ${initialSurvey?.title}` : "Create New Themed Survey"}
         </h1>
         <p className="text-xs sm:text-sm text-slate-500">
-          Design structured feedback surveys, customize rating scales, select target audiences, and assign theme sections.
+          {isEditing
+            ? "Update your survey configuration, adjust questions and rating scales, or modify the target audience."
+            : "Design structured feedback surveys, customize rating scales, select target audiences, and assign theme sections."}
         </p>
       </div>
 
@@ -475,22 +524,42 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
         </div>
 
         {/* Action Controls */}
-        <div className="pt-6 border-t border-slate-100 flex flex-wrap items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={() => handleSubmit("draft")}
-            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
-          >
-            💾 Save as Draft
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSubmit(scheduleType === "scheduled" ? "scheduled" : "published")}
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 cursor-pointer flex items-center gap-2"
-          >
-            <span>{scheduleType === "scheduled" ? "📅 Schedule Survey" : "🚀 Publish Survey Now"}</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+        <div className="pt-6 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          {onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+            >
+              Cancel
+            </button>
+          ) : (
+            <div />
+          )}
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => handleSubmit("draft")}
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+            >
+              💾 Save as Draft
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSubmit(scheduleType === "scheduled" ? "scheduled" : "published")}
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 cursor-pointer flex items-center gap-2"
+            >
+              <span>
+                {isEditing
+                  ? "Save Changes"
+                  : scheduleType === "scheduled"
+                  ? "📅 Schedule Survey"
+                  : "🚀 Publish Survey Now"}
+              </span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

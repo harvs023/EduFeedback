@@ -8,10 +8,12 @@ import { HistoricalAnalyticsView } from "./components/HistoricalAnalyticsView";
 import { TagalogMLTrainingStudio } from "./components/TagalogMLTrainingStudio";
 import { NewsAnnouncementsFeed } from "./components/NewsAnnouncementsFeed";
 import { SurveyBuilder } from "./components/SurveyBuilder";
+import { MySurveysScreen } from "./components/MySurveysScreen";
 import { SuperadminDashboard } from "./components/SuperadminDashboard";
 import { TakeSurveyModal } from "./components/TakeSurveyModal";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { AuthModal } from "./components/AuthModal";
+import { StandaloneAuthPage } from "./components/StandaloneAuthPage";
 import {
   ClipboardList,
   BarChart3,
@@ -20,6 +22,7 @@ import {
   PlusCircle,
   ShieldAlert,
   Sparkles,
+  UserCheck,
 } from "lucide-react";
 
 export default function App() {
@@ -28,6 +31,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [analyticsTargetSurveyId, setAnalyticsTargetSurveyId] = useState<string | number | "all">("all");
+  const [editingSurvey, setEditingSurvey] = useState<Survey | null>(null);
 
   // Core Data State
   const [surveys, setSurveys] = useState<Survey[]>([]);
@@ -42,6 +46,7 @@ export default function App() {
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
   const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "info" } | null>(null);
 
   const showToast = (text: string, type: "success" | "info" = "success") => {
@@ -49,13 +54,8 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Initialize Storage Data on Mount
+  // Initialize Storage Data & Cloud Readiness on Mount
   useEffect(() => {
-    /* ========================================================================== */
-    /* [MODE A: DEMO DATA (ACTIVE)]                                               */
-    /* Reads demo surveys, responses, and users from LocalStorage.               */
-    /* KEEP THIS BLOCK ACTIVE WHILE TESTING DEMO DATA.                            */
-    /* ========================================================================== */
     LocalStorageManager.init();
     setSurveys(LocalStorageManager.getSurveys());
     setResponses(LocalStorageManager.getResponses());
@@ -65,50 +65,60 @@ export default function App() {
     setUsers(LocalStorageManager.getUsers());
     setCurrentUser(LocalStorageManager.getCurrentUser());
 
-    /* ========================================================================== */
-    /* [MODE B: FIREBASE CLOUD DATABASE (READY TO UNCOMMENT)]                     */
-    /* When you have your Firebase project ready:                                 */
-    /* 1. Comment out the MODE A block above.                                     */
-    /* 2. Uncomment the loadFromFirebase() function call below.                   */
-    /* 3. Set `export const USE_FIREBASE = true;` in src/lib/databaseService.ts.  */
-    /* ========================================================================== */
-    /*
-    async function loadFromFirebase() {
-      try {
-        const [cloudSurveys, cloudResponses, cloudUsers, cloudNews, cloudMl, cloudLogs] = await Promise.all([
-          DatabaseService.getSurveys(),
-          DatabaseService.getResponses(),
-          DatabaseService.getUsers(),
-          DatabaseService.getNews(),
-          DatabaseService.getMLDataset(),
-          DatabaseService.getLogs(),
-        ]);
-        setSurveys(cloudSurveys);
-        setResponses(cloudResponses);
-        setUsers(cloudUsers);
-        setNewsList(cloudNews);
-        setMlDataset(cloudMl);
-        setLogs(cloudLogs);
-        if (cloudUsers.length > 0) setCurrentUser(cloudUsers[1] || cloudUsers[0]);
-      } catch (err) {
-        console.error("Failed loading from Firebase:", err);
+    // If Firebase is configured with active keys, sync cloud data
+    async function syncCloudIfConfigured() {
+      if (USE_FIREBASE) {
+        try {
+          const [cloudSurveys, cloudResponses, cloudUsers, cloudNews, cloudMl, cloudLogs] = await Promise.all([
+            DatabaseService.getSurveys(),
+            DatabaseService.getResponses(),
+            DatabaseService.getUsers(),
+            DatabaseService.getNews(),
+            DatabaseService.getMLDataset(),
+            DatabaseService.getLogs(),
+          ]);
+          if (cloudSurveys.length > 0) setSurveys(cloudSurveys);
+          if (cloudResponses.length > 0) setResponses(cloudResponses);
+          if (cloudUsers.length > 0) setUsers(cloudUsers);
+          if (cloudNews.length > 0) setNewsList(cloudNews);
+          if (cloudMl.length > 0) setMlDataset(cloudMl);
+          if (cloudLogs.length > 0) setLogs(cloudLogs);
+        } catch (err) {
+          console.warn("Cloud synchronization standby:", err);
+        }
       }
     }
-    loadFromFirebase();
-    */
+    syncCloudIfConfigured();
   }, []);
 
-  const handleSwitchUser = (user: UserProfile) => {
+  const handleLogin = (user: UserProfile) => {
     setCurrentUser(user);
     LocalStorageManager.setCurrentUser(user);
+    setUsers(LocalStorageManager.getUsers());
     LocalStorageManager.addLog({
       user: user.name,
       pos: user.pos,
-      action: "Session Switch",
-      details: `Switched active persona to ${user.name} (${user.pos})`,
+      action: "User Authentication",
+      details: `User signed in: ${user.name} (${user.email})`,
     });
     setLogs(LocalStorageManager.getLogs());
-    showToast(`Logged in as ${user.name} (${user.pos})`, "info");
+    showToast(`Welcome back, ${user.name}!`, "success");
+  };
+
+  const handleSignOut = async () => {
+    if (currentUser) {
+      LocalStorageManager.addLog({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: "User Sign Out",
+        details: `User signed out: ${currentUser.name}`,
+      });
+      setLogs(LocalStorageManager.getLogs());
+    }
+    await DatabaseService.signOut();
+    setCurrentUser(null);
+    LocalStorageManager.setCurrentUser(null);
+    showToast("Signed out successfully.", "info");
   };
 
   // Submit Survey Response Handler
@@ -189,8 +199,44 @@ export default function App() {
     showToast("Survey response submitted successfully!", "success");
   };
 
-  // Create Survey Handler
+  // Create / Edit Survey Handler
   const handleSaveSurvey = (surveyData: Partial<Survey>, status: "draft" | "published" | "scheduled") => {
+    // If editing an existing survey
+    if (surveyData.id) {
+      const updatedSurveys = surveys.map((s) => {
+        if (s.id === surveyData.id) {
+          return {
+            ...s,
+            ...surveyData,
+            status: status === "draft" ? "draft" : status === "scheduled" ? "scheduled" : "published",
+            openDate: surveyData.openDate,
+            closeDate: surveyData.closeDate,
+            closes: surveyData.closeDate ? new Date(surveyData.closeDate).toLocaleDateString() : (s.closes || "Open"),
+            questions: surveyData.questions || s.questions,
+            questionCount: surveyData.questions?.length || s.questionCount,
+          } as Survey;
+        }
+        return s;
+      });
+
+      LocalStorageManager.saveSurveys(updatedSurveys);
+      setSurveys(updatedSurveys);
+
+      LocalStorageManager.addLog({
+        user: currentUser?.name || "Member",
+        pos: currentUser?.pos || "Faculty",
+        action: "Survey Updated",
+        details: `Edited survey "${surveyData.title || surveyData.id}"`,
+      });
+      setLogs(LocalStorageManager.getLogs());
+
+      setEditingSurvey(null);
+      showToast(`Survey "${surveyData.title}" updated successfully!`, "success");
+      setCurrentView("surveys");
+      return;
+    }
+
+    // Creating a brand new survey
     const newSurvey: Survey = {
       id: `srv_${Date.now()}`,
       title: surveyData.title || "Untitled Survey",
@@ -234,8 +280,14 @@ export default function App() {
     });
     setLogs(LocalStorageManager.getLogs());
 
+    setEditingSurvey(null);
     showToast(`Survey "${newSurvey.title}" saved successfully!`, "success");
     setCurrentView("surveys");
+  };
+
+  const handleEditSurvey = (survey: Survey) => {
+    setEditingSurvey(survey);
+    setCurrentView("create");
   };
 
   // ML Training Sample Handlers
@@ -300,10 +352,19 @@ export default function App() {
     showToast("Survey flagged for administrative review.", "info");
   };
 
-  const handleDeleteSurvey = (surveyId: string | number) => {
+  const handleDeleteSurvey = (surveyId: string | number, surveyTitle?: string) => {
     const updated = surveys.filter((s) => s.id !== surveyId);
     LocalStorageManager.saveSurveys(updated);
     setSurveys(updated);
+
+    LocalStorageManager.addLog({
+      user: currentUser?.name || "User",
+      pos: currentUser?.pos || "Faculty",
+      action: "Survey Deleted",
+      details: `Removed survey "${surveyTitle || surveyId}"`,
+    });
+    setLogs(LocalStorageManager.getLogs());
+
     showToast("Survey permanently removed.", "info");
   };
 
@@ -409,14 +470,48 @@ export default function App() {
   const canCreateSurvey = !isSuperadmin;
   const flaggedCount = surveys.filter((s) => s.flagged).length;
 
+  const handleNavigate = (view: string) => {
+    if (view !== "create") {
+      setEditingSurvey(null);
+    }
+    setCurrentView(view);
+  };
+
   const sidebarNavItems = [
     { id: "surveys", label: "Dashboard", icon: ClipboardList },
+    ...(currentUser ? [{ id: "my-surveys", label: "My Surveys", icon: UserCheck }] : []),
     { id: "analytics", label: "Macro Analytics", icon: BarChart3 },
     ...(isSuperadmin ? [{ id: "tagalog-ml", label: "ML Models", icon: BrainCircuit }] : []),
     { id: "news", label: "News Feed", icon: Newspaper },
     ...(canCreateSurvey ? [{ id: "create", label: "Create Survey", icon: PlusCircle }] : []),
     ...(isSuperadmin ? [{ id: "admin", label: "Admin Oversight", icon: ShieldAlert, badge: flaggedCount }] : []),
   ];
+
+  // If no user is logged in, show the standalone sign in / registration page as the first screen!
+  if (!currentUser) {
+    return (
+      <>
+        {toastMessage && (
+          <div className="fixed top-5 right-5 z-50 animate-in fade-in slide-in-from-top-3 duration-200">
+            <div
+              className={`px-4 py-3 rounded-xl shadow-2xl border flex items-center gap-2 text-xs font-bold ${
+                toastMessage.type === "success"
+                  ? "bg-slate-900 text-white border-slate-700"
+                  : "bg-indigo-600 text-white border-indigo-500"
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              <span>{toastMessage.text}</span>
+            </div>
+          </div>
+        )}
+        <StandaloneAuthPage
+          onLogin={handleLogin}
+          defaultMode={authModalMode}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-900 overflow-hidden">
@@ -442,7 +537,7 @@ export default function App() {
           {/* Brand Header */}
           <div
             className="p-6 border-b border-slate-100 flex items-center gap-3 cursor-pointer"
-            onClick={() => setCurrentView("surveys")}
+            onClick={() => handleNavigate("surveys")}
           >
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold italic shadow-xs">
               E
@@ -458,7 +553,7 @@ export default function App() {
               return (
                 <button
                   key={item.id}
-                  onClick={() => setCurrentView(item.id)}
+                  onClick={() => handleNavigate(item.id)}
                   className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                     isActive
                       ? "bg-indigo-50 text-indigo-700 font-semibold"
@@ -498,11 +593,19 @@ export default function App() {
         {/* Sleek Top Header */}
         <Navbar
           currentView={currentView}
-          onNavigate={setCurrentView}
+          onNavigate={handleNavigate}
           currentUser={currentUser}
-          onSwitchUser={handleSwitchUser}
+          onSwitchUser={handleLogin}
+          onSignOut={handleSignOut}
           onOpenProfile={() => setShowProfileModal(true)}
-          onOpenAuth={() => setShowAuthModal(true)}
+          onOpenAuth={() => {
+            setAuthModalMode("login");
+            setShowAuthModal(true);
+          }}
+          onOpenRegister={() => {
+            setAuthModalMode("register");
+            setShowAuthModal(true);
+          }}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           selectedCategory={selectedCategory}
@@ -522,12 +625,64 @@ export default function App() {
               userResponses={responses}
               searchQuery={searchQuery}
               selectedCategory={selectedCategory}
-              onTakeSurvey={(survey) => setActiveSurveyForTaking(survey)}
+              onTakeSurvey={(survey) => {
+                if (!currentUser) {
+                  setAuthModalMode("login");
+                  setShowAuthModal(true);
+                  showToast("Please sign in or register to take this survey.", "info");
+                  return;
+                }
+                setActiveSurveyForTaking(survey);
+              }}
               onViewAnalytics={(surveyId) => {
                 setAnalyticsTargetSurveyId(surveyId);
                 setCurrentView("analytics");
               }}
-              onCreateSurvey={canCreateSurvey ? () => setCurrentView("create") : undefined}
+              onCreateSurvey={() => {
+                if (!currentUser) {
+                  setAuthModalMode("login");
+                  setShowAuthModal(true);
+                  showToast("Please sign in to author surveys.", "info");
+                  return;
+                }
+                if (canCreateSurvey) {
+                  setEditingSurvey(null);
+                  setCurrentView("create");
+                }
+              }}
+              onCreateNewSurvey={() => {
+                if (!currentUser) {
+                  setAuthModalMode("login");
+                  setShowAuthModal(true);
+                  showToast("Please sign in to author surveys.", "info");
+                  return;
+                }
+                if (canCreateSurvey) {
+                  setEditingSurvey(null);
+                  setCurrentView("create");
+                }
+              }}
+              onEditSurvey={handleEditSurvey}
+              onDeleteSurvey={handleDeleteSurvey}
+            />
+          )}
+
+          {currentView === "my-surveys" && (
+            <MySurveysScreen
+              surveys={surveys}
+              currentUser={currentUser}
+              userResponses={responses}
+              onCreateNewSurvey={() => {
+                setEditingSurvey(null);
+                setCurrentView("create");
+              }}
+              onEditSurvey={handleEditSurvey}
+              onDeleteSurvey={handleDeleteSurvey}
+              onViewAnalytics={(surveyId) => {
+                setAnalyticsTargetSurveyId(surveyId);
+                setCurrentView("analytics");
+              }}
+              onTakeSurvey={(survey) => setActiveSurveyForTaking(survey)}
             />
           )}
 
@@ -541,7 +696,7 @@ export default function App() {
               onNavigateToMLStudio={isSuperadmin ? () => setCurrentView("tagalog-ml") : undefined}
               isAdmin={isSuperadmin}
               currentUser={currentUser}
-              onCreateSurvey={canCreateSurvey ? () => setCurrentView("create") : undefined}
+              onCreateSurvey={canCreateSurvey ? () => { setEditingSurvey(null); setCurrentView("create"); } : undefined}
             />
           )}
 
@@ -585,6 +740,11 @@ export default function App() {
                 currentUser={currentUser}
                 categories={["Course", "Faculty", "Facilities", "Service", "Student Life", "General"]}
                 onSaveSurvey={handleSaveSurvey}
+                initialSurvey={editingSurvey || undefined}
+                onCancel={() => {
+                  setEditingSurvey(null);
+                  setCurrentView("surveys");
+                }}
               />
             ) : (
               <div className="bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-xs max-w-lg mx-auto mt-12 space-y-4">
@@ -664,8 +824,9 @@ export default function App() {
 
       {showAuthModal && (
         <AuthModal
+          initialMode={authModalMode}
           onClose={() => setShowAuthModal(false)}
-          onLogin={handleSwitchUser}
+          onLogin={handleLogin}
         />
       )}
     </div>

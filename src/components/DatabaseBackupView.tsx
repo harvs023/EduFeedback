@@ -640,10 +640,10 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
               <span>Firebase Cloud Architecture Ready</span>
             </div>
             <h3 className="font-serif text-xl font-bold text-slate-900">
-              Database Persistence Mode & Firebase Switcher
+              Database Persistence Mode & Cloud Sync
             </h3>
             <p className="text-xs text-slate-600 max-w-2xl">
-              Currently operating on local demonstration datasets. The entire codebase is pre-wired for Google Firebase Firestore and Auth with clean commenting markers.
+              Equipped with real-time Google Firebase Firestore and Auth integration. Automatically activates when environment variables are detected.
             </p>
           </div>
 
@@ -652,7 +652,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               <span className="text-slate-500 font-medium">Active Database:</span>
               <span className="font-bold text-slate-900">
-                {USE_FIREBASE && isFirebaseConfigured() ? "Firebase Firestore (Cloud)" : "Local Demo Storage (v2.5)"}
+                {USE_FIREBASE && isFirebaseConfigured() ? "Firebase Firestore (Cloud)" : "Persistent Local Engine"}
               </span>
             </div>
 
@@ -674,13 +674,13 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
               <div className="bg-white p-4 rounded-2xl border border-amber-100 shadow-xs space-y-2">
                 <div className="flex items-center gap-2 font-bold text-slate-900">
                   <span className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[11px] font-bold">1</span>
-                  <span>Paste Credentials</span>
+                  <span>Set Environment Variables</span>
                 </div>
                 <p className="text-slate-500 text-[11px]">
-                  Open <code className="font-mono text-amber-700 bg-amber-50 px-1 py-0.5 rounded">src/lib/firebase.ts</code> and paste your project config in <code className="font-mono text-slate-700">firebaseConfig</code>.
+                  Configure <code className="font-mono text-amber-700 bg-amber-50 px-1 py-0.5 rounded">VITE_FIREBASE_*</code> keys in your deployment environment or <code className="font-mono text-slate-700">.env</code>.
                 </p>
                 <div className="text-[10px] text-slate-400">
-                  Status: {isFirebaseConfigured() ? "✅ Credentials Detected" : "⏳ Standby (Placeholder)"}
+                  Status: {isFirebaseConfigured() ? "✅ Credentials Detected" : "⏳ Standby (Local Mode Active)"}
                 </div>
               </div>
 
@@ -688,15 +688,13 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
               <div className="bg-white p-4 rounded-2xl border border-amber-100 shadow-xs space-y-2">
                 <div className="flex items-center gap-2 font-bold text-slate-900">
                   <span className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[11px] font-bold">2</span>
-                  <span>Flip The Switch</span>
+                  <span>Deploy Security Rules</span>
                 </div>
                 <p className="text-slate-500 text-[11px]">
-                  In <code className="font-mono text-amber-700 bg-amber-50 px-1 py-0.5 rounded">src/lib/databaseService.ts</code>, change:
-                  <br />
-                  <code className="font-mono text-slate-700 block mt-1 bg-slate-50 p-1 rounded font-semibold">export const USE_FIREBASE = true;</code>
+                  Apply the production security rules in <code className="font-mono text-amber-700 bg-amber-50 px-1 py-0.5 rounded">firestore.rules</code> to protect student records.
                 </p>
                 <div className="text-[10px] text-slate-400">
-                  Current: <span className="font-mono font-bold text-amber-600">{USE_FIREBASE ? "true" : "false"}</span>
+                  Rules: <span className="font-mono font-bold text-amber-600">firestore.rules ready</span>
                 </div>
               </div>
 
@@ -705,10 +703,10 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                 <div>
                   <div className="flex items-center gap-2 font-bold text-slate-900">
                     <span className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[11px] font-bold">3</span>
-                    <span>Migrate Demo Data</span>
+                    <span>Sync Initial Schema</span>
                   </div>
                   <p className="text-slate-500 text-[11px] mt-1">
-                    Upload all initial demo surveys, questions, and students to your fresh Firestore collection with 1 click.
+                    Upload initial university surveys, question templates, and academic categories to Firestore.
                   </p>
                 </div>
 
@@ -722,7 +720,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                   }`}
                 >
                   <Server className="w-3.5 h-3.5" />
-                  <span>{isSeedingFirestore ? "Seeding Cloud..." : "Seed Firestore From Demo"}</span>
+                  <span>{isSeedingFirestore ? "Syncing Cloud..." : "Sync Firestore Cloud"}</span>
                 </button>
               </div>
             </div>
@@ -739,10 +737,10 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
               <span>Administrative Danger Zone</span>
             </div>
             <h3 className="font-serif text-lg font-bold text-slate-900">
-              Reset Database to Initial Factory Seed Demo Data
+              Reset Database to Clean Initial State
             </h3>
             <p className="text-xs text-slate-600">
-              Restores the default institutional surveys, student feedback responses, and Tagalog sentiment training sentences.
+              Restores baseline academic surveys, university feedback categories, and Tagalog sentiment training sentences.
             </p>
           </div>
 

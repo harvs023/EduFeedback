@@ -1,0 +1,404 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile containing academic role, department, and contact information",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "University institutional email address"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Full legal or campus name"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["superadmin", "user", "faculty", "student", "officer"],
+          "description": "System role classification"
+        },
+        "pos": {
+          "type": "string",
+          "enum": ["Student", "Student Officer", "Faculty", "Superadmin"],
+          "description": "Campus position or title"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "suspended"],
+          "description": "Account status"
+        },
+        "department": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "College or academic department"
+        },
+        "program": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Degree program or specialization"
+        },
+        "year": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Academic year level"
+        },
+        "section": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Class section"
+        },
+        "studentId": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Student or Employee ID number"
+        },
+        "joined": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Date user registered"
+        },
+        "surveys": {
+          "type": "number",
+          "description": "Total surveys authored"
+        }
+      },
+      "required": ["email", "name", "pos", "role", "status"]
+    },
+    "Survey": {
+      "title": "Survey",
+      "description": "Academic survey instrument published or drafted for university evaluation",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Unique survey identifier"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "description": "Title of the survey"
+        },
+        "cat": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Survey category"
+        },
+        "desc": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Detailed description or instructions"
+        },
+        "themeSection": {
+          "type": "string",
+          "enum": ["academics", "facilities", "student-welfare", "governance"],
+          "description": "Dashboard theme section"
+        },
+        "isTrending": {
+          "type": "boolean",
+          "description": "Whether survey has trending momentum"
+        },
+        "academicYear": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Academic year (e.g., 2025-2026)"
+        },
+        "created": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Creation date formatted string"
+        },
+        "responses": {
+          "type": "number",
+          "description": "Total completed response submissions"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["published", "draft", "scheduled"],
+          "description": "Survey publication status"
+        },
+        "openDate": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Date survey opens"
+        },
+        "closeDate": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Date survey closes"
+        },
+        "closes": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Human-readable closing indicator"
+        },
+        "questionCount": {
+          "type": "number",
+          "description": "Total number of questions"
+        },
+        "owner": {
+          "type": "string",
+          "format": "email",
+          "description": "Email address of author"
+        },
+        "ownerName": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Name of author"
+        },
+        "targetAudience": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Target respondent demographic"
+        },
+        "flagged": {
+          "type": "boolean",
+          "description": "Moderation flag"
+        },
+        "flagReason": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Reason survey was flagged"
+        }
+      },
+      "required": ["id", "title", "cat", "themeSection", "status", "owner"]
+    },
+    "SurveyResponse": {
+      "title": "SurveyResponse",
+      "description": "Individual response submission for a survey",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Response identifier"
+        },
+        "surveyId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Associated survey ID"
+        },
+        "surveyTitle": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Title of surveyed instrument"
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Category of surveyed instrument"
+        },
+        "userEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Respondent email address"
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Submission date"
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Epoch timestamp in milliseconds"
+        },
+        "academicYear": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Academic year"
+        },
+        "department": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Department of respondent"
+        },
+        "program": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Program of respondent"
+        },
+        "year": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Year level of respondent"
+        },
+        "section": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Section of respondent"
+        }
+      },
+      "required": ["id", "surveyId", "userEmail", "timestamp"]
+    },
+    "NewsAnnouncement": {
+      "title": "NewsAnnouncement",
+      "description": "Campus announcement and news bulletin",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "News identifier"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "description": "Announcement headline"
+        },
+        "excerpt": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Short summary"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 5000,
+          "description": "Full announcement text"
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Announcement category"
+        },
+        "author": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Publishing entity or administrator"
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Publication date"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["High", "Normal", "Urgent"],
+          "description": "Urgency classification"
+        },
+        "likesCount": {
+          "type": "number",
+          "description": "Endorsements count"
+        }
+      },
+      "required": ["id", "title", "content", "category", "author", "date"]
+    },
+    "TagalogMLSample": {
+      "title": "TagalogMLSample",
+      "description": "Bilingual Filipino/Tagalog NLP sentiment analysis labeled sample",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Sample identifier"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 2000,
+          "description": "Feedback sentence in Tagalog or Taglish"
+        },
+        "sentiment": {
+          "type": "string",
+          "enum": ["Positive", "Negative", "Neutral", "Constructive Suggestion"],
+          "description": "Supervised sentiment label"
+        },
+        "aspect": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Evaluated campus aspect"
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Detected language (Tagalog, Taglish, English)"
+        },
+        "emotion": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Emotional nuance"
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Validation confidence score"
+        }
+      },
+      "required": ["id", "text", "sentiment", "aspect"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Institutional audit trail entry",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128,
+          "description": "Log entry identifier"
+        },
+        "user": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "User name or identifier"
+        },
+        "pos": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Position or role of actor"
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Action executed"
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Contextual description"
+        },
+        "timestamp": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Formatted timestamp"
+        }
+      },
+      "required": ["id", "user", "action", "details"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Registered university members with role access and demographic attributes"
+    },
+    "/surveys/{surveyId}": {
+      "schema": "Survey",
+      "description": "Institutional academic feedback surveys"
+    },
+    "/responses/{responseId}": {
+      "schema": "SurveyResponse",
+      "description": "Survey response submissions with Tagalog NLP sentiments"
+    },
+    "/news/{newsId}": {
+      "schema": "NewsAnnouncement",
+      "description": "Campus news items and public announcements"
+    },
+    "/ml_dataset/{sampleId}": {
+      "schema": "TagalogMLSample",
+      "description": "Machine learning labeled training dataset for Tagalog sentiment analysis"
+    },
+    "/logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Administrative audit logs"
+    }
+  }
+}

@@ -1,0 +1,423 @@
+{
+  "users": [
+    {
+      "email": "admin@edufeedback.edu",
+      "name": "System Administrator",
+      "pos": "Superadmin",
+      "role": "superadmin",
+      "status": "active",
+      "department": "Institutional QA Office",
+      "joined": "Jan 15, 2024",
+      "surveysCount": 12
+    },
+    {
+      "email": "juan.delacruz@school.edu",
+      "name": "Juan Dela Cruz",
+      "pos": "Student",
+      "role": "user",
+      "status": "active",
+      "joined": "Aug 10, 2024",
+      "studentId": "2024-00189",
+      "year": "3rd Year",
+      "department": "College of Computer Studies",
+      "program": "Bachelor of Science in Computer Science",
+      "section": "CS-3A",
+      "surveysCount": 3
+    },
+    {
+      "email": "maria.reyes@school.edu",
+      "name": "Dr. Maria Reyes",
+      "pos": "Faculty",
+      "role": "user",
+      "status": "active",
+      "joined": "Aug 01, 2024",
+      "department": "College of Computer Studies",
+      "program": "Faculty of Computer Science",
+      "surveysCount": 8
+    },
+    {
+      "email": "clara.santos@school.edu",
+      "name": "Clara Santos",
+      "pos": "Student Officer",
+      "role": "user",
+      "status": "active",
+      "joined": "Aug 12, 2024",
+      "studentId": "2023-01452",
+      "year": "4th Year",
+      "department": "College of Business Administration",
+      "program": "BSBA Major in Marketing Management",
+      "section": "BA-4B",
+      "surveysCount": 5
+    }
+  ],
+  "surveys": [
+    {
+      "id": "survey-101",
+      "title": "Midterm Course Evaluation – CS101 & IT102",
+      "cat": "Course",
+      "status": "published",
+      "desc": "Suriin ang kalidad ng pagtuturo, mga laboratory exercises, at course materials para sa CS101 at IT102.",
+      "responsesCount": 184,
+      "created": "Feb 10, 2026",
+      "openDate": "2026-02-10T08:00",
+      "closeDate": "2026-03-30T23:59",
+      "closes": "Mar 30, 2026",
+      "ownerEmail": "maria.reyes@school.edu",
+      "ownerName": "Dr. Maria Reyes",
+      "themeSection": "academics",
+      "isTrending": true,
+      "ratingAverage": 4.6,
+      "tags": ["Academics", "Programming", "Midterms"],
+      "academicYear": "2025-2026",
+      "term": "2nd Sem",
+      "targetAudience": "students",
+      "questions": [
+        {
+          "id": "s101_q1",
+          "text": "How would you rate the clarity and mastery of the instructor during lectures?",
+          "type": "rating",
+          "min": 1,
+          "max": 5,
+          "options": [],
+          "labels": ["Kulang sa Paliwanag", "Medyo Mahirap", "Katamtaman", "Malinaw", "Napakalinaw at Mahusay"],
+          "required": true,
+          "order": 1
+        },
+        {
+          "id": "s101_q2",
+          "text": "Gaano ka-epektibo ang hands-on programming laboratory activities?",
+          "type": "rating",
+          "min": 1,
+          "max": 5,
+          "options": [],
+          "labels": ["Hindi Epektibo", "Kulang sa Gabay", "Katamtaman", "Nakatulong", "Napakaganda at Praktikal"],
+          "required": true,
+          "order": 2
+        },
+        {
+          "id": "s101_q3",
+          "text": "Aling bahagi ng kurso ang pinaka-kinailangan mo ng karagdagang konsultasyon?",
+          "type": "multiple",
+          "options": ["Data Structures & Algorithms", "Syntax & Basics", "Database Connection", "Debugging & Error Handling"],
+          "labels": [],
+          "required": true,
+          "order": 3
+        },
+        {
+          "id": "s101_q4",
+          "text": "Magbigay ng tapat na mungkahi o feedback (Tagalog, Taglish, o English) para sa guro at sa departamento.",
+          "type": "paragraph",
+          "options": [],
+          "labels": [],
+          "required": false,
+          "order": 4
+        }
+      ]
+    },
+    {
+      "id": "survey-102",
+      "title": "Campus WiFi & Computer Lab Facilities Assessment 2026",
+      "cat": "Facilities",
+      "status": "published",
+      "desc": "Komprehensibong pagtataya sa bilis ng internet, air conditioning sa laboratory, at kalagayan ng PC units sa campus.",
+      "responsesCount": 246,
+      "created": "Jan 18, 2026",
+      "openDate": "2026-01-18T08:00",
+      "closeDate": "2026-04-15T23:59",
+      "closes": "Apr 15, 2026",
+      "ownerEmail": "juan.delacruz@school.edu",
+      "ownerName": "Juan Dela Cruz",
+      "themeSection": "facilities",
+      "isTrending": true,
+      "ratingAverage": 3.8,
+      "tags": ["Facilities", "WiFi", "Computer Labs", "Campus Tech"],
+      "academicYear": "2025-2026",
+      "term": "2nd Sem",
+      "targetAudience": "all",
+      "questions": [
+        {
+          "id": "s102_q1",
+          "text": "Bilis at katatagan ng campus Wi-Fi sa inyong building o silid-aralan:",
+          "type": "rating",
+          "min": 1,
+          "max": 5,
+          "options": [],
+          "labels": ["Napakabagal / Madalas Ma-disconnect", "Mabagal", "Katamtaman", "Mabilis", "Napakabilis at Maaasahan"],
+          "required": true,
+          "order": 1
+        },
+        {
+          "id": "s102_q2",
+          "text": "Kondisyon ng mga computer terminal at hardware sa mga IT laboratories:",
+          "type": "rating",
+          "min": 1,
+          "max": 5,
+          "options": [],
+          "labels": ["Maraming Sira", "May Ilang May Depekto", "Maayos", "Maganda", "Bago at Napakahusay"],
+          "required": true,
+          "order": 2
+        },
+        {
+          "id": "s102_q3",
+          "text": "Ibahagi ang iyong karanasan o mga partikular na silid na nangangailangan ng agarang pagkumpuni o maintenance:",
+          "type": "paragraph",
+          "options": [],
+          "labels": [],
+          "required": false,
+          "order": 3
+        }
+      ]
+    },
+    {
+      "id": "survey-103",
+      "title": "University Library Digital Resources & Study Space Satisfaction",
+      "cat": "Service",
+      "status": "published",
+      "desc": "Pagsusuri sa mga online journal databases (IEEE, ScienceDirect), katahimikan ng study areas, at circulation services.",
+      "responsesCount": 132,
+      "created": "Feb 01, 2026",
+      "openDate": "2026-02-01T08:00",
+      "closeDate": "2026-05-01T23:59",
+      "closes": "May 01, 2026",
+      "ownerEmail": "clara.santos@school.edu",
+      "ownerName": "Clara Santos",
+      "themeSection": "academics",
+      "isTrending": false,
+      "ratingAverage": 4.5,
+      "tags": ["Library", "Study Hub", "Research", "Academics"],
+      "academicYear": "2025-2026",
+      "term": "2nd Sem",
+      "targetAudience": "students",
+      "questions": [
+        {
+          "id": "s103_q1",
+          "text": "Kaginhawahan at katahimikan ng study pods sa library:",
+          "type": "rating",
+          "min": 1,
+          "max": 5,
+          "options": [],
+          "labels": ["Masyadong Maingay", "Medyo Maingay", "Katamtaman", "Tahimik", "Napakatahimik at Kumportable"],
+          "required": true,
+          "order": 1
+        },
+        {
+          "id": "s103_q2",
+          "text": "Availability at bilis ng online research database access (IEEE, ProQuest):",
+          "type": "rating",
+          "min": 1,
+          "max": 5,
+          "options": [],
+          "labels": ["Hindi Ma-access", "Mabagal", "Puwede na", "Mabilis", "Napaka-epektibo"],
+          "required": true,
+          "order": 2
+        },
+        {
+          "id": "s103_q3",
+          "text": "Anong mga libro, software, o karagdagang subscription ang nais mong maidagdag sa koleksyon ng aklatan?",
+          "type": "paragraph",
+          "options": [],
+          "labels": [],
+          "required": false,
+          "order": 3
+        }
+      ]
+    },
+    {
+      "id": "survey-104",
+      "title": "University Food Court & Canteen Hygiene and Pricing Survey",
+      "cat": "Campus Life",
+      "status": "published",
+      "desc": "Pagsusuri sa kalidad, presyo, nutrisyon, at kalinisan ng mga pagkain at inumin sa university canteen at food stalls.",
+      "responsesCount": 310,
+      "created": "Jan 12, 2026",
+      "openDate": "2026-01-12T08:00",
+      "closeDate": "2026-04-30T23:59",
+      "closes": "Apr 30, 2026",
+      "ownerEmail": "clara.santos@school.edu",
+      "ownerName": "Clara Santos",
+      "themeSection": "student-welfare",
+      "isTrending": true,
+      "ratingAverage": 4.1,
+      "tags": ["Canteen", "Student Welfare", "Food Safety"],
+      "academicYear": "2025-2026",
+      "term": "2nd Sem",
+      "targetAudience": "all",
+      "questions": [
+        {
+          "id": "s104_q1",
+          "text": "Presyo ng pagkain kumpara sa badyet ng karaniwang estudyante:",
+          "type": "rating",
+          "min": 1,
+          "max": 5,
+          "options": [],
+          "labels": ["Masyadong Mahal", "Medyo Mataas", "Makatarungan", "Affordable", "Napakasulit"],
+          "required": true,
+          "order": 1
+        },
+        {
+          "id": "s104_q2",
+          "text": "Kalinisan ng dining tables, kubyertos, at canteen premises:",
+          "type": "rating",
+          "min": 1,
+          "max": 5,
+          "options": [],
+          "labels": ["Madumi", "Medyo Kulang sa Linis", "Maayos", "Malinis", "Napakalinis at Maaliwalas"],
+          "required": true,
+          "order": 2
+        },
+        {
+          "id": "s104_q3",
+          "text": "Anong mga masustansyang ulam o pagkaing abot-kaya ang nais mong makita sa canteen?",
+          "type": "paragraph",
+          "options": [],
+          "labels": [],
+          "required": false,
+          "order": 3
+        }
+      ]
+    }
+  ],
+  "responses": [
+    {
+      "id": "resp_1001",
+      "surveyId": "survey-101",
+      "surveyTitle": "Midterm Course Evaluation – CS101 & IT102",
+      "category": "Course",
+      "userEmail": "juan.delacruz@school.edu",
+      "date": "Feb 12, 2026",
+      "timestamp": 1770883200000,
+      "academicYear": "2025-2026",
+      "department": "College of Computer Studies",
+      "program": "BS Computer Science",
+      "year": "3rd Year",
+      "section": "CS-3A",
+      "sentiment": "Positive",
+      "sentimentScore": 0.92,
+      "sentimentAspect": "Pagtuturo / Teaching Quality",
+      "answers": [
+        { "questionId": "s101_q1", "ratingValue": 5, "answer": "Napakalinaw at Mahusay" },
+        { "questionId": "s101_q2", "ratingValue": 5, "answer": "Nakatulong nang husto ang laboratory exercises." },
+        { "questionId": "s101_q3", "answer": "Data Structures & Algorithms" },
+        { "questionId": "s101_q4", "answer": "Magaling magturo si doc maria, napakalinaw ng mga halimbawa sa coding at accommodating sa consultation." }
+      ]
+    },
+    {
+      "id": "resp_1002",
+      "surveyId": "survey-102",
+      "surveyTitle": "Campus WiFi & Computer Lab Facilities Assessment 2026",
+      "category": "Facilities",
+      "userEmail": "clara.santos@school.edu",
+      "date": "Feb 14, 2026",
+      "timestamp": 1771056000000,
+      "academicYear": "2025-2026",
+      "department": "College of Business Administration",
+      "program": "BSBA Major in Marketing Management",
+      "year": "4th Year",
+      "section": "BA-4B",
+      "sentiment": "Constructive Suggestion",
+      "sentimentScore": -0.35,
+      "sentimentAspect": "Internet / Wi-Fi",
+      "answers": [
+        { "questionId": "s102_q1", "ratingValue": 2, "answer": "Mabagal ang Wi-Fi lalo na kapag tanghali." },
+        { "questionId": "s102_q2", "ratingValue": 4, "answer": "Maayos naman ang PC units." },
+        { "questionId": "s102_q3", "answer": "Sana po dagdagan ang access points sa 3rd floor at ayusin ang aircon sa lab 302 dahil napakainit kapag hapon." }
+      ]
+    },
+    {
+      "id": "resp_1003",
+      "surveyId": "survey-104",
+      "surveyTitle": "University Food Court & Canteen Hygiene and Pricing Survey",
+      "category": "Campus Life",
+      "userEmail": "juan.delacruz@school.edu",
+      "date": "Feb 16, 2026",
+      "timestamp": 1771228800000,
+      "academicYear": "2025-2026",
+      "department": "College of Computer Studies",
+      "program": "BS Computer Science",
+      "year": "3rd Year",
+      "section": "CS-3A",
+      "sentiment": "Positive",
+      "sentimentScore": 0.75,
+      "sentimentAspect": "Kalinisan / Sanitation",
+      "answers": [
+        { "questionId": "s104_q1", "ratingValue": 4, "answer": "Affordable naman karamihan ng meals." },
+        { "questionId": "s104_q2", "ratingValue": 4, "answer": "Malinis ang dining tables." },
+        { "questionId": "s104_q3", "answer": "Sana mayroong free filtered water station sa bawat sulok ng canteen para bawas gastos sa mineral water." }
+      ]
+    }
+  ],
+  "news": [
+    {
+      "id": "news_1",
+      "title": "University Upgrades Campus Fiber Backbone & Wi-Fi 6 Infrastructure",
+      "excerpt": "Following student feedback in the latest Facilities Survey, high-density access points have been deployed across academic buildings.",
+      "content": "The University Administration and Information Technology Center (ITC) have completed Phase 1 of the Campus High-Speed Fiber Upgrade. All students and faculty can now access upgraded Wi-Fi 6 access points in the University Library, Engineering Annex, and Main Computer Laboratories.",
+      "category": "Infrastructure",
+      "author": "Office of the Vice President for Academic Support",
+      "date": "Feb 18, 2026",
+      "priority": "High",
+      "likesCount": 142,
+      "tags": ["Wi-Fi", "Infrastructure", "Survey Action Item"]
+    },
+    {
+      "id": "news_2",
+      "title": "Extended Library Hours & Peer-Tutoring Study Pods Now Open",
+      "excerpt": "The University Library will remain open until 9:00 PM on weekdays to support midterm research and project deadlines.",
+      "content": "In response to high student interest expressed in the Digital Resources and Study Space Satisfaction Survey, the Library Learning Commons announces extended operating hours.",
+      "category": "Academics",
+      "author": "University Library Council",
+      "date": "Feb 15, 2026",
+      "priority": "Normal",
+      "likesCount": 89,
+      "tags": ["Library", "Academics", "Student Support"]
+    }
+  ],
+  "mlDataset": [
+    {
+      "id": "ml_1",
+      "text": "Napakagaling magpaliwanag ng prof, malinaw ang bawat formula sa pisara.",
+      "sentiment": "Positive",
+      "aspect": "Pagtuturo / Teaching Quality",
+      "language": "Tagalog",
+      "emotion": "Masaya / Satisfied",
+      "confidence": 0.96
+    },
+    {
+      "id": "ml_2",
+      "text": "Mabagal ang internet sa laboratory rooms at laging nag-didisconnect sa online quiz.",
+      "sentiment": "Negative",
+      "aspect": "Internet / Wi-Fi",
+      "language": "Tagalog",
+      "emotion": "Dismayado / Frustrated",
+      "confidence": 0.94
+    },
+    {
+      "id": "ml_3",
+      "text": "Sana maglagay ng water refilling stations at maayos na upuan sa library 2nd floor.",
+      "sentiment": "Constructive Suggestion",
+      "aspect": "Pasilidad / Facilities",
+      "language": "Taglish",
+      "emotion": "Umaasa / Hopeful",
+      "confidence": 0.91
+    },
+    {
+      "id": "ml_4",
+      "text": "Accommodating at mabilis asikasuhin ang documents sa registrar window.",
+      "sentiment": "Positive",
+      "aspect": "Administrasyon",
+      "language": "Taglish",
+      "emotion": "Masaya / Satisfied",
+      "confidence": 0.93
+    }
+  ],
+  "logs": [
+    {
+      "id": "log_1",
+      "user": "System Administrator",
+      "pos": "Superadmin",
+      "action": "System Initialization",
+      "details": "System calibrated for multi-year academic evaluations and Tagalog NLP sentiment classification.",
+      "timestamp": "Feb 20, 2026, 08:00 AM"
+    }
+  ]
+}

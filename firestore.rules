@@ -1,0 +1,128 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Default Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Security Primitives & Helper Functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Verified administrator gate
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'admin@edufeedback.edu' ||
+        request.auth.token.email == 'azalrob023@gmail.com'
+      );
+    }
+
+    // Validation Blueprint for User Profiles
+    function isValidUser(data) {
+      return data.email is string && data.email.size() <= 150 &&
+             data.name is string && data.name.size() <= 100 &&
+             data.pos is string &&
+             data.status in ['active', 'suspended'];
+    }
+
+    // Validation Blueprint for Survey Instruments
+    function isValidSurvey(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() <= 200 &&
+             data.cat is string && data.cat.size() <= 100 &&
+             data.themeSection is string &&
+             data.status in ['published', 'draft', 'scheduled'];
+    }
+
+    // Validation Blueprint for Responses
+    function isValidResponse(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.surveyId is string && data.surveyId.size() <= 128 &&
+             data.timestamp is number;
+    }
+
+    // Validation Blueprint for News Announcements
+    function isValidNews(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() <= 200 &&
+             data.content is string && data.content.size() <= 10000;
+    }
+
+    // --------------------------------------------------------------------------
+    // COLLECTION RULES
+    // --------------------------------------------------------------------------
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidUser(incoming());
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (request.auth.uid == userId && isValidUser(incoming()))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Academic Surveys
+    match /surveys/{surveyId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidSurvey(incoming());
+      allow update: if isSignedIn() && isValidSurvey(incoming()) && (
+        isAdmin() ||
+        existing().owner == request.auth.token.email
+      );
+      allow delete: if isSignedIn() && (
+        isAdmin() ||
+        existing().owner == request.auth.token.email
+      );
+    }
+
+    // Survey Response Submissions
+    match /responses/{responseId} {
+      allow read: if isSignedIn();
+      allow create: if isValidResponse(incoming());
+      allow update, delete: if isAdmin();
+    }
+
+    // Campus News & Bulletins
+    match /news/{newsId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidNews(incoming());
+      allow update: if (
+        isAdmin() ||
+        // Allow members to increment like count
+        (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Tagalog / Filipino ML Dataset Samples
+    match /ml_dataset/{sampleId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // System Activity & Audit Logs
+    match /logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if true;
+      allow update, delete: if false;
+    }
+  }
+}

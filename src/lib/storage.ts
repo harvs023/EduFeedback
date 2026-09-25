@@ -20,7 +20,8 @@ import {
 
 const STORAGE_KEYS = {
   USERS: "edufeedback_users_v2",
-  CURRENT_USER: "edufeedback_current_user_v2",
+  CURRENT_USER: "edufeedback_current_user_v3",
+  PASSWORDS: "edufeedback_passwords_v2",
   SURVEYS: "edufeedback_surveys_v2",
   RESPONSES: "edufeedback_responses_v2",
   NEWS: "edufeedback_news_v2",
@@ -31,6 +32,14 @@ const STORAGE_KEYS = {
   SNAPSHOTS: "edufeedback_db_snapshots_v2",
 };
 
+// Known default credentials for demo accounts
+export const DEMO_PASSWORDS_MAP: Record<string, string> = {
+  "admin@edufeedback.edu": "admin123",
+  "maria.reyes@school.edu": "faculty123",
+  "clara.santos@school.edu": "officer123",
+  "juan.delacruz@school.edu": "student123",
+};
+
 export class LocalStorageManager {
   static init() {
     LocalStorageManager.getUsers();
@@ -39,9 +48,11 @@ export class LocalStorageManager {
     LocalStorageManager.getMLDataset();
     LocalStorageManager.getNews();
     LocalStorageManager.getLogs();
-    if (!LocalStorageManager.getCurrentUser()) {
-      LocalStorageManager.setCurrentUser(DEFAULT_USERS[1]); // Default to Juan Dela Cruz (Student)
-    }
+    // Clear legacy auto-assigned key if present
+    try {
+      localStorage.removeItem("edufeedback_current_user_v2");
+    } catch {}
+    // Do NOT auto-login: user must land on the standalone sign-in page first!
   }
 
   static getUsers(): UserProfile[] {
@@ -68,7 +79,7 @@ export class LocalStorageManager {
       const data = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
       if (data) return JSON.parse(data);
     } catch {}
-    return DEFAULT_USERS[1];
+    return null;
   }
 
   static setCurrentUser(user: UserProfile | null) {
@@ -79,6 +90,44 @@ export class LocalStorageManager {
         localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       }
     } catch {}
+  }
+
+  static savePassword(email: string, pass: string): void {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.PASSWORDS);
+      const map = data ? JSON.parse(data) : {};
+      map[email.trim().toLowerCase()] = pass;
+      localStorage.setItem(STORAGE_KEYS.PASSWORDS, JSON.stringify(map));
+    } catch {}
+  }
+
+  static getPassword(email: string): string | null {
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      if (DEMO_PASSWORDS_MAP[cleanEmail]) {
+        return DEMO_PASSWORDS_MAP[cleanEmail];
+      }
+      const data = localStorage.getItem(STORAGE_KEYS.PASSWORDS);
+      const map = data ? JSON.parse(data) : {};
+      return map[cleanEmail] || null;
+    } catch {
+      return null;
+    }
+  }
+
+  static verifyPassword(email: string, pass: string): boolean {
+    const cleanEmail = email.trim().toLowerCase();
+    // Allow demo passwords or standard password
+    if (DEMO_PASSWORDS_MAP[cleanEmail]) {
+      const expected = DEMO_PASSWORDS_MAP[cleanEmail];
+      return pass === expected || pass === "password123" || pass === "admin123";
+    }
+    const savedPass = LocalStorageManager.getPassword(cleanEmail);
+    if (savedPass) {
+      return pass === savedPass;
+    }
+    // If user exists without registered password, accept min 4 char password
+    return pass.length >= 4;
   }
 
   static getSurveys(): Survey[] {

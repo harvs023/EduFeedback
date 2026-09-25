@@ -52,6 +52,7 @@ interface DatabaseBackupViewProps {
   currentUser: UserProfile | null;
   onRestoreBackup: (backupData: SystemBackupData, mode: "overwrite" | "merge") => void;
   onResetDatabase: () => void;
+  onClearDatabase?: () => void;
   showToast: (text: string, type?: "success" | "info") => void;
 }
 
@@ -65,6 +66,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   currentUser,
   onRestoreBackup,
   onResetDatabase,
+  onClearDatabase,
   showToast,
 }) => {
   // Snapshots State
@@ -83,6 +85,8 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   // Factory Reset Safety State
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState("");
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [clearConfirmText, setClearConfirmText] = useState("");
 
   // Storage footprint calculation
   const storageMetrics = useMemo(() => {
@@ -239,6 +243,20 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
     setShowResetModal(false);
     setResetConfirmText("");
     showToast("Database successfully reset to pristine factory demo seed data.", "success");
+  };
+
+  // Complete Database Wipe / Clean Slate
+  const handleClearData = () => {
+    if (clearConfirmText.trim().toUpperCase() !== "CLEAR") {
+      showToast("Please type CLEAR exactly to confirm database wipe.", "info");
+      return;
+    }
+    if (onClearDatabase) {
+      onClearDatabase();
+    }
+    setShowClearModal(false);
+    setClearConfirmText("");
+    showToast("Database completely cleared! 0 surveys and 0 responses (Clean production slate).", "success");
   };
 
   // Firebase Seed & Readiness State
@@ -728,31 +746,65 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
         )}
       </div>
 
-      {/* Danger Zone: Factory Reset */}
-      <div className="bg-rose-50/50 rounded-3xl border border-rose-200 p-6 sm:p-8 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 text-rose-700 text-xs font-bold uppercase tracking-wider">
-              <AlertTriangle className="w-4 h-4" />
-              <span>Administrative Danger Zone</span>
+      {/* Danger Zone: Reset & Clean Slate */}
+      <div className="bg-rose-50/50 rounded-3xl border border-rose-200 p-6 sm:p-8 space-y-6">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-1.5 text-rose-700 text-xs font-bold uppercase tracking-wider">
+            <AlertTriangle className="w-4 h-4" />
+            <span>Administrative Danger Zone</span>
+          </div>
+          <h3 className="font-serif text-lg font-bold text-slate-900">
+            Database State & Production Cleanup Tools
+          </h3>
+          <p className="text-xs text-slate-600">
+            Choose between restoring the default demonstration seed datasets or wiping the database to an empty clean slate for fresh production deployment.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          {/* Option 1: Reset to Demo Seeds */}
+          <div className="p-4 bg-white rounded-2xl border border-rose-100 flex flex-col justify-between gap-3 shadow-xs">
+            <div>
+              <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                <span>Reset to Demo Seeds</span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                Repopulates the 5 sample surveys, 14 student evaluations, Filipino NLP sentences, and demo user accounts for testing and demonstrations.
+              </p>
             </div>
-            <h3 className="font-serif text-lg font-bold text-slate-900">
-              Reset Database to Clean Initial State
-            </h3>
-            <p className="text-xs text-slate-600">
-              Restores baseline academic surveys, university feedback categories, and Tagalog sentiment training sentences.
-            </p>
+            <button
+              onClick={() => {
+                setResetConfirmText("");
+                setShowResetModal(true);
+              }}
+              className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-colors"
+            >
+              Reset to Demo Seeds
+            </button>
           </div>
 
-          <button
-            onClick={() => {
-              setResetConfirmText("");
-              setShowResetModal(true);
-            }}
-            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-colors shrink-0"
-          >
-            Reset to Demo Seeds
-          </button>
+          {/* Option 2: Clean Slate (Empty Database) */}
+          <div className="p-4 bg-white rounded-2xl border border-rose-200 flex flex-col justify-between gap-3 shadow-xs">
+            <div>
+              <div className="font-bold text-rose-700 text-xs flex items-center gap-1.5">
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Wipe Database (Empty Clean Slate)</span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                Deletes all surveys, responses, news, and training sentences. Leaves 0 surveys and 0 responses, retaining only the Superadmin account for real-world launch.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setClearConfirmText("");
+                setShowClearModal(true);
+              }}
+              className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-colors"
+            >
+              Wipe to 0 Records (Clean Slate)
+            </button>
+          </div>
         </div>
       </div>
 
@@ -930,7 +982,68 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                     : "bg-slate-200 text-slate-400 cursor-not-allowed"
                 }`}
               >
-                Reset Everything
+                Reset to Demo Seeds
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MODAL: COMPLETE DATABASE WIPE (CLEAN SLATE) */}
+      {/* ============================================================ */}
+      {showClearModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setShowClearModal(false)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-rose-200 space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-200">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="font-serif text-lg font-bold text-slate-900">
+                Wipe to Empty Production Database
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                This will delete <strong className="text-rose-700">ALL</strong> surveys, evaluations, student responses, and campus news. The database will be completely empty (0 surveys, 0 responses), leaving only your Superadmin credentials active.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700">
+                To confirm permanent wipe, type <span className="font-mono text-rose-600 font-black">CLEAR</span> below:
+              </label>
+              <input
+                type="text"
+                value={clearConfirmText}
+                onChange={(e) => setClearConfirmText(e.target.value)}
+                placeholder="Type CLEAR"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-rose-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:outline-hidden focus:border-rose-400"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={clearConfirmText.trim().toUpperCase() !== "CLEAR"}
+                onClick={handleClearData}
+                className={`px-5 py-2.5 font-bold text-xs rounded-xl shadow-xs transition-colors ${
+                  clearConfirmText.trim().toUpperCase() === "CLEAR"
+                    ? "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
+                    : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                }`}
+              >
+                Wipe All Data to 0
               </button>
             </div>
           </div>

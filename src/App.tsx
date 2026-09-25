@@ -454,6 +454,22 @@ export default function App() {
     }
   };
 
+  const handleClearDatabase = () => {
+    try {
+      const emptyData = LocalStorageManager.clearAllData(currentUser?.email || "admin");
+      setSurveys(emptyData.surveys);
+      setResponses(emptyData.responses);
+      setUsers(emptyData.users);
+      setMlDataset(emptyData.mlDataset);
+      setLogs(emptyData.logs);
+      setNewsList(emptyData.news);
+      setCurrentUser(LocalStorageManager.getCurrentUser());
+      showToast("Database wiped to a 100% clean production slate (0 surveys, 0 responses).", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to clear database.", "info");
+    }
+  };
+
   const handleUpdateProfile = (updated: Partial<UserProfile>) => {
     if (!currentUser) return;
     const modifiedUser = { ...currentUser, ...updated };
@@ -792,6 +808,7 @@ export default function App() {
               onDeleteUser={handleDeleteUser}
               onRestoreBackup={handleRestoreBackup}
               onResetDatabase={handleResetDatabase}
+              onClearDatabase={handleClearDatabase}
               showToast={showToast}
               onNavigateToAnalytics={(surveyId) => {
                 setAnalyticsTargetSurveyId(surveyId || "all");

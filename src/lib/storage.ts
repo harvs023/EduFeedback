@@ -628,6 +628,34 @@ export class LocalStorageManager {
     };
   }
 
+  static clearAllData(clearedBy: string = "admin@edufeedback.edu") {
+    LocalStorageManager.saveSurveys([]);
+    LocalStorageManager.setResponses([]);
+    LocalStorageManager.saveNews([]);
+    LocalStorageManager.saveMlDataset([]);
+    // Retain users with admin account preserved so the system remains accessible
+    const adminOnly = DEFAULT_USERS.filter((u) => u.role === "superadmin");
+    const preservedUsers = adminOnly.length > 0 ? adminOnly : DEFAULT_USERS;
+    LocalStorageManager.saveUsers(preservedUsers);
+    LocalStorageManager.setLogs([]);
+
+    LocalStorageManager.addLog({
+      user: clearedBy,
+      pos: "Superadmin",
+      action: "Database Wiped",
+      details: "Database cleared to a clean production slate (0 surveys, 0 responses, 0 demo items)",
+    });
+
+    return {
+      surveys: [] as Survey[],
+      responses: [] as SurveyResponse[],
+      users: preservedUsers,
+      news: [] as NewsAnnouncement[],
+      mlDataset: [] as TagalogMLSample[],
+      logs: LocalStorageManager.getLogs(),
+    };
+  }
+
   static calculateStorageMetrics(): { totalBytes: number; formattedSize: string } {
     let total = 0;
     try {

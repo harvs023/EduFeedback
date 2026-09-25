@@ -64,6 +64,7 @@ interface SuperadminDashboardProps {
   onDeleteUser?: (email: string) => void;
   onRestoreBackup?: (backupData: SystemBackupData, mode: "overwrite" | "merge") => void;
   onResetDatabase?: () => void;
+  onClearDatabase?: () => void;
   onNavigateToAnalytics?: (surveyId?: string | number | "all") => void;
   onNavigateToML?: () => void;
   initialTab?: "surveys" | "flagged" | "users" | "logs" | "backup";
@@ -137,6 +138,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onDeleteUser,
   onRestoreBackup,
   onResetDatabase,
+  onClearDatabase,
   onNavigateToAnalytics,
   onNavigateToML,
   initialTab = "surveys",
@@ -1304,6 +1306,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           currentUser={currentUser}
           onRestoreBackup={onRestoreBackup || (() => {})}
           onResetDatabase={onResetDatabase || (() => {})}
+          onClearDatabase={onClearDatabase || (() => {})}
           showToast={showToast || (() => {})}
         />
       )}

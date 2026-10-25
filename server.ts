@@ -330,29 +330,43 @@ app.post("/api/ml/train-batch", async (req, res) => {
 app.post("/api/ml/generate-analytics-recommendations", async (req, res) => {
   const { dataset, surveyTitle, feedbackSamples, surveyCategory } = req.body;
 
-  const samples = Array.isArray(feedbackSamples) && feedbackSamples.length > 0
-    ? feedbackSamples
-    : ["Mabagal ang internet sa laboratory.", "Very approachable and clear teaching method.", "Sana may mas maraming study tables sa library."];
+  const samples: string[] = Array.isArray(feedbackSamples) && feedbackSamples.length > 0
+    ? feedbackSamples.filter((s: any) => typeof s === "string" && s.trim().length > 0)
+    : [
+        "Mabagal ang Wi-Fi sa laboratory 3.",
+        "The instructor explains concepts very clearly.",
+        "Sana maglagay ng water dispenser sa 4th floor.",
+        "Outdated software on some desktop units in computer lab.",
+      ];
+
+  const total = samples.length || 1;
 
   const prompt = `You are a specialized Bilingual (English and Tagalog) Machine Learning Analytics Engine for Philippine Higher Education.
 Using a trained ML corpus of ${Array.isArray(dataset) ? dataset.length : 25} labeled English and Tagalog university feedback samples:
 Survey: "${surveyTitle || "Academic & Campus Feedback"}" (Category: ${surveyCategory || "General"})
-Feedback Data to Analyze:
+Feedback Data to Analyze (${samples.length} items):
 ${JSON.stringify(samples)}
+
+CRITICAL PERCENTAGE INSTRUCTIONS:
+Carefully read and classify EVERY single feedback sample in "Feedback Data to Analyze" into Positive, Negative, or Constructive Suggestion / Neutral.
+Calculate the EXACT percentages based strictly on the ${samples.length} items provided.
+Do NOT return hardcoded or placeholder values (e.g., do NOT just return 70% or 68%).
+For example, if 1 out of 4 items is positive, positivePercent MUST be 25. If 0 items are positive, positivePercent MUST be 0. If all 4 items are negative, negativePercent MUST be 100 and positivePercent MUST be 0.
+The sum of positivePercent + negativePercent + constructiveSuggestionPercent must equal 100.
 
 Provide deep analytics and concrete recommendations in strict JSON:
 {
   "modelConfidence": 0.94,
-  "overallSentimentScore": 0.78,
+  "overallSentimentScore": number between 0.0 and 1.0 representing proportion of satisfied sentiment,
   "sentimentDistribution": {
-    "positivePercent": 68,
-    "negativePercent": 14,
-    "constructiveSuggestionPercent": 18
+    "positivePercent": integer percentage (0-100),
+    "negativePercent": integer percentage (0-100),
+    "constructiveSuggestionPercent": integer percentage (0-100)
   },
   "aspectBreakdown": [
-    { "aspect": "Teaching Quality", "score": 0.88, "status": "Strong", "tagalogKeywords": ["malinaw", "mahusay"], "englishKeywords": ["clear", "engaging"] },
-    { "aspect": "Campus Wi-Fi & Internet", "score": 0.42, "status": "Needs Immediate Attention", "tagalogKeywords": ["mabagal", "lag"], "englishKeywords": ["slow", "disconnects"] },
-    { "aspect": "Facilities & Labs", "score": 0.72, "status": "Moderate", "tagalogKeywords": ["mainit", "gamit"], "englishKeywords": ["computers", "aircon"] }
+    { "aspect": "Teaching Quality", "score": number between 0.0 and 1.0, "status": "Strong" | "Moderate" | "Needs Immediate Attention", "tagalogKeywords": ["malinaw", "mahusay"], "englishKeywords": ["clear", "engaging"] },
+    { "aspect": "Campus Wi-Fi & Internet", "score": number between 0.0 and 1.0, "status": "Strong" | "Moderate" | "Needs Immediate Attention", "tagalogKeywords": ["mabagal", "lag"], "englishKeywords": ["slow", "disconnects"] },
+    { "aspect": "Facilities & Labs", "score": number between 0.0 and 1.0, "status": "Strong" | "Moderate" | "Needs Immediate Attention", "tagalogKeywords": ["mainit", "gamit"], "englishKeywords": ["computers", "aircon"] }
   ],
   "bilingualInsights": "1 paragraph explaining how Tagalog vs English responses compare in tone and specific requests for this survey",
   "dataDrivenRecommendations": [
@@ -362,47 +376,72 @@ Provide deep analytics and concrete recommendations in strict JSON:
   ]
 }`;
 
-  const geminiResult = await executeGeminiWithFallback(prompt, 0.25);
+  const geminiResult = await executeGeminiWithFallback(prompt, 0.2);
   if (geminiResult) {
     try {
       const cleanedText = geminiResult.text.replace(/```json/gi, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(cleanedText);
-      return res.json({ success: true, result: parsed, source: geminiResult.source });
+      if (parsed.sentimentDistribution) {
+        return res.json({ success: true, result: parsed, source: geminiResult.source });
+      }
     } catch (parseErr) {
       console.warn("[Gemini ML Analytics] JSON parse error, using dynamic local synthesis.");
     }
   }
 
   // Dynamic Local Bilingual ML Fallback Engine
-  const total = samples.length || 1;
-  const posCount = samples.filter((s: string) => /maganda|mahusay|mabait|mabilis|clear|great|good|excellent/i.test(s)).length;
-  const negCount = samples.filter((s: string) => /mabagal|sira|kulang|mainit|poor|bad|slow|lag/i.test(s)).length;
-  const sugCount = samples.filter((s: string) => /sana|dapat|suggest|improve|paki/i.test(s)).length;
+  let posCount = 0;
+  let negCount = 0;
+  let sugCount = 0;
 
-  const posPct = Math.round((posCount / total) * 100) || 70;
-  const negPct = Math.round((negCount / total) * 100) || 15;
-  const sugPct = 100 - posPct - negPct;
+  samples.forEach((text) => {
+    const lower = text.toLowerCase();
+    
+    // Sarcasm detection check: e.g. "ganda ng wifi... di makakonek"
+    const hasPraise = /ganda|mabilis|galing|husay|bait|kudos|10\/10|the best/i.test(lower);
+    const hasContrast = /di makakonek|hindi makakonek|di gumagana|laging down|sira|pugon|walang kwenta|next sem/i.test(lower);
+    const isSarcasm = hasPraise && hasContrast;
+
+    const isNeg = isSarcasm || /mabagal|sira|kulang|mainit|poor|bad|slow|lag|delay|mahirap|pangit|mabaho|frustrat|outdated/i.test(lower);
+    const isSug = /sana|dapat|suggest|improve|paki|dagdagan|palitan|pwede ba|please/i.test(lower);
+    const isPos = !isNeg && /maganda|mahusay|mabait|mabilis|clear|great|good|excellent|approach|helpful|salamat|ayos|sulit/i.test(lower);
+
+    if (isNeg) {
+      negCount++;
+    } else if (isSug) {
+      sugCount++;
+    } else if (isPos) {
+      posCount++;
+    } else {
+      sugCount++;
+    }
+  });
+
+  const posPct = Math.round((posCount / total) * 100);
+  const negPct = Math.round((negCount / total) * 100);
+  const sugPct = Math.max(0, 100 - posPct - negPct);
+  const overallScore = total > 0 ? Number(Math.max(0, Math.min(1.0, (posCount * 1.0 + sugCount * 0.4) / total)).toFixed(2)) : 0.5;
 
   return res.json({
     success: true,
     result: {
-      modelConfidence: 0.92,
-      overallSentimentScore: Number(Math.max(0.2, (posPct - negPct + 100) / 200).toFixed(2)),
+      modelConfidence: 0.94,
+      overallSentimentScore: overallScore,
       sentimentDistribution: {
         positivePercent: posPct,
         negativePercent: negPct,
-        constructiveSuggestionPercent: Math.max(5, sugPct),
+        constructiveSuggestionPercent: sugPct,
       },
       aspectBreakdown: [
-        { aspect: "Pagtuturo / Instruction", score: 0.89, status: "Strong", tagalogKeywords: ["mahusay", "malinaw"], englishKeywords: ["clear", "helpful"] },
-        { aspect: "Pasibilidad & Infrastructure", score: 0.65, status: "Moderate", tagalogKeywords: ["gamit", "silid"], englishKeywords: ["rooms", "equipment"] },
-        { aspect: "Digital Services & Network", score: 0.52, status: "Needs Attention", tagalogKeywords: ["mabagal", "connection"], englishKeywords: ["slow", "portal"] },
+        { aspect: "Pagtuturo / Instruction", score: posCount > 0 ? 0.88 : 0.45, status: posCount > 0 ? "Strong" : "Moderate", tagalogKeywords: ["mahusay", "malinaw"], englishKeywords: ["clear", "helpful"] },
+        { aspect: "Pasibilidad & Infrastructure", score: negCount > 1 ? 0.38 : 0.65, status: negCount > 1 ? "Needs Immediate Attention" : "Moderate", tagalogKeywords: ["gamit", "silid"], englishKeywords: ["rooms", "equipment"] },
+        { aspect: "Digital Services & Network", score: negCount > 0 ? 0.35 : 0.72, status: negCount > 0 ? "Needs Immediate Attention" : "Strong", tagalogKeywords: ["mabagal", "connection"], englishKeywords: ["slow", "wifi"] },
       ],
-      bilingualInsights: `Evaluation of responses for "${surveyTitle || "Academic Feedback"}" shows students formulate praise and appreciation in both formal Tagalog and English, while urgent pain points and feature suggestions are communicated via expressive colloquial Taglish.`,
+      bilingualInsights: `Evaluation of the ${total} responses for "${surveyTitle || "Academic Feedback"}" shows ${posPct}% positive sentiment, ${negPct}% critical issues, and ${sugPct}% constructive recommendations. Urgent pain points (Wi-Fi, facilities) are expressed via colloquial Taglish and specific English remarks.`,
       dataDrivenRecommendations: [
-        { priority: "High", area: "Immediate Operational Response", action: `Address reported friction points raised in the latest ${surveyCategory || "evaluation"} feedback cycle.`, impact: "Directly improves student experience and institutional satisfaction." },
-        { priority: "Medium", area: "Instructional Consistency", action: "Share highlighted instructional best practices across academic departments.", impact: "Maintains high satisfaction benchmark across cohorts." },
-        { priority: "Low", area: "Periodic Review", action: "Schedule follow-up pulse survey to measure implementation progress.", impact: "Provides continuous longitudinal tracking." },
+        { priority: negPct > 30 ? "High" : "Medium", area: "Infrastructure & Technical Facilities", action: "Prioritize hardware/network maintenance on reported computer labs and Wi-Fi access points.", impact: "Directly resolves student friction points in laboratory work." },
+        { priority: "Medium", area: "Instructional Support", action: "Maintain commended instructional approaches and expand practical application modules.", impact: "Supports academic engagement and teaching consistency." },
+        { priority: "Low", area: "Campus Amenities", action: "Evaluate feasibility of student amenity requests (e.g. hydration stations, extra seating).", impact: "Enhances student welfare and campus comfort." },
       ],
     },
     source: "local-bilingual-ml-engine",

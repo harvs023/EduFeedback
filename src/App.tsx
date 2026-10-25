@@ -840,6 +840,8 @@ export default function App() {
             isSuperadmin ? (
               <TagalogMLTrainingStudio
                 dataset={mlDataset}
+                surveys={surveys}
+                responses={responses}
                 onAddSample={handleAddMlSample}
               />
             ) : (

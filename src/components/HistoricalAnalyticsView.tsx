@@ -642,10 +642,10 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
       });
 
       const posA = matchA.filter((r) => r.sentimentAnalysis?.sentiment === "Positive").length;
-      const pctA = matchA.length > 0 ? Math.round((posA / matchA.length) * 100) : 74;
+      const pctA = matchA.length > 0 ? Math.round((posA / matchA.length) * 100) : (respA.length > 0 ? sentA.posPct : 0);
 
       const posB = matchB.filter((r) => r.sentimentAnalysis?.sentiment === "Positive").length;
-      const pctB = matchB.length > 0 ? Math.round((posB / matchB.length) * 100) : 82;
+      const pctB = matchB.length > 0 ? Math.round((posB / matchB.length) * 100) : (respB.length > 0 ? sentB.posPct : 0);
 
       const diff = pctB - pctA;
       return {

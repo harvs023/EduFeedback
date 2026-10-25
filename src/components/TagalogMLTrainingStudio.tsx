@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { TagalogMLSample, TagalogMLMetrics, Survey } from "../types";
+import { TagalogMLSample, TagalogMLMetrics, Survey, SurveyResponse } from "../types";
 import {
   BrainCircuit,
   Sparkles,
@@ -28,6 +28,7 @@ import {
 interface TagalogMLTrainingStudioProps {
   dataset: TagalogMLSample[];
   surveys?: Survey[];
+  responses?: SurveyResponse[];
   onAddSample: (sample: Omit<TagalogMLSample, "id">) => void;
   onBulkAddSamples?: (samples: Array<Omit<TagalogMLSample, "id">>) => void;
   onDeleteSample?: (id: string) => void;
@@ -36,6 +37,7 @@ interface TagalogMLTrainingStudioProps {
 export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = ({
   dataset,
   surveys = [],
+  responses = [],
   onAddSample,
   onBulkAddSamples,
   onDeleteSample,
@@ -113,12 +115,47 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
 
   // ML Recommendations Generator State
   const [selectedSurveyId, setSelectedSurveyId] = useState<string>(surveys[0]?.id ? String(surveys[0].id) : "custom");
-  const [customFeedbackToAnalyze, setCustomFeedbackToAnalyze] = useState<string>(
-    "Mabagal ang Wi-Fi sa laboratory 3.\nThe instructor explains concepts very clearly.\nSana maglagay ng water dispenser sa 4th floor.\nOutdated software on some desktop units in computer lab."
-  );
+  const [customFeedbackToAnalyze, setCustomFeedbackToAnalyze] = useState<string>(() => {
+    if (surveys[0]?.id && responses.length > 0) {
+      const sId = String(surveys[0].id);
+      const matched = responses.filter((r) => String(r.surveyId) === sId || r.surveyIdStr === sId);
+      const textSubmissions = matched
+        .flatMap((r) => r.answers.map((a) => a.answer))
+        .filter((ans) => typeof ans === "string" && ans.trim().length > 3 && isNaN(Number(ans)));
+      if (textSubmissions.length > 0) {
+        return textSubmissions.slice(0, 30).join("\n");
+      }
+    }
+    return "Mabagal ang Wi-Fi sa laboratory 3.\nThe instructor explains concepts very clearly.\nSana maglagay ng water dispenser sa 4th floor.\nOutdated software on some desktop units in computer lab.";
+  });
   const [generatingRecommendations, setGeneratingRecommendations] = useState<boolean>(false);
   const [recommendationsResult, setRecommendationsResult] = useState<any | null>(null);
   const [copiedNotification, setCopiedNotification] = useState<boolean>(false);
+
+  const handleSurveyChange = (surveyId: string) => {
+    setSelectedSurveyId(surveyId);
+    if (surveyId === "custom") {
+      setCustomFeedbackToAnalyze(
+        "Mabagal ang Wi-Fi sa laboratory 3.\nThe instructor explains concepts very clearly.\nSana maglagay ng water dispenser sa 4th floor.\nOutdated software on some desktop units in computer lab."
+      );
+    } else {
+      const matched = responses.filter(
+        (r) => String(r.surveyId) === surveyId || r.surveyIdStr === surveyId
+      );
+      const textSubmissions = matched
+        .flatMap((r) => r.answers.map((a) => a.answer))
+        .filter((ans) => typeof ans === "string" && ans.trim().length > 3 && isNaN(Number(ans)));
+
+      if (textSubmissions.length > 0) {
+        setCustomFeedbackToAnalyze(textSubmissions.slice(0, 30).join("\n"));
+      } else {
+        const found = surveys.find((s) => String(s.id) === surveyId);
+        setCustomFeedbackToAnalyze(
+          `No written comments submitted for "${found?.title || "this survey"}" yet. Enter custom responses here to test the model.`
+        );
+      }
+    }
+  };
 
   // Quick Analyze Single Sentence
   const handleAnalyze = async () => {
@@ -423,7 +460,7 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
               </label>
               <select
                 value={selectedSurveyId}
-                onChange={(e) => setSelectedSurveyId(e.target.value)}
+                onChange={(e) => handleSurveyChange(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
               >
                 {surveys.map((s) => (
@@ -481,12 +518,12 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
                       ML Evaluation Result
                     </span>
                     <span className="text-sm font-extrabold text-slate-900">
-                      Overall Satisfaction Score: {Math.round((recommendationsResult.overallSentimentScore || 0.8) * 100)}%
+                      Overall Satisfaction Score: {Math.round((recommendationsResult.overallSentimentScore ?? 0) * 100)}%
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                      Confidence: {Math.round((recommendationsResult.modelConfidence || 0.94) * 100)}%
+                      Confidence: {Math.round((recommendationsResult.modelConfidence ?? 0.94) * 100)}%
                     </span>
                   </div>
                 </div>
@@ -496,19 +533,19 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
                   <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
                     <span className="text-[10px] font-bold text-emerald-800 uppercase block">Positive</span>
                     <span className="text-base font-extrabold text-emerald-700">
-                      {recommendationsResult.sentimentDistribution?.positivePercent || 70}%
+                      {recommendationsResult.sentimentDistribution?.positivePercent ?? 0}%
                     </span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200">
                     <span className="text-[10px] font-bold text-rose-800 uppercase block">Negative</span>
                     <span className="text-base font-extrabold text-rose-700">
-                      {recommendationsResult.sentimentDistribution?.negativePercent || 15}%
+                      {recommendationsResult.sentimentDistribution?.negativePercent ?? 0}%
                     </span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200">
                     <span className="text-[10px] font-bold text-blue-800 uppercase block">Suggestions</span>
                     <span className="text-base font-extrabold text-blue-700">
-                      {recommendationsResult.sentimentDistribution?.constructiveSuggestionPercent || 15}%
+                      {recommendationsResult.sentimentDistribution?.constructiveSuggestionPercent ?? 0}%
                     </span>
                   </div>
                 </div>

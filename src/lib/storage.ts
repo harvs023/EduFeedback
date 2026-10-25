@@ -130,11 +130,32 @@ export class LocalStorageManager {
     return pass.length >= 4;
   }
 
+  static isWiped(): boolean {
+    try {
+      return localStorage.getItem("edufeedback_is_wiped_v2") === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  static setWiped(wiped: boolean): void {
+    try {
+      if (wiped) {
+        localStorage.setItem("edufeedback_is_wiped_v2", "true");
+      } else {
+        localStorage.removeItem("edufeedback_is_wiped_v2");
+      }
+    } catch {}
+  }
+
   static getSurveys(): Survey[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.SURVEYS);
-      if (data) return JSON.parse(data);
+      if (data !== null) return JSON.parse(data);
     } catch {}
+    if (LocalStorageManager.isWiped()) {
+      return [];
+    }
     LocalStorageManager.setSurveys(INITIAL_SURVEYS);
     return INITIAL_SURVEYS;
   }
@@ -152,8 +173,11 @@ export class LocalStorageManager {
   static getResponses(): SurveyResponse[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.RESPONSES);
-      if (data) return JSON.parse(data);
+      if (data !== null) return JSON.parse(data);
     } catch {}
+    if (LocalStorageManager.isWiped()) {
+      return [];
+    }
     LocalStorageManager.setResponses(INITIAL_RESPONSES);
     return INITIAL_RESPONSES;
   }
@@ -173,8 +197,11 @@ export class LocalStorageManager {
   static getNews(): NewsAnnouncement[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.NEWS);
-      if (data) return JSON.parse(data);
+      if (data !== null) return JSON.parse(data);
     } catch {}
+    if (LocalStorageManager.isWiped()) {
+      return [];
+    }
     LocalStorageManager.setNews(INITIAL_NEWS);
     return INITIAL_NEWS;
   }
@@ -192,8 +219,11 @@ export class LocalStorageManager {
   static getMLDataset(): TagalogMLSample[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.ML_DATASET);
-      if (data) return JSON.parse(data);
+      if (data !== null) return JSON.parse(data);
     } catch {}
+    if (LocalStorageManager.isWiped()) {
+      return [];
+    }
     LocalStorageManager.setMLDataset(INITIAL_TAGALOG_ML_DATASET);
     return INITIAL_TAGALOG_ML_DATASET;
   }
@@ -215,8 +245,11 @@ export class LocalStorageManager {
   static getLogs(): ActivityLog[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.LOGS);
-      if (data) return JSON.parse(data);
+      if (data !== null) return JSON.parse(data);
     } catch {}
+    if (LocalStorageManager.isWiped()) {
+      return [];
+    }
     LocalStorageManager.setLogs(INITIAL_LOGS);
     return INITIAL_LOGS;
   }
@@ -323,6 +356,24 @@ export class LocalStorageManager {
     };
     notifs.unshift(newNotif);
     LocalStorageManager.setNotifications(notifs);
+  }
+
+  static markAllNotificationsRead(userEmail?: string): NotificationItem[] {
+    try {
+      const existing = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      if (!existing) return [];
+      const notifs: NotificationItem[] = JSON.parse(existing);
+      const updated = notifs.map((n) => {
+        if (!userEmail || n.userEmail === "all" || n.userEmail.toLowerCase() === userEmail.toLowerCase()) {
+          return { ...n, read: true };
+        }
+        return n;
+      });
+      LocalStorageManager.setNotifications(updated);
+      return updated;
+    } catch {
+      return [];
+    }
   }
 
   static getCategories(): string[] {
@@ -604,6 +655,7 @@ export class LocalStorageManager {
   }
 
   static resetToInitialDemoData(resetBy: string = "admin@edufeedback.edu") {
+    LocalStorageManager.setWiped(false);
     LocalStorageManager.saveSurveys(INITIAL_SURVEYS);
     LocalStorageManager.setResponses(INITIAL_RESPONSES);
     LocalStorageManager.saveUsers(DEFAULT_USERS);
@@ -629,6 +681,7 @@ export class LocalStorageManager {
   }
 
   static clearAllData(clearedBy: string = "admin@edufeedback.edu") {
+    LocalStorageManager.setWiped(true);
     LocalStorageManager.saveSurveys([]);
     LocalStorageManager.setResponses([]);
     LocalStorageManager.saveNews([]);

@@ -56,7 +56,7 @@ export const DEFAULT_USERS: UserProfile[] = [
     role: "superadmin",
     status: "active",
     joined: "Jan 15, 2024",
-    surveys: 12,
+    surveys: 0,
   },
   {
     email: "juan.delacruz@school.edu",

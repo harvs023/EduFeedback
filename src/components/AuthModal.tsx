@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { UserProfile } from "../types";
 import { DEPARTMENTS_DATA, PROGRAMS_BY_DEPARTMENT } from "../data/initialData";
 import { DatabaseService } from "../lib/databaseService";
+import { LocalStorageManager } from "../lib/storage";
 import {
   X,
   LogIn,
@@ -17,6 +18,7 @@ import {
   AlertCircle,
   Loader2,
   CheckCircle2,
+  ShieldCheck,
 } from "lucide-react";
 
 interface AuthModalProps {
@@ -34,6 +36,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingNotice, setPendingNotice] = useState<{ name: string; pos: string; email: string } | null>(null);
 
   // Login Form States
   const [loginEmail, setLoginEmail] = useState<string>("");
@@ -115,13 +118,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const isStudent = regPos === "Student";
       const isOfficer = regPos === "Student Officer";
+      const isApprovalRequired = regPos === "Faculty" || regPos === "Student Officer";
+      const initialStatus = isApprovalRequired ? "pending_approval" : "active";
 
       const newUser: UserProfile = {
         name: regName.trim(),
         email: regEmail.trim().toLowerCase(),
         pos: regPos,
         role: "user",
-        status: "active",
+        status: initialStatus,
         department: regDepartment,
         program: isStudent || isOfficer ? regProgram : undefined,
         year: isStudent || isOfficer ? regYear : undefined,
@@ -132,8 +137,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       const result = await DatabaseService.register(newUser, regPassword);
       if (result.success && result.user) {
-        onLogin(result.user);
-        onClose();
+        if (isApprovalRequired) {
+          LocalStorageManager.addLog({
+            user: newUser.name,
+            pos: newUser.pos,
+            action: "Faculty/Officer Registration Submitted",
+            details: `${newUser.name} registered as ${newUser.pos} (${newUser.email}) and awaits admin approval.`,
+          });
+          LocalStorageManager.addNotification(
+            "admin@edufeedback.edu",
+            "🛡️ New Account Pending Approval",
+            `${newUser.name} registered as ${newUser.pos} (${newUser.email}) and requires admin verification.`,
+            "🛡️",
+            "account_pending",
+            { email: newUser.email }
+          );
+          setPendingNotice({
+            name: newUser.name,
+            pos: newUser.pos,
+            email: newUser.email,
+          });
+        } else {
+          onLogin(result.user);
+          onClose();
+        }
       } else {
         setError(result.error || "Registration failed. Please try again.");
       }
@@ -153,6 +180,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5 my-8"
         onClick={(e) => e.stopPropagation()}
       >
+        {pendingNotice ? (
+          <div className="text-center py-4 space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto shadow-xs">
+              <ShieldCheck className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="font-serif text-lg font-bold text-slate-900">Registration Submitted</h3>
+              <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mt-0.5">
+                Administrative Approval Required
+              </p>
+            </div>
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-left text-xs space-y-1.5 text-slate-700">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Name:</span>
+                <span className="font-bold text-slate-900">{pendingNotice.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Assigned Role:</span>
+                <span className="font-bold text-indigo-700">{pendingNotice.pos}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Email:</span>
+                <span className="font-mono text-slate-600">{pendingNotice.email}</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Faculty and Student Officer roles require administrative approval before activation. The System Administrator has been notified.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingNotice(null);
+                setMode("login");
+                setLoginEmail(pendingNotice.email);
+              }}
+              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+            >
+              Go to Sign In
+            </button>
+          </div>
+        ) : (
+          <>
         {/* Header with Title and Mode Switcher */}
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
           <div className="space-y-1">
@@ -505,6 +574,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
             </div>
           </form>
+        )}
+        </>
         )}
       </div>
     </div>

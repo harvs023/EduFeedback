@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Survey, UserProfile, SurveyResponse } from "../types";
+import { Survey, UserProfile, SurveyResponse, NewsAnnouncement } from "../types";
 import {
   Flame,
   Star,
@@ -29,6 +29,7 @@ interface ThemedSurveySectionsProps {
   surveys: Survey[];
   currentUser: UserProfile | null;
   userResponses?: SurveyResponse[];
+  newsList?: NewsAnnouncement[];
   onTakeSurvey?: (survey: Survey) => void;
   onOpenSurvey?: (survey: Survey) => void;
   onViewAnalytics: (surveyId: string | number) => void;
@@ -85,6 +86,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   surveys,
   currentUser,
   userResponses = [],
+  newsList = [],
   onTakeSurvey,
   onOpenSurvey,
   onViewAnalytics,
@@ -97,7 +99,8 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
 }) => {
   const [selectedTheme, setSelectedTheme] = useState<string>("all");
   const [performanceFilter, setPerformanceFilter] = useState<"all" | "trending" | "top-rated">("all");
-  const [internalSearch, setInternalSearch] = useState<string>("");
+  const [performanceTimeframe, setPerformanceTimeframe] = useState<"month" | "year">("year");
+  const [internalSearch, setInternalSearch] = useState<string>("" );
   const [statusFilter, setStatusFilter] = useState<"all" | "unanswered" | "answered">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>(selectedCategory);
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
@@ -109,6 +112,142 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
 
   const answeredSurveyIds = useMemo(() => {
     return new Set(userResponses.map((r) => String(r.surveyId)));
+  }, [userResponses]);
+
+  // Dynamic Total Respondents Count derived strictly from actual recorded responses
+  const totalRespondentsCount = useMemo(() => {
+    if (userResponses && userResponses.length > 0) {
+      return userResponses.length;
+    }
+    return surveys.reduce((acc, s) => acc + (s.responses || 0), 0);
+  }, [userResponses, surveys]);
+
+  // Dynamic Sentiment Score computed across live response feedback
+  const sentimentMetrics = useMemo(() => {
+    if (!userResponses || userResponses.length === 0) {
+      return {
+        scoreDisplay: "0.0 / 10",
+        label: "No evaluations recorded",
+        hasData: false,
+      };
+    }
+
+    let totalScore = 0;
+    let scoreCount = 0;
+    let positiveCount = 0;
+    let negativeCount = 0;
+    let neutralCount = 0;
+
+    userResponses.forEach((r) => {
+      if (r.sentimentAnalysis?.score !== undefined) {
+        const s = r.sentimentAnalysis.score > 1 ? r.sentimentAnalysis.score : r.sentimentAnalysis.score * 10;
+        totalScore += s;
+        scoreCount++;
+      } else if (r.answers && Array.isArray(r.answers)) {
+        const ratingAnswers = r.answers.filter((a) => typeof a.ratingValue === "number" && a.ratingValue > 0);
+        if (ratingAnswers.length > 0) {
+          const avg5 = ratingAnswers.reduce((sum, a) => sum + (a.ratingValue || 0), 0) / ratingAnswers.length;
+          totalScore += avg5 * 2;
+          scoreCount++;
+        }
+      }
+
+      const sentiment = r.sentimentAnalysis?.sentiment;
+      if (sentiment === "Positive") positiveCount++;
+      else if (sentiment === "Negative") negativeCount++;
+      else if (sentiment) neutralCount++;
+    });
+
+    if (scoreCount === 0) {
+      return {
+        scoreDisplay: "0.0 / 10",
+        label: "No evaluations recorded",
+        hasData: false,
+      };
+    }
+
+    const avg = (totalScore / scoreCount).toFixed(1);
+    let label = "Neutral Sentiment";
+    if (positiveCount > negativeCount && positiveCount >= neutralCount) {
+      label = "Positive (Tagalog/Eng)";
+    } else if (negativeCount > positiveCount) {
+      label = "Needs Attention";
+    }
+
+    return {
+      scoreDisplay: `${avg} / 10`,
+      label,
+      hasData: true,
+    };
+  }, [userResponses]);
+
+  // Dynamic Monthly / Annual Performance Volume from user responses
+  const monthlyVolumeData = useMemo(() => {
+    const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+    const monthCounts = [0, 0, 0, 0, 0, 0, 0];
+
+    if (!userResponses || userResponses.length === 0) {
+      return {
+        hasData: false,
+        totalVolume: 0,
+        monthLabels,
+        monthCounts,
+        maxCount: 1,
+      };
+    }
+
+    userResponses.forEach((r) => {
+      let monthIdx = -1;
+      if (r.timestamp) {
+        monthIdx = new Date(r.timestamp).getMonth();
+      } else if (r.date) {
+        const parsed = Date.parse(r.date);
+        if (!isNaN(parsed)) {
+          monthIdx = new Date(parsed).getMonth();
+        } else {
+          const first3 = r.date.trim().slice(0, 3).toLowerCase();
+          const lookup = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+          monthIdx = lookup.indexOf(first3);
+        }
+      }
+
+      if (monthIdx >= 0 && monthIdx < 7) {
+        monthCounts[monthIdx]++;
+      } else if (monthIdx >= 7) {
+        monthCounts[6]++;
+      }
+    });
+
+    const totalVolume = monthCounts.reduce((a, b) => a + b, 0);
+    const maxCount = Math.max(...monthCounts, 1);
+
+    return {
+      hasData: totalVolume > 0,
+      totalVolume,
+      monthLabels,
+      monthCounts,
+      maxCount,
+    };
+  }, [userResponses]);
+
+  // Dynamic Local Response Insights extracted from actual responses
+  const latestLocalInsight = useMemo(() => {
+    if (!userResponses || userResponses.length === 0) return null;
+    for (const r of userResponses) {
+      if (r.answers && Array.isArray(r.answers)) {
+        for (const a of r.answers) {
+          const text = (a.answer || "").toString().trim();
+          if (text.length > 10 && isNaN(Number(text)) && !text.toLowerCase().includes("stars")) {
+            return {
+              quote: text,
+              lang: r.sentimentAnalysis?.language || "Tagalog/English",
+              sentiment: r.sentimentAnalysis?.sentiment || "NLP Analyzed",
+            };
+          }
+        }
+      }
+    }
+    return null;
   }, [userResponses]);
 
   // Surveys created by the currently logged-in user
@@ -215,26 +354,93 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
     });
   }, [eligibleSurveys, selectedTheme, performanceFilter, effectiveSearch, statusFilter, categoryFilter, answeredSurveyIds]);
 
+  // Priority / Mandatory Institutional Surveys assigned to current user
+  const pendingRequiredSurveys = useMemo(() => {
+    if (!currentUser) return [];
+    return surveys.filter((s) => {
+      if (!s.isRequired || s.status !== "published") return false;
+      const isAnswered = answeredSurveyIds.has(String(s.id));
+      if (isAnswered) return false;
+      if (s.requiredAudience === "faculty") return currentUser.pos === "Faculty";
+      if (s.requiredAudience === "students") return currentUser.pos === "Student" || currentUser.pos === "Student Officer";
+      if (s.requiredAudience === "officers") return currentUser.pos === "Student Officer";
+      return true; // "all"
+    });
+  }, [surveys, currentUser, answeredSurveyIds]);
+
   return (
     <div className="space-y-6">
+      {/* Priority / Mandatory Institutional Survey Banner (First thing shown on homepage) */}
+      {pendingRequiredSurveys.length > 0 && (
+        <div className="space-y-3">
+          {pendingRequiredSurveys.map((reqSurvey) => (
+            <div
+              key={reqSurvey.id}
+              className="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 rounded-2xl p-5 sm:p-6 text-white shadow-lg border border-amber-300/40 relative overflow-hidden"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="bg-white/20 backdrop-blur-md px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider text-white border border-white/30 flex items-center gap-1">
+                      <Star className="w-3 h-3 fill-white" />
+                      <span>Priority Action Required</span>
+                    </span>
+                    <span className="text-amber-100 text-xs font-semibold">
+                      Institutional Semester Clearance Requirement
+                    </span>
+                  </div>
+                  <h3 className="font-bold text-lg sm:text-xl text-white leading-tight">
+                    {reqSurvey.title}
+                  </h3>
+                  <p className="text-xs text-amber-50 max-w-2xl leading-relaxed">
+                    {reqSurvey.desc || "This institutional evaluation requires your immediate completion for semester clearance records and university quality assurance."}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleLaunchSurvey(reqSurvey)}
+                  className="px-5 py-2.5 bg-white hover:bg-amber-50 text-amber-950 font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all shrink-0 cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
+                >
+                  <span>Complete Survey Now</span>
+                  <ArrowRight className="w-4 h-4 text-amber-700" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Top 3 Stat Cards (from Sleek Interface design) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">TOTAL RESPONDENTS</div>
-          <div className="text-2xl font-bold text-slate-900">12,482</div>
-          <div className="text-green-500 text-xs font-medium mt-1">+14% from last month</div>
+          <div className="text-2xl font-bold text-slate-900">
+            {totalRespondentsCount.toLocaleString()}
+          </div>
+          <div className={`text-xs font-medium mt-1 ${totalRespondentsCount > 0 ? "text-emerald-600" : "text-slate-400"}`}>
+            {totalRespondentsCount > 0 ? `${totalRespondentsCount.toLocaleString()} total submissions recorded` : "0 in current cycle"}
+          </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">SENTIMENT SCORE</div>
-          <div className="text-2xl font-bold text-slate-900">8.4 / 10</div>
-          <div className="text-blue-500 text-xs font-medium mt-1">Strong Positive (Tagalog/Eng)</div>
+          <div className="text-2xl font-bold text-slate-900">
+            {sentimentMetrics.scoreDisplay}
+          </div>
+          <div className={`text-xs font-medium mt-1 ${sentimentMetrics.hasData ? "text-blue-600" : "text-slate-400"}`}>
+            {sentimentMetrics.label}
+          </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">ACTIVE SURVEYS</div>
           <div className="text-2xl font-bold text-slate-900">{filteredSurveys.length}</div>
-          <div className="text-slate-500 text-xs font-medium mt-1">across 6 themes</div>
+          <div className="text-slate-500 text-xs font-medium mt-1">
+            {filteredSurveys.length === 0
+              ? "0 active in catalog"
+              : `across ${themeTabs.filter((t) => t.id !== "all" && t.count > 0).length || 1} theme${
+                  (themeTabs.filter((t) => t.id !== "all" && t.count > 0).length || 1) === 1 ? "" : "s"
+                }`}
+          </div>
         </div>
       </div>
 
@@ -251,65 +457,76 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setSelectedTheme("all")}
-                  className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 font-medium text-slate-600 transition-colors"
+                  onClick={() => setPerformanceTimeframe("month")}
+                  className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
+                    performanceTimeframe === "month"
+                      ? "bg-indigo-600 text-white shadow-xs font-semibold"
+                      : "border border-slate-200 hover:bg-slate-50 text-slate-600"
+                  }`}
                 >
                   Past Month
                 </button>
-                <button className="px-3 py-1 text-xs bg-indigo-600 text-white rounded-lg font-medium shadow-xs">
+                <button
+                  onClick={() => setPerformanceTimeframe("year")}
+                  className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
+                    performanceTimeframe === "year"
+                      ? "bg-indigo-600 text-white shadow-xs font-semibold"
+                      : "border border-slate-200 hover:bg-slate-50 text-slate-600"
+                  }`}
+                >
                   Past Year
                 </button>
               </div>
             </div>
 
-            {/* Sleek bar visualization */}
-            <div className="relative h-32 flex items-end justify-between gap-3 sm:gap-4 px-2 pt-4">
-              <div className="w-full bg-indigo-100 rounded-t h-12 relative group transition-all hover:bg-indigo-200">
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-xs">
-                  1.2k
-                </div>
+            {/* Dynamic response velocity bar visualization */}
+            {!monthlyVolumeData.hasData ? (
+              <div className="h-32 flex flex-col items-center justify-center text-center p-4 bg-slate-50/70 rounded-xl border border-dashed border-slate-200">
+                <BarChart3 className="w-6 h-6 text-slate-400 mb-1" />
+                <p className="text-xs font-semibold text-slate-700">No Annual Response Data Available</p>
+                <p className="text-[11px] text-slate-400 max-w-xs mt-0.5">
+                  Feedback volume and velocity will automatically plot here as survey submissions are received.
+                </p>
               </div>
-              <div className="w-full bg-indigo-200 rounded-t h-20 relative group transition-all hover:bg-indigo-300">
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-xs">
-                  2.4k
-                </div>
-              </div>
-              <div className="w-full bg-indigo-300 rounded-t h-28 relative group transition-all hover:bg-indigo-400">
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-xs">
-                  3.8k
-                </div>
-              </div>
-              <div className="w-full bg-indigo-400 rounded-t h-24 relative group transition-all hover:bg-indigo-500">
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-xs">
-                  3.1k
-                </div>
-              </div>
-              <div className="w-full bg-indigo-500 rounded-t h-32 relative group transition-all hover:bg-indigo-600">
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-xs">
-                  4.6k
-                </div>
-              </div>
-              <div className="w-full bg-indigo-600 rounded-t h-40 relative group transition-all hover:bg-indigo-700">
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-xs">
-                  5.8k
-                </div>
-              </div>
-              <div className="w-full bg-indigo-700 rounded-t h-36 relative group transition-all hover:bg-indigo-800">
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-1.5 py-0.5 rounded shadow-xs">
-                  5.2k
-                </div>
-              </div>
-            </div>
+            ) : (
+              <div>
+                <div className="relative h-32 flex items-end justify-between gap-3 sm:gap-4 px-2 pt-4">
+                  {monthlyVolumeData.monthLabels.map((lbl, idx) => {
+                    const count = monthlyVolumeData.monthCounts[idx];
+                    const heightPct = count > 0
+                      ? Math.max(16, Math.round((count / monthlyVolumeData.maxCount) * 100))
+                      : 8;
+                    const bgColors = [
+                      "bg-indigo-100 hover:bg-indigo-200",
+                      "bg-indigo-200 hover:bg-indigo-300",
+                      "bg-indigo-300 hover:bg-indigo-400",
+                      "bg-indigo-400 hover:bg-indigo-500",
+                      "bg-indigo-500 hover:bg-indigo-600",
+                      "bg-indigo-600 hover:bg-indigo-700",
+                      "bg-indigo-700 hover:bg-indigo-800",
+                    ][idx % 7];
 
-            <div className="flex justify-between text-[10px] text-slate-400 mt-2 px-2 uppercase font-bold tracking-widest">
-              <span>Jan</span>
-              <span>Feb</span>
-              <span>Mar</span>
-              <span>Apr</span>
-              <span>May</span>
-              <span>Jun</span>
-              <span>Jul</span>
-            </div>
+                    return (
+                      <div
+                        key={lbl}
+                        className={`w-full ${bgColors} rounded-t relative group transition-all`}
+                        style={{ height: `${heightPct}%` }}
+                      >
+                        <div className="absolute -top-7 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-2 py-0.5 rounded shadow-xs whitespace-nowrap z-10 font-mono">
+                          {count.toLocaleString()} resp
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-between text-[10px] text-slate-400 mt-2 px-2 uppercase font-bold tracking-widest">
+                  {monthlyVolumeData.monthLabels.map((lbl) => (
+                    <span key={lbl}>{lbl}</span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Categorized Themes & Trending Now Grid */}
@@ -425,24 +642,42 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
         <div className="lg:col-span-4 space-y-6">
           {/* Dark News Update Card */}
           <div className="bg-indigo-900 rounded-2xl p-6 text-white shadow-md">
-            <h3 className="text-sm font-bold mb-4 flex items-center gap-2 uppercase tracking-widest text-indigo-200">
-              <Newspaper className="w-4 h-4 text-indigo-300" />
-              <span>News Update</span>
-            </h3>
-            <div className="space-y-4">
-              <div className="border-l-2 border-indigo-400 pl-4 py-1">
-                <div className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider">SYSTEM ANNOUNCEMENT</div>
-                <div className="text-xs leading-relaxed text-indigo-50 mt-0.5">
-                  v2.4 Patch: Dynamic survey performance engine enabled (Trending & Top-Rated badges earned automatically).
-                </div>
-              </div>
-              <div className="border-l-2 border-indigo-400 pl-4 py-1">
-                <div className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider">CAMPUS PULSE</div>
-                <div className="text-xs leading-relaxed text-indigo-50 mt-0.5">
-                  Registration for Year-End Academic Feedback cycle opens Monday morning.
-                </div>
-              </div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold flex items-center gap-2 uppercase tracking-widest text-indigo-200">
+                <Newspaper className="w-4 h-4 text-indigo-300" />
+                <span>News Update</span>
+              </h3>
+              <span className="text-[10px] bg-indigo-800/80 text-indigo-300 px-2 py-0.5 rounded font-mono font-medium">
+                {newsList.length} {newsList.length === 1 ? "Update" : "Updates"}
+              </span>
             </div>
+
+            {newsList.length === 0 ? (
+              <div className="py-6 text-center border border-indigo-800/60 rounded-xl bg-indigo-950/40 p-4">
+                <p className="text-xs text-indigo-200 font-medium">No announcements published</p>
+                <p className="text-[11px] text-indigo-400 mt-1">
+                  Campus updates and announcements will appear here when posted by administration.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {newsList.slice(0, 2).map((item) => (
+                  <div key={item.id} className="border-l-2 border-indigo-400 pl-4 py-1">
+                    <div className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider">
+                      {item.category || item.tag || "CAMPUS NEWS"}
+                    </div>
+                    <div className="text-xs leading-relaxed text-indigo-50 mt-0.5 font-semibold">
+                      {item.title}
+                    </div>
+                    {item.summary && (
+                      <div className="text-[11px] leading-relaxed text-indigo-200/90 mt-1 line-clamp-2">
+                        {item.summary}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Top Performing Surveys Card (Calculated Dynamically from ratings) */}
@@ -501,12 +736,18 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
               <div className="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-widest">
                 Local Response Insights
               </div>
-              <div className="bg-slate-50 p-3 rounded-lg italic text-[11px] text-slate-600 leading-relaxed border border-slate-200/60">
-                "Maganda ang turo pero kulang sa kagamitan sa lab."
-                <span className="not-italic font-bold text-indigo-600 ml-1 block mt-1">
-                  — Tagalog NLP Sentiment Synced
-                </span>
-              </div>
+              {latestLocalInsight ? (
+                <div className="bg-slate-50 p-3 rounded-lg italic text-[11px] text-slate-600 leading-relaxed border border-slate-200/60">
+                  "{latestLocalInsight.quote}"
+                  <span className="not-italic font-bold text-indigo-600 ml-1 block mt-1">
+                    — {latestLocalInsight.sentiment} ({latestLocalInsight.lang})
+                  </span>
+                </div>
+              ) : (
+                <div className="bg-slate-50 p-3 rounded-lg text-[11px] text-slate-400 text-center py-4 border border-dashed border-slate-200">
+                  No local feedback comments recorded yet.
+                </div>
+              )}
             </div>
           </div>
         </div>

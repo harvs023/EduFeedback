@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Survey, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog } from "./types";
+import { Survey, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem } from "./types";
 import { LocalStorageManager } from "./lib/storage";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
 import { Navbar } from "./components/Navbar";
@@ -23,6 +23,7 @@ import {
   ShieldAlert,
   Sparkles,
   UserCheck,
+  SlidersHorizontal,
 } from "lucide-react";
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   // Modals State
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
@@ -54,6 +56,12 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  const handleMarkAllNotificationsRead = () => {
+    const updated = LocalStorageManager.markAllNotificationsRead(currentUser?.email);
+    setNotifications(updated);
+    showToast("All notifications marked as read.", "info");
+  };
+
   // Initialize Storage Data & Cloud Readiness on Mount
   useEffect(() => {
     LocalStorageManager.init();
@@ -64,6 +72,7 @@ export default function App() {
     setLogs(LocalStorageManager.getLogs());
     setUsers(LocalStorageManager.getUsers());
     setCurrentUser(LocalStorageManager.getCurrentUser());
+    setNotifications(LocalStorageManager.getNotifications(LocalStorageManager.getCurrentUser()?.email || ""));
 
     // If Firebase is configured with active keys, sync cloud data
     async function syncCloudIfConfigured() {
@@ -78,11 +87,21 @@ export default function App() {
             DatabaseService.getLogs(),
           ]);
           if (cloudSurveys.length > 0) setSurveys(cloudSurveys);
+          else if (LocalStorageManager.isWiped()) setSurveys([]);
+
           if (cloudResponses.length > 0) setResponses(cloudResponses);
+          else if (LocalStorageManager.isWiped()) setResponses([]);
+
           if (cloudUsers.length > 0) setUsers(cloudUsers);
+
           if (cloudNews.length > 0) setNewsList(cloudNews);
+          else if (LocalStorageManager.isWiped()) setNewsList([]);
+
           if (cloudMl.length > 0) setMlDataset(cloudMl);
+          else if (LocalStorageManager.isWiped()) setMlDataset([]);
+
           if (cloudLogs.length > 0) setLogs(cloudLogs);
+          else if (LocalStorageManager.isWiped()) setLogs([]);
         } catch (err) {
           console.warn("Cloud synchronization standby:", err);
         }
@@ -91,7 +110,7 @@ export default function App() {
     syncCloudIfConfigured();
   }, []);
 
-  const handleLogin = (user: UserProfile) => {
+  const handleLogin = async (user: UserProfile) => {
     setCurrentUser(user);
     LocalStorageManager.setCurrentUser(user);
     setUsers(LocalStorageManager.getUsers());
@@ -103,6 +122,15 @@ export default function App() {
     });
     setLogs(LocalStorageManager.getLogs());
     showToast(`Welcome back, ${user.name}!`, "success");
+
+    if (USE_FIREBASE) {
+      try {
+        const cloudUsers = await DatabaseService.getUsers();
+        if (cloudUsers.length > 0) setUsers(cloudUsers);
+      } catch (err) {
+        console.warn("User sync on login:", err);
+      }
+    }
   };
 
   const handleSignOut = async () => {
@@ -122,11 +150,17 @@ export default function App() {
   };
 
   // Submit Survey Response Handler
-  const handleSubmitSurveyResponse = async (answers: any[]) => {
+  const handleSubmitSurveyResponse = async (answers: any[], isAnonymous: boolean = true) => {
     if (!activeSurveyForTaking) return;
 
     // Detect if any answers have Tagalog / open feedback
-    let detectedSentiment: any = { sentiment: "Positive", score: 0.9, aspect: "General" };
+    let detectedSentiment: any = {
+      sentiment: "Positive",
+      score: 0.9,
+      aspects: ["General"],
+      language: "Taglish",
+      sarcasmDetected: false,
+    };
     const paragraphAns = answers.find((a) => a.answer && a.answer.length > 10 && !a.ratingValue);
 
     if (paragraphAns) {
@@ -134,14 +168,20 @@ export default function App() {
         const res = await fetch("/api/ml/analyze-tagalog", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: paragraphAns.answer }),
+          body: JSON.stringify({
+            text: paragraphAns.answer,
+            surveyContext: activeSurveyForTaking.title,
+          }),
         });
         const data = await res.json();
         if (data.success && data.result) {
           detectedSentiment = {
             sentiment: data.result.sentiment,
             score: data.result.score,
-            aspect: data.result.aspects?.[0] || "Pagtuturo",
+            aspects: data.result.aspects || ["General"],
+            language: data.result.language || "Taglish",
+            sarcasmDetected: Boolean(data.result.sarcasmDetected),
+            emotion: data.result.emotion,
           };
         }
       } catch (e) {
@@ -154,7 +194,9 @@ export default function App() {
       surveyId: activeSurveyForTaking.id,
       surveyTitle: activeSurveyForTaking.title,
       category: activeSurveyForTaking.cat,
-      userEmail: currentUser?.email || "anonymous@school.edu.ph",
+      userEmail: isAnonymous ? "anonymous@school.edu.ph" : currentUser?.email || "anonymous@school.edu.ph",
+      userName: isAnonymous ? "Anonymous Respondent" : currentUser?.name,
+      isAnonymous,
       date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       timestamp: Date.now(),
       academicYear: activeSurveyForTaking.academicYear || "2025-2026",
@@ -368,11 +410,56 @@ export default function App() {
     showToast("Survey permanently removed.", "info");
   };
 
-  const handleToggleUserStatus = (email: string, newStatus: "active" | "suspended") => {
+  const handleUpdateSurveyStatus = (
+    surveyId: string | number,
+    newStatus: "published" | "draft" | "scheduled" | "closed"
+  ) => {
+    const updated = surveys.map((s) => (s.id === surveyId ? { ...s, status: newStatus } : s));
+    LocalStorageManager.saveSurveys(updated);
+    setSurveys(updated);
+    LocalStorageManager.addLog({
+      user: currentUser?.name || "Admin",
+      pos: currentUser?.pos || "Admin",
+      action: "Survey Status Changed",
+      details: `Updated survey status to "${newStatus}" for ID: ${surveyId}`,
+    });
+    setLogs(LocalStorageManager.getLogs());
+    showToast(`Survey status updated to ${newStatus}.`, "success");
+  };
+
+  const handleDuplicateSurvey = (survey: Survey) => {
+    const newId = `srv_${Date.now()}`;
+    const duplicated: Survey = {
+      ...survey,
+      id: newId,
+      title: `${survey.title} (Copy)`,
+      status: "draft",
+      responses: 0,
+      created: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      createdAtTimestamp: Date.now(),
+      flagged: false,
+      flagReason: undefined,
+      owner: currentUser?.email || survey.owner,
+      ownerName: currentUser?.name || survey.ownerName,
+    };
+    const updated = [duplicated, ...surveys];
+    LocalStorageManager.saveSurveys(updated);
+    setSurveys(updated);
+    LocalStorageManager.addLog({
+      user: currentUser?.name || "Admin",
+      pos: currentUser?.pos || "Admin",
+      action: "Survey Duplicated",
+      details: `Cloned survey "${survey.title}" into draft instrument`,
+    });
+    setLogs(LocalStorageManager.getLogs());
+    showToast("Survey duplicated as draft!", "success");
+  };
+
+  const handleToggleUserStatus = (email: string, newStatus: "active" | "suspended" | "pending_approval") => {
     const updated = users.map((u) => (u.email === email ? { ...u, status: newStatus } : u));
     LocalStorageManager.saveUsers(updated);
     setUsers(updated);
-    showToast(`User status updated to ${newStatus}.`, "info");
+    showToast(`User status updated to ${newStatus.replace('_', ' ')}.`, "info");
   };
 
   const handlePromoteUser = (email: string, newPos: UserProfile["pos"]) => {
@@ -454,7 +541,7 @@ export default function App() {
     }
   };
 
-  const handleClearDatabase = () => {
+  const handleClearDatabase = async () => {
     try {
       const emptyData = LocalStorageManager.clearAllData(currentUser?.email || "admin");
       setSurveys(emptyData.surveys);
@@ -464,7 +551,18 @@ export default function App() {
       setLogs(emptyData.logs);
       setNewsList(emptyData.news);
       setCurrentUser(LocalStorageManager.getCurrentUser());
-      showToast("Database wiped to a 100% clean production slate (0 surveys, 0 responses).", "success");
+
+      if (USE_FIREBASE) {
+        showToast("Wiping Cloud Firestore collections...", "info");
+        const cloudResult = await DatabaseService.wipeFirebaseCloud();
+        if (cloudResult.success) {
+          showToast(cloudResult.message, "success");
+        } else {
+          showToast(`Local storage wiped, but Cloud Firestore error: ${cloudResult.message}`, "info");
+        }
+      } else {
+        showToast("Database wiped to a 100% clean production slate (0 surveys, 0 responses).", "success");
+      }
     } catch (err: any) {
       showToast(err.message || "Failed to clear database.", "info");
     }
@@ -482,8 +580,8 @@ export default function App() {
   };
 
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
-  // All users except admin can create surveys (Students, Student Officers, Faculty)
-  const canCreateSurvey = !isSuperadmin;
+  // All authenticated users can author surveys (Students, Officers, Faculty, Admins)
+  const canCreateSurvey = Boolean(currentUser);
   const flaggedCount = surveys.filter((s) => s.flagged).length;
 
   const handleNavigate = (view: string) => {
@@ -495,11 +593,27 @@ export default function App() {
 
   const sidebarNavItems = [
     { id: "surveys", label: "Dashboard", icon: ClipboardList },
-    ...(currentUser ? [{ id: "my-surveys", label: "My Surveys", icon: UserCheck }] : []),
+    ...(currentUser
+      ? [
+          {
+            id: "my-surveys",
+            label: isSuperadmin ? "Survey Management" : "My Surveys",
+            icon: isSuperadmin ? SlidersHorizontal : UserCheck,
+          },
+        ]
+      : []),
     { id: "analytics", label: "Macro Analytics", icon: BarChart3 },
     ...(isSuperadmin ? [{ id: "tagalog-ml", label: "ML Models", icon: BrainCircuit }] : []),
     { id: "news", label: "News Feed", icon: Newspaper },
-    ...(canCreateSurvey ? [{ id: "create", label: "Create Survey", icon: PlusCircle }] : []),
+    ...(canCreateSurvey
+      ? [
+          {
+            id: "create",
+            label: isSuperadmin ? "New Instrument" : "Create Survey",
+            icon: PlusCircle,
+          },
+        ]
+      : []),
     ...(isSuperadmin ? [{ id: "admin", label: "Admin Oversight", icon: ShieldAlert, badge: flaggedCount }] : []),
   ];
 
@@ -626,10 +740,11 @@ export default function App() {
           onSearchChange={setSearchQuery}
           selectedCategory={selectedCategory}
           onCategoryChange={setSelectedCategory}
-          notifications={LocalStorageManager.getNotifications(currentUser?.email || "")}
-          unreadNotifsCount={1}
+          notifications={notifications}
+          unreadNotifsCount={notifications.filter((n) => !n.read).length}
           unreadNewsCount={newsList.length}
           flaggedSurveysCount={flaggedCount}
+          onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
         />
 
         {/* View Router */}
@@ -639,6 +754,7 @@ export default function App() {
               surveys={surveys}
               currentUser={currentUser}
               userResponses={responses}
+              newsList={newsList}
               searchQuery={searchQuery}
               selectedCategory={selectedCategory}
               onTakeSurvey={(survey) => {
@@ -699,6 +815,10 @@ export default function App() {
                 setCurrentView("analytics");
               }}
               onTakeSurvey={(survey) => setActiveSurveyForTaking(survey)}
+              onFlagSurvey={handleFlagSurvey}
+              onClearFlag={handleClearFlag}
+              onUpdateSurveyStatus={handleUpdateSurveyStatus}
+              onDuplicateSurvey={handleDuplicateSurvey}
             />
           )}
 

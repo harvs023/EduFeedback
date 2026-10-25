@@ -1,6 +1,6 @@
 export type UserRole = "student" | "officer" | "faculty" | "superadmin" | "user";
 export type Position = "Student" | "Student Officer" | "Faculty" | "Superadmin";
-export type AccountStatus = "active" | "suspended" | "invited";
+export type AccountStatus = "active" | "suspended" | "invited" | "pending_approval";
 
 export interface UserProfile {
   id?: string;
@@ -86,6 +86,9 @@ export interface Survey {
   ratingAverage?: number;
   academicYear?: string; // e.g. "2024-2025", "2025-2026"
   term?: "1st Sem" | "2nd Sem" | "Midyear";
+  isRequired?: boolean; // Admin-designated required/priority survey
+  requiredAudience?: "all" | "students" | "faculty" | "officers";
+  allowAnonymous?: boolean; // Whether respondents can submit anonymously (if false, identity is recorded for clearance)
 }
 
 export interface Answer {
@@ -101,6 +104,8 @@ export interface SurveyResponse {
   surveyTitle: string;
   category: string;
   userEmail: string;
+  userName?: string;
+  isAnonymous?: boolean;
   answers: Answer[];
   date: string;
   time?: string;
@@ -116,6 +121,9 @@ export interface SurveyResponse {
     score: number;
     language: string;
     aspects: string[];
+    sarcasmDetected?: boolean;
+    confidence?: number;
+    emotion?: string;
   };
 }
 
@@ -128,7 +136,18 @@ export interface NotificationItem {
   time: string;
   displayTime?: string;
   read: boolean;
-  type: "welcome" | "flag" | "flag_cleared" | "survey_deleted" | "response" | "general" | "news" | "profile_update";
+  type:
+    | "welcome"
+    | "flag"
+    | "flag_cleared"
+    | "survey_deleted"
+    | "response"
+    | "general"
+    | "news"
+    | "profile_update"
+    | "required_survey"
+    | "account_approved"
+    | "account_pending";
   data?: Record<string, any>;
 }
 

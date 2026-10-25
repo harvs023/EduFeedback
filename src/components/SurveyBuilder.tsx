@@ -55,6 +55,16 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     initialSurvey?.targetAudience?.filters?.roles || ["students", "faculty", "officers"]
   );
 
+  // Mandatory / Required Survey (Admin Only Feature)
+  const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
+  const [isRequired, setIsRequired] = useState<boolean>(initialSurvey?.isRequired || false);
+  const [requiredAudience, setRequiredAudience] = useState<"all" | "students" | "faculty" | "officers">(
+    initialSurvey?.requiredAudience || "students"
+  );
+  const [allowAnonymous, setAllowAnonymous] = useState<boolean>(
+    initialSurvey?.allowAnonymous !== undefined ? initialSurvey.allowAnonymous : true
+  );
+
   // Questions builder list
   const [questions, setQuestions] = useState<Question[]>(
     initialSurvey?.questions && initialSurvey.questions.length > 0
@@ -183,6 +193,24 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     });
   };
 
+  const changeQuestionType = (qIndex: number, newType: Question["type"]) => {
+    setQuestions((prev) => {
+      const copy = [...prev];
+      const current = copy[qIndex];
+      const updated: Question = { ...current, type: newType };
+      if ((newType === "multiple" || newType === "checkbox") && (!updated.options || updated.options.length === 0)) {
+        updated.options = ["Option 1", "Option 2", "Option 3"];
+      }
+      if (newType === "rating") {
+        updated.min = 1;
+        updated.max = 5;
+        updated.labels = ["1 (Poor)", "2 (Fair)", "3 (Average)", "4 (Good)", "5 (Excellent)"];
+      }
+      copy[qIndex] = updated;
+      return copy;
+    });
+  };
+
   const handleSubmit = (actionStatus: "draft" | "published" | "scheduled") => {
     if (!title.trim()) {
       alert("Please enter a survey title.");
@@ -214,6 +242,9 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
         type: targetType,
         filters: targetType === "custom" ? { roles: selectedRoles } : undefined,
       },
+      isRequired: isSuperadmin ? isRequired : (initialSurvey?.isRequired || false),
+      requiredAudience: isSuperadmin ? requiredAudience : (initialSurvey?.requiredAudience || "students"),
+      allowAnonymous,
       tags: [cat, themeSection || "General", academicYear],
     };
 
@@ -373,6 +404,79 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
           </div>
         </div>
 
+        {/* Anonymity & Semester Clearance Policy */}
+        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              Respondent Identity & Clearance Signing Mode
+            </span>
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allowAnonymous}
+                onChange={(e) => setAllowAnonymous(e.target.checked)}
+                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+              />
+              <span className="text-xs font-semibold text-slate-700">
+                {allowAnonymous ? "Allow Anonymous Responses" : "Require Verified Identity (For Clearance Signing)"}
+              </span>
+            </label>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            {allowAnonymous
+              ? "Respondents may choose whether to submit anonymously or include their student/faculty identity."
+              : "Institutional identity (Name, Student ID, Email) will be recorded and verified for end-of-semester clearance signing."}
+          </p>
+        </div>
+
+        {/* Admin-Only: Priority & Mandatory Institutional Survey Configuration */}
+        {isSuperadmin && (
+          <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-amber-600 text-white tracking-wider">
+                  Admin Oversight
+                </span>
+                <span className="text-xs font-bold text-amber-950">
+                  Priority / Mandatory Institutional Survey
+                </span>
+              </div>
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isRequired}
+                  onChange={(e) => setIsRequired(e.target.checked)}
+                  className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-amber-300 cursor-pointer"
+                />
+                <span className="text-xs font-bold text-amber-900">
+                  Designate as Mandatory Priority Survey
+                </span>
+              </label>
+            </div>
+
+            {isRequired && (
+              <div className="pt-2 border-t border-amber-200/80 space-y-2">
+                <label className="block text-xs font-bold text-amber-900">
+                  Specify Who is Required to Complete This:
+                </label>
+                <select
+                  value={requiredAudience}
+                  onChange={(e) => setRequiredAudience(e.target.value as any)}
+                  className="w-full sm:w-80 px-3 py-1.5 bg-white border border-amber-300 rounded-xl text-xs font-bold text-amber-950 focus:outline-hidden"
+                >
+                  <option value="all">Mandatory for All Campus Stakeholders</option>
+                  <option value="students">Mandatory for Students Only (Semester Clearance Requirement)</option>
+                  <option value="faculty">Mandatory for Faculty Members Only</option>
+                  <option value="officers">Mandatory for Student Officers Only</option>
+                </select>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  ⚡ When marked as Mandatory, this survey will be prominently pinned at the top of the homepage for eligible users until they submit their response.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {scheduleType === "scheduled" && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-blue-50/50 rounded-2xl border border-blue-200/60">
             <div>
@@ -399,63 +503,68 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
         {/* SECTION 3: Questions Builder */}
         <div className="pt-4 border-t border-slate-100 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="font-serif text-base font-bold text-slate-900">
-              3. Survey Questions ({questions.length})
-            </h2>
-
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={addRatingQuestion}
-                className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Star className="w-3.5 h-3.5" />
-                <span>+ Rating</span>
-              </button>
-              <button
-                type="button"
-                onClick={addMultipleChoiceQuestion}
-                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <ListFilter className="w-3.5 h-3.5" />
-                <span>+ Multi-Choice</span>
-              </button>
-              <button
-                type="button"
-                onClick={addCheckboxQuestion}
-                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <CheckSquare className="w-3.5 h-3.5" />
-                <span>+ Checkbox</span>
-              </button>
-              <button
-                type="button"
-                onClick={addParagraphQuestion}
-                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <AlignLeft className="w-3.5 h-3.5" />
-                <span>+ Tagalog/Text</span>
-              </button>
+            <div>
+              <h2 className="font-serif text-base font-bold text-slate-900">
+                3. Survey Questions ({questions.length})
+              </h2>
+              <p className="text-xs text-slate-500">
+                Define question prompts and customize scales below. Add new questions using the toolbar at the bottom.
+              </p>
             </div>
+            {questions.length > 0 && (
+              <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                {questions.length} {questions.length === 1 ? "Question" : "Questions"}
+              </span>
+            )}
           </div>
+
+          {/* Empty state when no questions yet */}
+          {questions.length === 0 && (
+            <div className="p-8 bg-slate-50 border border-dashed border-slate-300 rounded-2xl text-center space-y-2">
+              <p className="text-sm font-semibold text-slate-700">No questions added yet</p>
+              <p className="text-xs text-slate-500">Choose a question type from the toolbar below to start building your survey.</p>
+            </div>
+          )}
 
           {/* Questions Stack */}
           <div className="space-y-4">
             {questions.map((q, qIdx) => (
               <div key={qIdx} className="p-5 bg-slate-50/80 rounded-2xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-md bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
+                    <span className="w-6 h-6 rounded-md bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
                       {qIdx + 1}
                     </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-white border border-slate-200 text-slate-600">
-                      {q.type}
-                    </span>
+                    {/* Inline Quick-Switch Pill Buttons for Question Types */}
+                    <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                      {[
+                        { type: "rating", label: "Rating", icon: "⭐" },
+                        { type: "multiple", label: "Multiple", icon: "🔘" },
+                        { type: "checkbox", label: "Checkbox", icon: "☑️" },
+                        { type: "paragraph", label: "NLP Feedback", icon: "📝" },
+                      ].map((t) => (
+                        <button
+                          key={t.type}
+                          type="button"
+                          onClick={() => changeQuestionType(qIdx, t.type as any)}
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                            q.type === t.type
+                              ? "bg-blue-600 text-white shadow-xs"
+                              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                          }`}
+                          title={`Switch to ${t.label}`}
+                        >
+                          <span>{t.icon}</span>
+                          <span className="hidden sm:inline">{t.label}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => removeQuestion(qIdx)}
-                    className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
+                    title="Delete question"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -520,6 +629,62 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
                 )}
               </div>
             ))}
+          </div>
+
+          {/* Add Question at the Bottom Toolbar */}
+          <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-50 via-blue-50/20 to-indigo-50/20 rounded-2xl border-2 border-dashed border-slate-300 hover:border-blue-400 transition-all space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                  +
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900">Add Next Question</h3>
+                  <p className="text-[11px] text-slate-500">Append a new question without scrolling back to the top</p>
+                </div>
+              </div>
+              <span className="text-[11px] font-semibold text-slate-400">
+                Item #{questions.length + 1}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={addRatingQuestion}
+                className="px-3 py-2.5 bg-white hover:bg-blue-50 hover:border-blue-300 text-blue-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+              >
+                <Star className="w-4 h-4 text-amber-500 fill-amber-400 shrink-0" />
+                <span>+ Rating Scale</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={addMultipleChoiceQuestion}
+                className="px-3 py-2.5 bg-white hover:bg-indigo-50 hover:border-indigo-300 text-indigo-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+              >
+                <ListFilter className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>+ Multi-Choice</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={addCheckboxQuestion}
+                className="px-3 py-2.5 bg-white hover:bg-emerald-50 hover:border-emerald-300 text-emerald-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+              >
+                <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>+ Checkbox</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={addParagraphQuestion}
+                className="px-3 py-2.5 bg-white hover:bg-slate-100 hover:border-slate-300 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+              >
+                <AlignLeft className="w-4 h-4 text-slate-600 shrink-0" />
+                <span>+ Tagalog / Text</span>
+              </button>
+            </div>
           </div>
         </div>
 

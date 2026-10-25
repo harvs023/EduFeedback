@@ -39,7 +39,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { isFirebaseConfigured, seedFirestoreWithInitialDemoData } from "../lib/firebase";
+import { isFirebaseConfigured, seedFirestoreWithInitialDemoData, firebaseConfig } from "../lib/firebase";
 import { USE_FIREBASE } from "../lib/databaseService";
 
 interface DatabaseBackupViewProps {
@@ -87,6 +87,12 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   const [resetConfirmText, setResetConfirmText] = useState("");
   const [showClearModal, setShowClearModal] = useState(false);
   const [clearConfirmText, setClearConfirmText] = useState("");
+  const [isWipingDatabase, setIsWipingDatabase] = useState(false);
+
+  // Firestore Sync Diagnostics Modal
+  const [showSyncErrorModal, setShowSyncErrorModal] = useState(false);
+  const [syncErrorMessage, setSyncErrorMessage] = useState("");
+  const [copiedRule, setCopiedRule] = useState(false);
 
   // Storage footprint calculation
   const storageMetrics = useMemo(() => {
@@ -246,17 +252,23 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   };
 
   // Complete Database Wipe / Clean Slate
-  const handleClearData = () => {
+  const handleClearData = async () => {
     if (clearConfirmText.trim().toUpperCase() !== "CLEAR") {
       showToast("Please type CLEAR exactly to confirm database wipe.", "info");
       return;
     }
-    if (onClearDatabase) {
-      onClearDatabase();
+    setIsWipingDatabase(true);
+    try {
+      if (onClearDatabase) {
+        await onClearDatabase();
+      }
+      setShowClearModal(false);
+      setClearConfirmText("");
+    } catch (err: any) {
+      showToast(err?.message || "Failed to wipe database.", "info");
+    } finally {
+      setIsWipingDatabase(false);
     }
-    setShowClearModal(false);
-    setClearConfirmText("");
-    showToast("Database completely cleared! 0 surveys and 0 responses (Clean production slate).", "success");
   };
 
   // Firebase Seed & Readiness State
@@ -265,7 +277,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
 
   const handleSeedFirestore = async () => {
     if (!isFirebaseConfigured()) {
-      showToast("Firebase credentials not configured yet. Please update src/lib/firebase.ts first.", "info");
+      showToast("Firebase credentials not configured yet. Please update src/lib/firebase.ts or .env first.", "info");
       return;
     }
     setIsSeedingFirestore(true);
@@ -274,9 +286,13 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
       if (res.success) {
         showToast(res.message, "success");
       } else {
-        showToast(res.message, "info");
+        setSyncErrorMessage(res.message);
+        setShowSyncErrorModal(true);
+        showToast("Firestore write blocked. Click details to resolve.", "info");
       }
     } catch (e: any) {
+      setSyncErrorMessage(e?.message || "Failed to seed Firestore.");
+      setShowSyncErrorModal(true);
       showToast(e?.message || "Failed to seed Firestore.", "info");
     } finally {
       setIsSeedingFirestore(false);
@@ -1010,7 +1026,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                 Wipe to Empty Production Database
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                This will delete <strong className="text-rose-700">ALL</strong> surveys, evaluations, student responses, and campus news. The database will be completely empty (0 surveys, 0 responses), leaving only your Superadmin credentials active.
+                This will delete <strong className="text-rose-700">ALL</strong> surveys, evaluations, student responses, and campus news from <strong className="text-slate-900">both local storage and Cloud Firestore</strong>. All collections will be wiped to 0 records, leaving only your Superadmin credentials active.
               </p>
             </div>
 
@@ -1020,6 +1036,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
               </label>
               <input
                 type="text"
+                disabled={isWipingDatabase}
                 value={clearConfirmText}
                 onChange={(e) => setClearConfirmText(e.target.value)}
                 placeholder="Type CLEAR"
@@ -1029,21 +1046,137 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
 
             <div className="flex justify-end gap-2 pt-2">
               <button
+                disabled={isWipingDatabase}
                 onClick={() => setShowClearModal(false)}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
-                disabled={clearConfirmText.trim().toUpperCase() !== "CLEAR"}
+                disabled={isWipingDatabase || clearConfirmText.trim().toUpperCase() !== "CLEAR"}
                 onClick={handleClearData}
-                className={`px-5 py-2.5 font-bold text-xs rounded-xl shadow-xs transition-colors ${
-                  clearConfirmText.trim().toUpperCase() === "CLEAR"
+                className={`px-5 py-2.5 font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-2 ${
+                  clearConfirmText.trim().toUpperCase() === "CLEAR" && !isWipingDatabase
                     ? "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
                     : "bg-slate-200 text-slate-400 cursor-not-allowed"
                 }`}
               >
-                Wipe All Data to 0
+                {isWipingDatabase && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isWipingDatabase ? "Wiping Local & Firestore..." : "Wipe All Data to 0"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MODAL: FIRESTORE PERMISSIONS DIAGNOSTICS & RESOLUTION */}
+      {/* ============================================================ */}
+      {showSyncErrorModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setShowSyncErrorModal(false)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-amber-200 space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shrink-0">
+                  <Flame className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-slate-900">
+                    Firestore Permission Resolution
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Connected Project: <code className="font-bold text-slate-800">{firebaseConfig.projectId || "Not detected"}</code>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSyncErrorModal(false)}
+                className="p-1 text-slate-400 hover:bg-slate-100 rounded-full cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 space-y-1">
+              <div className="font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Error details:</span>
+              </div>
+              <p className="text-[11px] font-mono leading-relaxed">{syncErrorMessage}</p>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600">
+              <p className="leading-relaxed">
+                <strong>Why this is happening:</strong> Even after editing rules in Firebase, the changes will be rejected if:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <li>
+                  <strong>Rule not Published:</strong> In the Firebase Console, you must click the blue <strong>"Publish"</strong> button in the top right to apply rule changes.
+                </li>
+                <li>
+                  <strong>Wrong Database Tab:</strong> Ensure you are in <strong>"Firestore Database" &gt; Rules</strong>, not "Realtime Database".
+                </li>
+                <li>
+                  <strong>Auth Requirement in Rules:</strong> If rules check <code>request.auth</code>, but Email/Password is not enabled under <em>Authentication &gt; Sign-in method</em>, unauthenticated writes fail.
+                </li>
+              </ul>
+
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 text-xs">Production Working Ruleset:</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if false;\n    }\n    function isSignedIn() {\n      return request.auth != null;\n    }\n    function isAdmin() {\n      return isSignedIn() && (\n        request.auth.token.email == 'admin@edufeedback.edu' ||\n        request.auth.token.email == 'azalrob023@gmail.com'\n      );\n    }\n    match /users/{userId} {\n      allow read, write: if isSignedIn();\n    }\n    match /surveys/{surveyId} {\n      allow read: if true;\n      allow write: if isSignedIn();\n    }\n    match /responses/{responseId} {\n      allow read: if true;\n      allow create: if true;\n      allow update, delete: if isAdmin();\n    }\n    match /news/{newsId} {\n      allow read: if true;\n      allow write: if isSignedIn();\n    }\n    match /ml_dataset/{sampleId} {\n      allow read: if true;\n      allow write: if isSignedIn();\n    }\n    match /logs/{logId} {\n      allow read: if true;\n      allow create: if true;\n      allow update, delete: if isAdmin();\n    }\n  }\n}`);
+                      setCopiedRule(true);
+                      setTimeout(() => setCopiedRule(false), 2000);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>{copiedRule ? "Copied!" : "Copy Rule"}</span>
+                  </button>
+                </div>
+                <pre className="p-3 bg-slate-900 text-amber-300 rounded-xl font-mono text-[10px] leading-relaxed overflow-x-auto max-h-48">
+{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'admin@edufeedback.edu' ||
+        request.auth.token.email == 'azalrob023@gmail.com'
+      );
+    }
+    match /users/{userId} { allow read, write: if isSignedIn(); }
+    match /surveys/{surveyId} { allow read: if true; allow write: if isSignedIn(); }
+    match /responses/{responseId} { allow read: if true; allow create: if true; allow update, delete: if isAdmin(); }
+    match /news/{newsId} { allow read: if true; allow write: if isSignedIn(); }
+    match /ml_dataset/{sampleId} { allow read: if true; allow write: if isSignedIn(); }
+    match /logs/{logId} { allow read: if true; allow create: if true; allow update, delete: if isAdmin(); }
+  }
+}`}
+                </pre>
+                <p className="text-[10px] text-slate-500">
+                  Paste this into <strong>Firebase Console &gt; Firestore Database &gt; Rules</strong>, click <strong className="text-slate-800">Publish</strong>, and press <strong>Sync Firestore Cloud</strong> again.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                onClick={() => setShowSyncErrorModal(false)}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl cursor-pointer shadow-xs"
+              >
+                Got It
               </button>
             </div>
           </div>

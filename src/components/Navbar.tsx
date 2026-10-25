@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { UserProfile, NotificationItem } from "../types";
+import { LocalStorageManager } from "../lib/storage";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -19,6 +20,9 @@ import {
   ShieldCheck,
   CheckCircle2,
   UserCheck,
+  MessageSquare,
+  Flag,
+  SlidersHorizontal,
 } from "lucide-react";
 
 interface NavbarProps {
@@ -38,6 +42,7 @@ interface NavbarProps {
   unreadNotifsCount?: number;
   unreadNewsCount?: number;
   flaggedSurveysCount?: number;
+  onMarkAllNotificationsRead?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -55,22 +60,41 @@ export const Navbar: React.FC<NavbarProps> = ({
   unreadNotifsCount = 0,
   unreadNewsCount = 0,
   flaggedSurveysCount = 0,
+  onMarkAllNotificationsRead,
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
-  // All users except admin can create surveys (Students, Student Officers, Faculty)
-  const canCreateSurvey = Boolean(currentUser && !isSuperadmin);
+  // All authenticated users can author surveys (Students, Officers, Faculty, Admins)
+  const canCreateSurvey = Boolean(currentUser);
 
   const navItems = [
     { id: "surveys", label: "Surveys", icon: ClipboardList, badge: undefined },
-    ...(currentUser ? [{ id: "my-surveys", label: "My Surveys", icon: UserCheck, badge: undefined }] : []),
+    ...(currentUser
+      ? [
+          {
+            id: "my-surveys",
+            label: isSuperadmin ? "Survey Management" : "My Surveys",
+            icon: isSuperadmin ? SlidersHorizontal : UserCheck,
+            badge: undefined,
+          },
+        ]
+      : []),
     { id: "analytics", label: "Analytics", icon: BarChart3, badge: undefined },
     ...(isSuperadmin ? [{ id: "tagalog-ml", label: "ML Models", icon: BrainCircuit, badge: "94.2%" }] : []),
     { id: "news", label: "News & Actions", icon: Newspaper, badgeCount: unreadNewsCount },
-    ...(canCreateSurvey ? [{ id: "create", label: "Create Survey", icon: PlusCircle, badge: undefined }] : []),
+    ...(canCreateSurvey
+      ? [
+          {
+            id: "create",
+            label: isSuperadmin ? "New Instrument" : "Create Survey",
+            icon: PlusCircle,
+            badge: undefined,
+          },
+        ]
+      : []),
     ...(isSuperadmin
       ? [
           {
@@ -163,39 +187,87 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <h4 className="text-sm font-bold text-slate-900">Notifications</h4>
                     <p className="text-xs text-slate-500">System alerts & survey updates</p>
                   </div>
-                  <span className="px-2 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-full">
-                    Active
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {unreadNotifsCount && unreadNotifsCount > 0 ? (
+                      <button
+                        onClick={() => {
+                          if (onMarkAllNotificationsRead) {
+                            onMarkAllNotificationsRead();
+                          } else {
+                            LocalStorageManager.markAllNotificationsRead(currentUser?.email);
+                          }
+                        }}
+                        className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    ) : null}
+                    <span className="px-2 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-full">
+                      {notifications.length} Total
+                    </span>
+                  </div>
                 </div>
                 <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
                   {notifications.length === 0 ? (
                     <div className="p-6 text-center text-slate-500 text-xs">No new notifications</div>
                   ) : (
-                    notifications.slice(0, 4).map((n) => (
-                      <div
-                        key={n.id}
-                        onClick={() => {
-                          setShowNotifMenu(false);
-                          if (n.type === "news") onNavigate("news");
-                          else if (n.type === "response") onNavigate("analytics");
-                          else onNavigate("surveys");
-                        }}
-                        className="p-3.5 hover:bg-slate-50 cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-start gap-2.5">
-                          <div className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
-                            <Bell className="w-3.5 h-3.5" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-slate-900 truncate">{n.title}</p>
-                            <p className="text-xs text-slate-600 line-clamp-2 mt-0.5">{n.message}</p>
-                            <span className="text-[10px] text-slate-400 mt-1 block">
-                              {n.displayTime || n.time}
-                            </span>
+                    notifications.map((n) => {
+                      const isUnread = !n.read;
+                      return (
+                        <div
+                          key={n.id}
+                          onClick={() => {
+                            setShowNotifMenu(false);
+                            if (n.type === "news") onNavigate("news");
+                            else if (n.type === "response") onNavigate("analytics");
+                            else onNavigate("surveys");
+                          }}
+                          className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors ${
+                            isUnread ? "bg-indigo-50/30" : ""
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <div
+                              className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                                n.type === "response"
+                                  ? "bg-blue-50 text-blue-600"
+                                  : n.type === "news"
+                                  ? "bg-purple-50 text-purple-600"
+                                  : n.type === "flag" || n.type === "flag_cleared"
+                                  ? "bg-amber-50 text-amber-600"
+                                  : n.type === "approval"
+                                  ? "bg-emerald-50 text-emerald-600"
+                                  : "bg-indigo-50 text-indigo-600"
+                              }`}
+                            >
+                              {n.type === "response" ? (
+                                <MessageSquare className="w-3.5 h-3.5" />
+                              ) : n.type === "news" ? (
+                                <Sparkles className="w-3.5 h-3.5" />
+                              ) : n.type === "flag" || n.type === "flag_cleared" ? (
+                                <Flag className="w-3.5 h-3.5" />
+                              ) : n.type === "approval" ? (
+                                <UserCheck className="w-3.5 h-3.5" />
+                              ) : (
+                                <Bell className="w-3.5 h-3.5" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <p className="text-xs font-bold text-slate-900 truncate">{n.title}</p>
+                                {isUnread && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 shrink-0" />
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-600 line-clamp-2 mt-0.5">{n.message}</p>
+                              <span className="text-[10px] text-slate-400 mt-1 block">
+                                {n.displayTime || n.time}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
                 <div className="p-2 border-t border-slate-100 text-center">
@@ -253,8 +325,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                       }}
                       className="w-full px-4 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                     >
-                      <ClipboardList className="w-4 h-4 text-slate-400" />
-                      <span>My Created Surveys</span>
+                      {isSuperadmin ? (
+                        <SlidersHorizontal className="w-4 h-4 text-slate-400" />
+                      ) : (
+                        <ClipboardList className="w-4 h-4 text-slate-400" />
+                      )}
+                      <span>{isSuperadmin ? "Campus Survey Management" : "My Created Surveys"}</span>
                     </button>
                     <button
                       onClick={() => {

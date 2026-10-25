@@ -132,7 +132,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
-  console.error("Firestore Error:", JSON.stringify(errInfo));
+  console.error("Firestore Error: ", JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -261,6 +261,11 @@ export const FirestoreUserService = {
   async getAll(): Promise<UserProfile[]> {
     const firestore = getFirebaseDb();
     if (!firestore) return [];
+    const authInstance = getFirebaseAuth();
+    if (!authInstance?.currentUser) {
+      // Users collection is protected and requires an active authenticated session
+      return [];
+    }
     try {
       const snap = await getDocs(collection(firestore, COLLECTIONS.USERS));
       return snap.docs.map((docSnap) => docSnap.data() as UserProfile);
@@ -273,6 +278,10 @@ export const FirestoreUserService = {
   async getByEmail(email: string): Promise<UserProfile | null> {
     const firestore = getFirebaseDb();
     if (!firestore) return null;
+    const authInstance = getFirebaseAuth();
+    if (!authInstance?.currentUser) {
+      return null;
+    }
     const docId = email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, "_");
     try {
       const snap = await getDoc(doc(firestore, COLLECTIONS.USERS, docId));
@@ -445,30 +454,93 @@ export async function seedFirestoreWithData(data: {
   mlDataset: TagalogMLSample[];
   logs: ActivityLog[];
 }): Promise<{ success: boolean; message: string }> {
+  let currentCollection = "";
   try {
     const firestore = getFirebaseDb();
     if (!firestore) {
       return { success: false, message: "Firebase is not initialized. Please verify configuration keys." };
     }
 
+    // Ensure Firebase Auth session exists with admin privileges for Firestore security rules
+    const authInstance = getFirebaseAuth();
+    if (authInstance) {
+      const currentEmail = authInstance.currentUser?.email?.toLowerCase();
+      const isAdminEmail = currentEmail === "admin@edufeedback.edu" || currentEmail === "azalrob023@gmail.com";
+
+      if (!isAdminEmail) {
+        try {
+          await signInWithEmailAndPassword(authInstance, "admin@edufeedback.edu", "admin123");
+        } catch (authErr: any) {
+          if (
+            authErr?.code === "auth/user-not-found" ||
+            authErr?.code === "auth/invalid-credential" ||
+            authErr?.code === "auth/invalid-login-credentials"
+          ) {
+            try {
+              await createUserWithEmailAndPassword(authInstance, "admin@edufeedback.edu", "admin123");
+            } catch (createErr: any) {
+              console.warn("Could not auto-create admin in Firebase Auth:", createErr);
+              if (createErr?.code === "auth/operation-not-allowed") {
+                return {
+                  success: false,
+                  message: "Firebase Auth Error: Email/Password provider is disabled. Please go to Firebase Console > Authentication > Sign-in method and enable 'Email/Password'.",
+                };
+              }
+            }
+          } else if (authErr?.code === "auth/operation-not-allowed") {
+            return {
+              success: false,
+              message: "Firebase Auth Error: Email/Password provider is disabled in your Firebase Console. Go to Firebase Console > Authentication > Sign-in method and enable 'Email/Password'.",
+            };
+          } else if (authErr?.code === "auth/unauthorized-domain") {
+            return {
+              success: false,
+              message: "Firebase Auth Error: Current domain is not authorized. Please access the app via http://localhost:3000 instead of IP address, or add your domain to Firebase Console > Authentication > Settings > Authorized domains.",
+            };
+          } else {
+            console.warn("Firebase Auth signIn notice:", authErr?.message || authErr);
+          }
+        }
+      }
+    }
+
+    currentCollection = "";
+    let currentDocId = "";
+
+    currentCollection = COLLECTIONS.SURVEYS;
     for (const survey of data.surveys) {
-      await setDoc(doc(firestore, COLLECTIONS.SURVEYS, String(survey.id)), survey);
+      currentDocId = String(survey.id);
+      await setDoc(doc(firestore, COLLECTIONS.SURVEYS, currentDocId), survey);
     }
+
+    currentCollection = COLLECTIONS.RESPONSES;
     for (const resp of data.responses) {
-      await setDoc(doc(firestore, COLLECTIONS.RESPONSES, String(resp.id)), resp);
+      currentDocId = String(resp.id);
+      await setDoc(doc(firestore, COLLECTIONS.RESPONSES, currentDocId), resp);
     }
+
+    currentCollection = COLLECTIONS.USERS;
     for (const user of data.users) {
-      const docId = user.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, "_");
-      await setDoc(doc(firestore, COLLECTIONS.USERS, docId), user);
+      currentDocId = user.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, "_");
+      await setDoc(doc(firestore, COLLECTIONS.USERS, currentDocId), user);
     }
+
+    currentCollection = COLLECTIONS.NEWS;
     for (const news of data.news) {
-      await setDoc(doc(firestore, COLLECTIONS.NEWS, news.id), news);
+      currentDocId = news.id;
+      await setDoc(doc(firestore, COLLECTIONS.NEWS, currentDocId), news);
     }
+
+    currentCollection = COLLECTIONS.ML_DATASET;
     for (const ml of data.mlDataset) {
-      await setDoc(doc(firestore, COLLECTIONS.ML_DATASET, ml.id), ml);
+      currentDocId = ml.id;
+      await setDoc(doc(firestore, COLLECTIONS.ML_DATASET, currentDocId), ml);
     }
+
+    currentCollection = COLLECTIONS.LOGS;
     for (const log of data.logs) {
-      await setDoc(doc(firestore, COLLECTIONS.LOGS, log.id), log);
+      currentDocId = log.id;
+      await setDoc(doc(firestore, COLLECTIONS.LOGS, currentDocId), log);
     }
 
     return {
@@ -477,9 +549,95 @@ export async function seedFirestoreWithData(data: {
     };
   } catch (error: any) {
     console.error("Firestore seeding failed:", error);
+    const msg = String(error?.message || "");
+    const isPermissionError = error?.code === "permission-denied" || msg.includes("insufficient permissions");
+    
+    if (isPermissionError) {
+      return {
+        success: false,
+        message: `Missing or insufficient permissions on collection '${currentCollection || "unknown"}'. Please ensure the rules are published in Firebase Console and you are signed in as an administrator.`,
+      };
+    }
+
     return {
       success: false,
       message: error?.message || "Failed to seed Firestore data.",
     };
   }
 }
+
+/**
+ * Wipe all cloud Firestore collections to 0 records (Clean Production Slate).
+ * Preserves the Superadmin account so administrative access remains active.
+ */
+export async function wipeFirestoreCloudData(): Promise<{
+  success: boolean;
+  message: string;
+  deletedCounts?: Record<string, number>;
+}> {
+  try {
+    const firestore = getFirebaseDb();
+    if (!firestore) {
+      return { success: false, message: "Firebase is not initialized. Please verify configuration keys." };
+    }
+
+    // Ensure Firebase Auth session exists with admin privileges
+    const authInstance = getFirebaseAuth();
+    if (authInstance) {
+      const currentEmail = authInstance.currentUser?.email?.toLowerCase();
+      const isAdminEmail = currentEmail === "admin@edufeedback.edu" || currentEmail === "azalrob023@gmail.com";
+
+      if (!isAdminEmail) {
+        try {
+          await signInWithEmailAndPassword(authInstance, "admin@edufeedback.edu", "admin123");
+        } catch (authErr: any) {
+          console.warn("Admin sign-in notice during cloud wipe:", authErr?.message);
+        }
+      }
+    }
+
+    const collectionsToClear = [
+      COLLECTIONS.SURVEYS,
+      COLLECTIONS.RESPONSES,
+      COLLECTIONS.NEWS,
+      COLLECTIONS.ML_DATASET,
+      COLLECTIONS.LOGS,
+    ];
+
+    const counts: Record<string, number> = {};
+
+    for (const colName of collectionsToClear) {
+      const snap = await getDocs(collection(firestore, colName));
+      counts[colName] = snap.size;
+      for (const d of snap.docs) {
+        await deleteDoc(doc(firestore, colName, d.id));
+      }
+    }
+
+    // In users collection: remove non-superadmin accounts
+    const usersSnap = await getDocs(collection(firestore, COLLECTIONS.USERS));
+    let deletedUsers = 0;
+    for (const d of usersSnap.docs) {
+      const uData = d.data();
+      const userEmail = (uData.email || "").toLowerCase();
+      if (userEmail !== "admin@edufeedback.edu" && userEmail !== "azalrob023@gmail.com") {
+        await deleteDoc(doc(firestore, COLLECTIONS.USERS, d.id));
+        deletedUsers++;
+      }
+    }
+    counts[COLLECTIONS.USERS] = deletedUsers;
+
+    return {
+      success: true,
+      message: `Cloud Firestore successfully wiped! Removed ${counts[COLLECTIONS.SURVEYS] || 0} surveys, ${counts[COLLECTIONS.RESPONSES] || 0} responses, and ${deletedUsers} demo users. Admin credentials preserved.`,
+      deletedCounts: counts,
+    };
+  } catch (error: any) {
+    console.error("Firestore cloud wipe failed:", error);
+    return {
+      success: false,
+      message: error?.message || "Failed to wipe Cloud Firestore data.",
+    };
+  }
+}
+

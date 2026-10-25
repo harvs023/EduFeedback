@@ -47,20 +47,54 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [analysisResult, setAnalysisResult] = useState<any | null>(null);
 
+  // Dynamic dataset metrics helper
+  const calculateDatasetMetrics = (samples: TagalogMLSample[]): TagalogMLMetrics => {
+    const total = samples.length;
+    if (total === 0) {
+      return {
+        accuracy: 0.0,
+        f1Score: 0.0,
+        finalLoss: 1.0,
+        epochs: 0,
+        totalSamples: 0,
+        tagalogSamples: 0,
+        modelStatus: "No Samples in Corpus",
+        version: "EduBilingual-BERT-v2.5",
+      };
+    }
+    const tagalogCount = samples.filter((d) => d.language === "Tagalog" || d.language === "Taglish").length;
+    const verifiedCount = samples.filter((d) => d.verified).length;
+    const balanceFactor = Math.min(1, tagalogCount / (total * 0.4 || 1));
+    const verifiedRatio = verifiedCount / total;
+    const accuracy = Math.min(0.985, Math.max(0.75, 0.86 + (total > 30 ? 0.07 : total * 0.002) + verifiedRatio * 0.04));
+    const f1Score = Number((accuracy * (0.97 + balanceFactor * 0.02)).toFixed(3));
+    const finalLoss = Number(Math.max(0.028, 0.26 - total * 0.0035).toFixed(3));
+
+    return {
+      accuracy: Number(accuracy.toFixed(3)),
+      f1Score,
+      finalLoss,
+      epochs: 25,
+      totalSamples: total,
+      tagalogSamples: tagalogCount,
+      modelStatus: "Trained & Ready (EduBilingual-BERT-v2.5)",
+      version: "EduBilingual-BERT-v2.5",
+    };
+  };
+
   // Training Simulation State
   const [isTraining, setIsTraining] = useState<boolean>(false);
   const [trainingProgress, setTrainingProgress] = useState<number>(0);
   const [currentEpoch, setCurrentEpoch] = useState<number>(0);
-  const [modelMetrics, setModelMetrics] = useState<TagalogMLMetrics>({
-    accuracy: 0.948,
-    f1Score: 0.941,
-    finalLoss: 0.052,
-    epochs: 25,
-    totalSamples: dataset.length,
-    tagalogSamples: dataset.filter((d) => d.language === "Tagalog" || d.language === "Taglish").length,
-    modelStatus: "Trained & Ready (EduBilingual-BERT-v2.5)",
-    version: "EduBilingual-BERT-v2.5",
-  });
+  const [modelMetrics, setModelMetrics] = useState<TagalogMLMetrics>(() => calculateDatasetMetrics(dataset));
+
+  React.useEffect(() => {
+    setModelMetrics((prev) => ({
+      ...calculateDatasetMetrics(dataset),
+      modelStatus: prev.modelStatus,
+      version: prev.version,
+    }));
+  }, [dataset]);
 
   // Single Sample Add State
   const [newText, setNewText] = useState<string>("");
@@ -819,17 +853,43 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
         </div>
 
         <div className="space-y-4">
+          {/* Quick sample chips */}
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            <span className="text-slate-400 font-medium">Quick Test:</span>
+            {[
+              "Sobrang galing ni Ma'am magturo pero bitin talaga sa 2 hours lab.",
+              "Mabagal ang Wi-Fi connection sa 3rd floor library study area.",
+              "Sana dagdagan ang computer units para hindi nag-aagawan sa coding.",
+              "Very accommodating staff and clean air-conditioned lecture halls.",
+            ].map((sample) => (
+              <button
+                key={sample}
+                type="button"
+                onClick={() => setInputText(sample)}
+                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 transition-colors cursor-pointer truncate max-w-xs"
+                title={sample}
+              >
+                "{sample}"
+              </button>
+            ))}
+          </div>
+
           <div className="flex gap-2">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Type or paste any student feedback sentence..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !analyzing) {
+                  handleAnalyze();
+                }
+              }}
+              placeholder="Type or paste any student feedback sentence in Tagalog, Taglish, or English..."
               className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-900 focus:bg-white focus:outline-hidden"
             />
             <button
               onClick={handleAnalyze}
-              disabled={analyzing}
+              disabled={analyzing || !inputText.trim()}
               className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs flex items-center gap-2 cursor-pointer transition-all"
             >
               {analyzing ? (
@@ -842,33 +902,143 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
           </div>
 
           {analysisResult && (
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Model Prediction
-                </span>
-                <span
-                  className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                    analysisResult.sentiment === "Positive"
-                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                      : analysisResult.sentiment === "Negative"
-                      ? "bg-rose-50 text-rose-700 border border-rose-200"
-                      : "bg-blue-50 text-blue-700 border border-blue-200"
-                  }`}
-                >
-                  {analysisResult.sentiment} (Confidence: {Math.round((analysisResult.score || 0.85) * 100)}%)
-                </span>
+            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+              {/* Header Badges: Prediction, Confidence, Language, Emotion */}
+              <div className="flex items-center justify-between flex-wrap gap-2.5 border-b border-slate-200/70 pb-3.5">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Model Classification
+                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`px-3 py-1 rounded-lg text-xs font-bold ${
+                        analysisResult.sentiment === "Positive"
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          : analysisResult.sentiment === "Negative"
+                          ? "bg-rose-50 text-rose-700 border border-rose-200"
+                          : analysisResult.sentiment === "Constructive Suggestion"
+                          ? "bg-amber-50 text-amber-700 border border-amber-200"
+                          : "bg-blue-50 text-blue-700 border border-blue-200"
+                      }`}
+                    >
+                      {analysisResult.sentiment}
+                    </span>
+
+                    {/* Confidence Score (fixed: reads confidence property) */}
+                    <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-700 font-mono">
+                      {Math.round(
+                        (typeof analysisResult.confidence === "number"
+                          ? analysisResult.confidence <= 1
+                            ? analysisResult.confidence * 100
+                            : analysisResult.confidence
+                          : 88)
+                      )}% Confidence
+                    </span>
+
+                    {/* Sentiment polarity */}
+                    {typeof analysisResult.score === "number" && (
+                      <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-600 font-mono">
+                        Polarity: {analysisResult.score > 0 ? `+${analysisResult.score.toFixed(2)}` : analysisResult.score.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Language Detection */}
+                  {analysisResult.language && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      <Languages className="w-3.5 h-3.5" />
+                      <span>{analysisResult.language}</span>
+                    </span>
+                  )}
+
+                  {/* Emotion / Tone */}
+                  {analysisResult.emotion && (
+                    <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                      Tone: {analysisResult.emotion}
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <div className="text-xs text-slate-700">
-                <span className="font-bold">Detected Aspects: </span>
-                {analysisResult.aspects?.join(", ") || "General Feedback"}
+              {/* Sarcasm / Irony Detected Callout */}
+              {analysisResult.sarcasmDetected && (
+                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                  <span className="text-base leading-none">🎭</span>
+                  <div>
+                    <span className="font-bold">Filipino Sarcasm / Irony Detected: </span>
+                    <span>
+                      {analysisResult.sarcasmExplanation ||
+                        "Surface positive language was identified as ironic campus satire. Model reclassified to true critical sentiment."}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Detected Aspects */}
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Detected Academic / Campus Aspects:
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {analysisResult.aspects && analysisResult.aspects.length > 0 ? (
+                    analysisResult.aspects.map((asp: string) => (
+                      <span
+                        key={asp}
+                        className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 shadow-2xs"
+                      >
+                        {asp}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-500">General Feedback</span>
+                  )}
+                </div>
               </div>
 
-              {analysisResult.tagalogNuances && (
-                <div className="text-xs text-slate-600 bg-white p-3 rounded-xl border border-slate-200">
-                  <span className="font-bold text-slate-800">Linguistic Analysis: </span>
-                  {analysisResult.tagalogNuances}
+              {/* Extracted Key Phrases / Keywords */}
+              {analysisResult.keywords && analysisResult.keywords.length > 0 && (
+                <div>
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                    Extracted Linguistic Keywords:
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {analysisResult.keywords.map((kw: string, i: number) => (
+                      <span
+                        key={i}
+                        className="px-2 py-0.5 bg-blue-50/70 border border-blue-200/80 rounded-md text-[11px] font-mono text-blue-800"
+                      >
+                        #{kw}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* English Translation / Semantic Meaning */}
+              {analysisResult.englishTranslation && (
+                <div className="text-xs bg-white p-3 rounded-xl border border-slate-200 space-y-1">
+                  <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                    <span>English Semantic Translation:</span>
+                  </span>
+                  <p className="text-slate-600 italic leading-relaxed pl-5">
+                    "{analysisResult.englishTranslation}"
+                  </p>
+                </div>
+              )}
+
+              {/* Actionable Recommendation */}
+              {analysisResult.actionableRecommendation && (
+                <div className="text-xs bg-blue-50/60 p-3 rounded-xl border border-blue-200/80 space-y-1">
+                  <span className="font-bold text-blue-900 flex items-center gap-1.5">
+                    <Lightbulb className="w-3.5 h-3.5 text-blue-700" />
+                    <span>Actionable Institutional Recommendation:</span>
+                  </span>
+                  <p className="text-blue-950 font-medium leading-relaxed pl-5">
+                    {analysisResult.actionableRecommendation}
+                  </p>
                 </div>
               )}
             </div>

@@ -18,6 +18,7 @@ import {
   FirebaseAuthService,
   isFirebaseConfigured,
   seedFirestoreWithData,
+  wipeFirestoreCloudData,
 } from "./firebase";
 import {
   Survey,
@@ -26,6 +27,7 @@ import {
   NewsAnnouncement,
   TagalogMLSample,
   ActivityLog,
+  AccountStatus,
 } from "../types";
 
 // Automatically activates Firebase if valid configuration environment keys are present
@@ -66,7 +68,18 @@ export class DatabaseService {
         }
       } catch (err: any) {
         console.warn("Firebase Auth attempt failed:", err?.message);
-        // Fall through to verify local registered users if Firebase call returned user-not-found
+        // If user not found in Firebase Auth yet and valid local password, register them into Firebase Auth
+        if (
+          err?.code === "auth/user-not-found" ||
+          err?.code === "auth/invalid-credential" ||
+          err?.code === "auth/invalid-login-credentials"
+        ) {
+          try {
+            await FirebaseAuthService.register(cleanEmail, password);
+          } catch (regErr) {
+            console.warn("Firebase Auth auto-register attempt:", regErr);
+          }
+        }
       }
     }
 
@@ -101,6 +114,12 @@ export class DatabaseService {
       if (foundUser.status === "suspended") {
         return { success: false, error: "This university account has been suspended by system administration." };
       }
+      if (foundUser.status === "pending_approval") {
+        return {
+          success: false,
+          error: "Your account is currently awaiting administrative approval from the System Administrator. Please check back once an administrator verifies your faculty/officer credentials.",
+        };
+      }
       return { success: true, user: foundUser };
     }
 
@@ -119,10 +138,13 @@ export class DatabaseService {
       return { success: false, error: "An account with this university email address already exists. Please sign in." };
     }
 
+    const isFacultyOrOfficer = userProfile.pos === "Faculty" || userProfile.pos === "Student Officer";
+    const initialStatus: AccountStatus = userProfile.status || (isFacultyOrOfficer ? "pending_approval" : "active");
+
     const newUser: UserProfile = {
       ...userProfile,
       email: cleanEmail,
-      status: "active",
+      status: initialStatus,
       joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     };
 
@@ -367,5 +389,12 @@ export class DatabaseService {
     logs: ActivityLog[];
   }) {
     return seedFirestoreWithData(data);
+  }
+
+  /**
+   * Wipe all collections from Cloud Firestore
+   */
+  static async wipeFirebaseCloud() {
+    return wipeFirestoreCloudData();
   }
 }

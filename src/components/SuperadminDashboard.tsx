@@ -57,7 +57,7 @@ interface SuperadminDashboardProps {
   onClearFlag: (surveyId: string | number) => void;
   onFlagSurvey: (surveyId: string | number, reason: string) => void;
   onDeleteSurvey: (surveyId: string | number) => void;
-  onToggleUserStatus: (email: string, newStatus: "active" | "suspended") => void;
+  onToggleUserStatus: (email: string, newStatus: "active" | "suspended" | "pending_approval") => void;
   onPromoteUser: (email: string, newPos: UserProfile["pos"]) => void;
   onAddUser?: (user: UserProfile) => void;
   onUpdateUser?: (email: string, changes: Partial<UserProfile>) => void;
@@ -1235,11 +1235,13 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
       {activeTab === "users" && (
         <UserManagementView
           users={users}
+          surveys={surveys}
           currentUser={currentUser}
           onAddUser={onAddUser || (() => {})}
           onUpdateUser={onUpdateUser || (() => {})}
           onDeleteUser={onDeleteUser || (() => {})}
           onToggleUserStatus={onToggleUserStatus}
+          onApproveUser={(email) => onToggleUserStatus(email, "active")}
           onPromoteUser={onPromoteUser}
         />
       )}

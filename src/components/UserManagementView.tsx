@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { UserProfile } from "../types";
+import { UserProfile, Survey } from "../types";
 import { DEPARTMENTS_DATA } from "../data/initialData";
 import {
   Users,
@@ -29,21 +29,25 @@ import {
 
 interface UserManagementViewProps {
   users: UserProfile[];
+  surveys?: Survey[];
   currentUser: UserProfile | null;
   onAddUser: (user: UserProfile) => void;
   onUpdateUser: (email: string, changes: Partial<UserProfile>) => void;
   onDeleteUser: (email: string) => void;
-  onToggleUserStatus: (email: string, status: "active" | "suspended") => void;
+  onToggleUserStatus: (email: string, status: "active" | "suspended" | "pending_approval") => void;
+  onApproveUser?: (email: string) => void;
   onPromoteUser: (email: string, newPos: UserProfile["pos"]) => void;
 }
 
 export const UserManagementView: React.FC<UserManagementViewProps> = ({
   users,
+  surveys = [],
   currentUser,
   onAddUser,
   onUpdateUser,
   onDeleteUser,
   onToggleUserStatus,
+  onApproveUser,
   onPromoteUser,
 }) => {
   // Search & Filter States
@@ -79,10 +83,13 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     const total = users.length;
     const active = users.filter((u) => u.status === "active").length;
     const suspended = users.filter((u) => u.status === "suspended").length;
+    const pending = users.filter((u) => u.status === "pending_approval").length;
     const students = users.filter((u) => u.pos === "Student").length;
-    const creators = users.filter((u) => u.pos === "Faculty" || u.pos === "Student Officer").length;
+    const faculty = users.filter((u) => u.pos === "Faculty").length;
+    const officers = users.filter((u) => u.pos === "Student Officer").length;
+    const creators = students + faculty + officers; // All students, faculty and officers have survey creation rights
     const admins = users.filter((u) => u.pos === "Superadmin").length;
-    return { total, active, suspended, students, creators, admins };
+    return { total, active, suspended, pending, students, faculty, officers, creators, admins };
   }, [users]);
 
   // Filtered Users
@@ -296,7 +303,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               Students
             </span>
             <div className="font-serif text-2xl font-black text-blue-700 mt-0.5">{stats.students}</div>
-            <span className="text-[11px] text-blue-600">primary respondents</span>
+            <span className="text-[11px] text-blue-600">creators & respondents</span>
           </div>
 
           <div className="bg-purple-50/60 p-4 rounded-2xl border border-purple-200">
@@ -304,16 +311,30 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               Survey Creators
             </span>
             <div className="font-serif text-2xl font-black text-purple-700 mt-0.5">{stats.creators}</div>
-            <span className="text-[11px] text-purple-600">Faculty & Officers</span>
+            <span className="text-[11px] text-purple-600">Students, Faculty & Officers</span>
           </div>
 
-          <div className="bg-amber-50/60 p-4 rounded-2xl border border-amber-200">
-            <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
-              Administrators
-            </span>
-            <div className="font-serif text-2xl font-black text-amber-700 mt-0.5">{stats.admins}</div>
-            <span className="text-[11px] text-amber-600">superadmin rights</span>
-          </div>
+          {stats.pending > 0 ? (
+            <div
+              onClick={() => setStatusFilter("pending_approval")}
+              className="bg-amber-500/10 hover:bg-amber-500/20 p-4 rounded-2xl border border-amber-300 transition-all cursor-pointer ring-1 ring-amber-400/50"
+            >
+              <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                <span>Needs Approval</span>
+              </span>
+              <div className="font-serif text-2xl font-black text-amber-900 mt-0.5">{stats.pending}</div>
+              <span className="text-[11px] text-amber-700 font-semibold underline">Click to review</span>
+            </div>
+          ) : (
+            <div className="bg-amber-50/60 p-4 rounded-2xl border border-amber-200">
+              <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
+                Administrators
+              </span>
+              <div className="font-serif text-2xl font-black text-amber-700 mt-0.5">{stats.admins}</div>
+              <span className="text-[11px] text-amber-600">superadmin rights</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -337,10 +358,10 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
             <select
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden"
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden cursor-pointer"
             >
               <option value="all">All Roles & Positions</option>
-              <option value="Student">Student (Respondent)</option>
+              <option value="Student">Student (Creator & Respondent)</option>
               <option value="Student Officer">Student Officer (Creator)</option>
               <option value="Faculty">Faculty (Creator)</option>
               <option value="Superadmin">Superadmin (Administrator)</option>
@@ -352,10 +373,11 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden"
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden cursor-pointer"
             >
               <option value="all">All Statuses</option>
               <option value="active">Active Only</option>
+              <option value="pending_approval">Pending Approval ({stats.pending})</option>
               <option value="suspended">Suspended Only</option>
             </select>
           </div>
@@ -488,7 +510,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                           onChange={(e) => onPromoteUser(u.email, e.target.value as any)}
                           className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors focus:outline-hidden ${roleBadgeColor}`}
                         >
-                          <option value="Student">Student (Respondent)</option>
+                          <option value="Student">Student (Creator & Respondent)</option>
                           <option value="Student Officer">Student Officer (Creator)</option>
                           <option value="Faculty">Faculty (Creator)</option>
                           <option value="Superadmin">Superadmin (Admin)</option>
@@ -511,31 +533,56 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                       {/* Surveys Authored */}
                       <td className="p-4">
                         <span className="font-bold text-slate-900 text-xs">
-                          {u.surveys || 0}
+                          {surveys ? surveys.filter((s) => s.creatorEmail?.toLowerCase() === u.email.toLowerCase() || (s.creatorRole === u.pos && !s.creatorEmail)).length : (u.surveys || 0)}
                         </span>{" "}
                         <span className="text-[11px] text-slate-500">surveys</span>
                       </td>
 
                       {/* Status */}
                       <td className="p-4">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                            u.status === "active"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : "bg-rose-50 text-rose-700 border-rose-200"
-                          }`}
-                        >
+                        {u.status === "pending_approval" ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold border bg-amber-50 text-amber-800 border-amber-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            <span>PENDING APPROVAL</span>
+                          </span>
+                        ) : (
                           <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              u.status === "active" ? "bg-emerald-500" : "bg-rose-500"
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                              u.status === "active"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-rose-50 text-rose-700 border-rose-200"
                             }`}
-                          />
-                          <span>{u.status.toUpperCase()}</span>
-                        </span>
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                u.status === "active" ? "bg-emerald-500" : "bg-rose-500"
+                              }`}
+                            />
+                            <span>{u.status.toUpperCase()}</span>
+                          </span>
+                        )}
                       </td>
 
                       {/* Administrative Actions */}
                       <td className="p-4 text-right space-x-1 whitespace-nowrap">
+                        {/* Approve Button for Pending Users */}
+                        {u.status === "pending_approval" && (
+                          <button
+                            onClick={() => {
+                              if (onApproveUser) {
+                                onApproveUser(u.email);
+                              } else {
+                                onToggleUserStatus(u.email, "active");
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer mr-1.5"
+                            title="Approve and activate this account"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Approve Account</span>
+                          </button>
+                        )}
+
                         {/* Edit User Button */}
                         <button
                           onClick={() => setEditingUser(u)}
@@ -564,7 +611,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                             >
                               <UserX className="w-4 h-4" />
                             </button>
-                          ) : (
+                          ) : u.status === "suspended" ? (
                             <button
                               onClick={() => onToggleUserStatus(u.email, "active")}
                               className="p-1.5 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-lg transition-colors cursor-pointer"
@@ -572,7 +619,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                             >
                               <UserCheck className="w-4 h-4" />
                             </button>
-                          )
+                          ) : null
                         )}
 
                         {/* Delete User Button */}
@@ -681,7 +728,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                     onChange={(e) => setAddForm({ ...addForm, pos: e.target.value as any })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:bg-white focus:outline-hidden"
                   >
-                    <option value="Student">Student (Respondent)</option>
+                    <option value="Student">Student (Creator & Respondent)</option>
                     <option value="Student Officer">Student Officer (Creator)</option>
                     <option value="Faculty">Faculty (Creator)</option>
                     <option value="Superadmin">Superadmin (Admin)</option>
@@ -855,7 +902,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                     onChange={(e) => setEditingUser({ ...editingUser, pos: e.target.value as any })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
                   >
-                    <option value="Student">Student (Respondent)</option>
+                    <option value="Student">Student (Creator & Respondent)</option>
                     <option value="Student Officer">Student Officer (Creator)</option>
                     <option value="Faculty">Faculty (Creator)</option>
                     <option value="Superadmin">Superadmin (Admin)</option>

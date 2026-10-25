@@ -3,10 +3,9 @@ import { UserProfile, Position } from "../types";
 import {
   DEPARTMENTS_DATA,
   PROGRAMS_BY_DEPARTMENT,
-  DEMO_ACCOUNTS_CREDENTIALS,
-  DemoAccountCredential,
 } from "../data/initialData";
 import { DatabaseService } from "../lib/databaseService";
+import { LocalStorageManager } from "../lib/storage";
 import { isFirebaseConfigured } from "../lib/firebase";
 import {
   ShieldCheck,
@@ -46,8 +45,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [autoFilledAccount, setAutoFilledAccount] = useState<string | null>(null);
+  const [pendingNotice, setPendingNotice] = useState<{ name: string; pos: string; email: string } | null>(null);
 
   // Sign In Form States
   const [loginEmail, setLoginEmail] = useState<string>("");
@@ -67,38 +65,6 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
   const [regIdNumber, setRegIdNumber] = useState<string>("");
 
   const programsForDept = PROGRAMS_BY_DEPARTMENT[regDepartment] || [];
-
-  const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(id);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const handleAutoFill = (account: DemoAccountCredential) => {
-    setMode("login");
-    setLoginEmail(account.email);
-    setLoginPassword(account.password);
-    setAutoFilledAccount(account.email);
-    setError(null);
-    setTimeout(() => setAutoFilledAccount(null), 2500);
-  };
-
-  const handleDirectSignIn = async (account: DemoAccountCredential) => {
-    setError(null);
-    setIsLoading(true);
-    try {
-      const result = await DatabaseService.login(account.email, account.password);
-      if (result.success && result.user) {
-        onLogin(result.user);
-      } else {
-        setError(result.error || "Unable to sign in with demo credentials.");
-      }
-    } catch (err: any) {
-      setError(err?.message || "An authentication error occurred.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,12 +126,15 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
     setIsLoading(true);
     try {
       let roleType: "superadmin" | "user" = "user";
+      const isApprovalRequired = regPos === "Faculty" || regPos === "Student Officer";
+      const initialStatus = isApprovalRequired ? "pending_approval" : "active";
+
       const newProfile: UserProfile = {
         name: regName.trim(),
         email: regEmail.trim().toLowerCase(),
         pos: regPos as Position,
         role: roleType,
-        status: "active",
+        status: initialStatus,
         department: regDepartment,
         program: regProgram,
         surveys: 0,
@@ -180,7 +149,29 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
 
       const result = await DatabaseService.register(newProfile, regPassword);
       if (result.success && result.user) {
-        onLogin(result.user);
+        if (isApprovalRequired) {
+          LocalStorageManager.addLog({
+            user: newProfile.name,
+            pos: newProfile.pos,
+            action: "Faculty/Officer Registration Submitted",
+            details: `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and awaits admin approval.`,
+          });
+          LocalStorageManager.addNotification(
+            "admin@edufeedback.edu",
+            "🛡️ New Account Pending Approval",
+            `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and requires admin verification.`,
+            "🛡️",
+            "account_pending",
+            { email: newProfile.email }
+          );
+          setPendingNotice({
+            name: newProfile.name,
+            pos: newProfile.pos,
+            email: newProfile.email,
+          });
+        } else {
+          onLogin(result.user);
+        }
       } else {
         setError(result.error || "Failed to create account.");
       }
@@ -228,148 +219,75 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
 
       {/* Main Dual-Pane Section */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start my-auto">
-        {/* Left Column: Demo Users & Admin Credentials Showcase */}
+        {/* Left Column: Institutional Portal Overview & Pillars */}
         <div className="lg:col-span-7 flex flex-col gap-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-900/40 text-indigo-300 text-xs font-semibold border border-indigo-700/50 mb-3">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Instant Access Demonstration Accounts</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Official Institutional Quality Assurance Portal</span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-              Sign In to Your <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-sky-300 to-teal-300">University Portal</span>
+              Empowering Campus Voices Through <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-sky-300 to-teal-300">Bilingual Intelligence</span>
             </h1>
-            <p className="text-slate-300 text-sm sm:text-base mt-2 leading-relaxed">
-              Welcome to the institutional feedback system. You can sign in using your university email or use any of the pre-configured accounts below to test different roles.
+            <p className="text-slate-300 text-sm sm:text-base mt-2.5 leading-relaxed">
+              EduFeedback is the university’s centralized evaluation and sentiment analytics platform. We unite student voices, faculty assessments, and administrative oversight to drive institutional excellence.
             </p>
           </div>
 
-          {/* Credentials Cards Container */}
-          <div className="bg-slate-900/70 border border-slate-800/90 rounded-2xl p-5 shadow-2xl backdrop-blur-sm">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <KeyRound className="w-4 h-4 text-amber-400" />
-                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-200">
-                  Available Demo Users & Admin Credentials
-                </h2>
+          {/* Institutional Pillars Container */}
+          <div className="bg-slate-900/70 border border-slate-800/90 rounded-2xl p-6 shadow-2xl backdrop-blur-sm space-y-4">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Institutional Capabilities &amp; Core Framework
+            </h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-950/80 border border-indigo-700/50 flex items-center justify-center text-indigo-400">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-bold text-white">Tagalog &amp; Taglish NLP</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Evaluates Filipino colloquial feedback, nuances, and suggestions with high-precision sentiment models and fine-tuned accuracy.
+                </p>
               </div>
-              <span className="text-[11px] text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700">
-                1-Click Sign In Available
-              </span>
+
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-950/80 border border-emerald-700/50 flex items-center justify-center text-emerald-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-bold text-white">Clearance Signing</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Verified student participation tracking for mandatory semester evaluations required for end-of-term institutional clearance.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-950/80 border border-blue-700/50 flex items-center justify-center text-blue-400">
+                  <Users className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-bold text-white">Universal Survey Creation</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Every campus member—Students, Student Officers, and Faculty—holds survey authorship rights to gather community feedback.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="w-8 h-8 rounded-lg bg-purple-950/80 border border-purple-700/50 flex items-center justify-center text-purple-400">
+                  <Building className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-bold text-white">Longitudinal Analytics</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Compare historical evaluation trends before vs. now to measure the real impact of university improvements over time.
+                </p>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-4">
-              {DEMO_ACCOUNTS_CREDENTIALS.map((acc) => {
-                const isAutoFilled = autoFilledAccount === acc.email;
-                return (
-                  <div
-                    key={acc.email}
-                    className={`p-3.5 rounded-xl border transition-all duration-200 flex flex-col justify-between relative ${
-                      isAutoFilled
-                        ? "bg-indigo-950/60 border-indigo-500 shadow-md shadow-indigo-500/10 ring-1 ring-indigo-400"
-                        : "bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900/80"
-                    }`}
-                  >
-                    <div>
-                      {/* Badge and Name */}
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${acc.badgeColor}`}>
-                          {acc.badgeLabel}
-                        </span>
-                        {acc.pos === "Superadmin" && (
-                          <span className="text-[9px] font-semibold text-rose-400 bg-rose-950/50 px-1.5 py-0.5 rounded border border-rose-900/50">
-                            Root Admin
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="font-semibold text-sm text-white">{acc.name}</div>
-                      <div className="text-[11px] text-slate-400 truncate mb-3">{acc.department}</div>
-
-                      {/* Credentials Display with Copy */}
-                      <div className="space-y-1.5 bg-slate-900/90 rounded-lg p-2 border border-slate-800/80 text-xs">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Email</span>
-                          <div className="flex items-center gap-1.5">
-                            <code className="text-indigo-300 font-mono text-[11px] select-all truncate max-w-[170px]">
-                              {acc.email}
-                            </code>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(acc.email, `email-${acc.email}`)}
-                              className="text-slate-400 hover:text-slate-200 p-0.5 transition-colors cursor-pointer"
-                              title="Copy email"
-                            >
-                              {copiedKey === `email-${acc.email}` ? (
-                                <Check className="w-3 h-3 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3 h-3" />
-                              )}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Pass</span>
-                          <div className="flex items-center gap-1.5">
-                            <code className="text-amber-300 font-mono text-[11px] select-all">
-                              {acc.password}
-                            </code>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(acc.password, `pass-${acc.email}`)}
-                              className="text-slate-400 hover:text-slate-200 p-0.5 transition-colors cursor-pointer"
-                              title="Copy password"
-                            >
-                              {copiedKey === `pass-${acc.email}` ? (
-                                <Check className="w-3 h-3 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3 h-3" />
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <p className="text-[11px] text-slate-400 mt-2.5 leading-relaxed line-clamp-2">
-                        {acc.description}
-                      </p>
-                    </div>
-
-                    {/* Actions: Auto-fill or Direct Sign In */}
-                    <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-slate-800/60">
-                      <button
-                        type="button"
-                        onClick={() => handleAutoFill(acc)}
-                        className="w-full py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer border border-slate-700"
-                      >
-                        <span>Auto-fill</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDirectSignIn(acc)}
-                        disabled={isLoading}
-                        className={`w-full py-1.5 px-2 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer ${
-                          acc.pos === "Superadmin"
-                            ? "bg-rose-600 hover:bg-rose-500 text-white shadow-xs shadow-rose-600/30"
-                            : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs shadow-indigo-600/30"
-                        }`}
-                      >
-                        <span>Sign In</span>
-                        <ArrowRight className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Firebase & Demo Data Note */}
-            <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-amber-400" />
-                <span>Demo datasets match <code>scripts/demo-data.json</code> &amp; Firebase Cloud</span>
-              </span>
-              <span className="text-slate-400">Version 3.0</span>
+            {/* Governance & Approval Policy Callout */}
+            <div className="mt-4 pt-4 border-t border-slate-800/80 flex items-start gap-2.5 text-xs text-slate-400">
+              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <span className="font-bold text-slate-300">Governance Notice:</span> Faculty and Student Council Officer registrations undergo administrative verification by University QA administrators before account activation.
+              </div>
             </div>
           </div>
         </div>
@@ -377,6 +295,48 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
         {/* Right Column: Authentication Form Card (Sign In & Register) */}
         <div className="lg:col-span-5 w-full">
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl relative">
+            {pendingNotice ? (
+              <div className="text-center py-6 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-400/40 text-amber-400 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/10">
+                  <ShieldCheck className="w-8 h-8" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Registration Submitted</h3>
+                  <p className="text-xs text-amber-300 font-semibold uppercase tracking-wider mt-1">
+                    Administrative Approval Required
+                  </p>
+                </div>
+                <div className="p-4 bg-slate-950/70 rounded-xl border border-slate-800 text-left text-xs space-y-2">
+                  <div className="flex justify-between border-b border-slate-800 pb-2">
+                    <span className="text-slate-400">Name:</span>
+                    <span className="font-bold text-white">{pendingNotice.name}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-800 pb-2">
+                    <span className="text-slate-400">Assigned Role:</span>
+                    <span className="font-bold text-indigo-300">{pendingNotice.pos}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Email:</span>
+                    <span className="font-mono text-slate-300">{pendingNotice.email}</span>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
+                  To safeguard institutional integrity, Faculty and Student Council Officer accounts require verification and approval by the System Administrator before signing in. An alert has been forwarded to the admin desk.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingNotice(null);
+                    setMode("login");
+                    setLoginEmail(pendingNotice.email);
+                  }}
+                  className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
+                >
+                  Return to Sign In Screen
+                </button>
+              </div>
+            ) : (
+              <>
             {/* Mode Switcher Tabs */}
             <div className="grid grid-cols-2 p-1 bg-slate-950/80 rounded-2xl border border-slate-800 mb-6">
               <button
@@ -718,6 +678,8 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                   )}
                 </button>
               </form>
+            )}
+            </>
             )}
           </div>
         </div>

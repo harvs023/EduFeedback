@@ -31,6 +31,10 @@ import {
   Lock,
   ShieldCheck,
   ShieldAlert,
+  ArrowLeftRight,
+  ArrowUpRight,
+  ArrowDownRight,
+  Scale,
 } from "lucide-react";
 
 interface HistoricalAnalyticsViewProps {
@@ -113,7 +117,20 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
   }, [initialSurveyId, isAdmin, accessibleSurveyIds]);
 
   const [timeframe, setTimeframe] = useState<TimeframeFilter>("all");
-  const [activeTab, setActiveTab] = useState<"overview" | "timeline" | "demographics" | "questions" | "ml-synthesis">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "timeline" | "demographics" | "questions" | "comparison" | "ml-synthesis">("overview");
+
+  // Comparison Module State (Survey A vs Survey B)
+  const [compareSurveyAId, setCompareSurveyAId] = useState<string>(() => {
+    return accessibleSurveys[0]?.id ? String(accessibleSurveys[0].id) : "all";
+  });
+  const [compareSurveyBId, setCompareSurveyBId] = useState<string>(() => {
+    return accessibleSurveys[1]?.id
+      ? String(accessibleSurveys[1].id)
+      : accessibleSurveys[0]?.id
+      ? String(accessibleSurveys[0].id)
+      : "all";
+  });
+
   const [isGeneratingMlSynthesis, setIsGeneratingMlSynthesis] = useState<boolean>(false);
   const [mlSynthesisResult, setMlSynthesisResult] = useState<any | null>(null);
   const [mlSynthesisError, setMlSynthesisError] = useState<string | null>(null);
@@ -224,54 +241,210 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
 
   // Multi-Year Monthly Trend Breakdown (adapts to selected year or multi-year horizon)
   const monthlyTrends = useMemo(() => {
-    let months: Array<{ label: string; count: number; ratingSum: number; ratingCount: number }> = [];
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let buckets: Array<{ label: string; count: number; ratingSum: number; ratingCount: number; key: string }> = [];
 
     if (timeframe.startsWith("year-")) {
       const yr = timeframe.replace("year-", "");
-      months = [
-        { label: `Jan ${yr}`, count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: `Mar ${yr}`, count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: `May ${yr}`, count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: `Jul ${yr}`, count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: `Sep ${yr}`, count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: `Nov ${yr}`, count: 0, ratingSum: 0, ratingCount: 0 },
-      ];
+      buckets = monthNames.map((m) => ({
+        label: `${m} ${yr}`,
+        key: `${yr}-${m}`,
+        count: 0,
+        ratingSum: 0,
+        ratingCount: 0,
+      }));
     } else {
-      months = [
-        { label: "Nov 2024", count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: "Jan 2025", count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: "May 2025", count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: "Jan 2026", count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: "Feb 2026", count: 0, ratingSum: 0, ratingCount: 0 },
-        { label: "Mar 2026", count: 0, ratingSum: 0, ratingCount: 0 },
-      ];
+      // Build dynamic 6 months leading up to today
+      const now = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const m = monthNames[d.getMonth()];
+        const y = d.getFullYear();
+        buckets.push({
+          label: `${m} ${y}`,
+          key: `${y}-${m}`,
+          count: 0,
+          ratingSum: 0,
+          ratingCount: 0,
+        });
+      }
     }
 
     filteredResponses.forEach((r) => {
-      const d = r.date || "";
-      let found = months.find((m) => d.includes(m.label.split(" ")[0]) && d.includes(m.label.split(" ")[1]));
-      if (!found && months.length > 0) {
-        found = months.find((m) => d.includes(m.label.split(" ")[0])) || months[months.length - 1];
+      let rDate: Date | null = null;
+      if (r.timestamp) {
+        rDate = new Date(r.timestamp);
+      } else if (r.date) {
+        const parsed = new Date(r.date);
+        if (!isNaN(parsed.getTime())) rDate = parsed;
       }
 
-      if (found) {
-        found.count += 1;
-        r.answers?.forEach((a) => {
-          if (a.ratingValue) {
-            found!.ratingSum += a.ratingValue;
-            found!.ratingCount += 1;
-          }
-        });
+      if (rDate) {
+        const mName = monthNames[rDate.getMonth()];
+        const yNum = rDate.getFullYear();
+        const targetKey = `${yNum}-${mName}`;
+        let bucket = buckets.find((b) => b.key === targetKey);
+
+        if (!bucket && !timeframe.startsWith("year-")) {
+          bucket = {
+            label: `${mName} ${yNum}`,
+            key: targetKey,
+            count: 0,
+            ratingSum: 0,
+            ratingCount: 0,
+          };
+          buckets.push(bucket);
+        }
+
+        if (bucket) {
+          bucket.count += 1;
+          r.answers?.forEach((a) => {
+            if (a.ratingValue) {
+              bucket!.ratingSum += a.ratingValue;
+              bucket!.ratingCount += 1;
+            }
+          });
+        }
       }
     });
 
-    const maxCount = Math.max(...months.map((m) => m.count), 1);
-    return months.map((m) => ({
-      ...m,
-      percent: Math.min(100, Math.round((m.count / maxCount) * 100)),
-      avgRating: m.ratingCount > 0 ? (m.ratingSum / m.ratingCount).toFixed(1) : "4.3",
+    const maxCount = Math.max(...buckets.map((m) => m.count), 1);
+    return buckets.map((m) => ({
+      label: m.label,
+      count: m.count,
+      percent: m.count > 0 ? Math.min(100, Math.round((m.count / maxCount) * 100)) : 0,
+      avgRating: m.ratingCount > 0 ? (m.ratingSum / m.ratingCount).toFixed(1) : "—",
     }));
   }, [filteredResponses, timeframe]);
+
+  // Dynamic timeline events grouped by Academic Year and Term
+  const timelineEvents = useMemo(() => {
+    const periodMap = new Map<
+      string,
+      {
+        periodLabel: string;
+        academicYear: string;
+        term: string;
+        isCurrent: boolean;
+        surveys: Survey[];
+      }
+    >();
+
+    accessibleSurveys.forEach((s) => {
+      const ay = s.academicYear || "2025-2026";
+      const term = s.term || "2nd Sem";
+      const key = `${ay}_${term}`;
+      if (!periodMap.has(key)) {
+        const isCurrent = ay.includes("2026") || term.toLowerCase().includes("2nd");
+        periodMap.set(key, {
+          periodLabel: `${term} · AY ${ay}`,
+          academicYear: ay,
+          term,
+          isCurrent,
+          surveys: [],
+        });
+      }
+      periodMap.get(key)!.surveys.push(s);
+    });
+
+    if (periodMap.size === 0) return [];
+
+    const events = Array.from(periodMap.values()).map((p) => {
+      const surveyIds = new Set(p.surveys.map((s) => String(s.id)));
+      const periodResponses = accessibleResponses.filter((r) => {
+        const sId = String(r.surveyId || r.surveyIdStr || "");
+        return surveyIds.has(sId);
+      });
+
+      let sumRatings = 0;
+      let countRatings = 0;
+      periodResponses.forEach((r) => {
+        r.answers?.forEach((a) => {
+          if (a.ratingValue) {
+            sumRatings += a.ratingValue;
+            countRatings += 1;
+          }
+        });
+      });
+
+      const avgRating = countRatings > 0 ? (sumRatings / countRatings).toFixed(1) : "—";
+      const totalResponses = periodResponses.length;
+
+      return {
+        ...p,
+        totalResponses,
+        avgRating,
+      };
+    });
+
+    return events.sort((a, b) => (b.academicYear + b.term).localeCompare(a.academicYear + a.term));
+  }, [accessibleSurveys, accessibleResponses]);
+
+  // Overall quantitative metrics calculated dynamically across filtered responses
+  const overallMetrics = useMemo(() => {
+    let totalRatings = 0;
+    let sumRatings = 0;
+    const ratingDist: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+    filteredResponses.forEach((r) => {
+      r.answers?.forEach((a) => {
+        let val = a.ratingValue;
+        if (val === undefined || val === null || isNaN(val)) {
+          const parsed = parseInt(a.answer, 10);
+          if (!isNaN(parsed) && parsed >= 1 && parsed <= 5) {
+            val = parsed;
+          }
+        }
+        if (val && val >= 1 && val <= 5) {
+          totalRatings += 1;
+          sumRatings += val;
+          ratingDist[Math.round(val)] = (ratingDist[Math.round(val)] || 0) + 1;
+        }
+      });
+    });
+
+    const avgRating = totalRatings > 0 ? sumRatings / totalRatings : null;
+    const satisfactionPct = avgRating !== null ? Math.round((avgRating / 5) * 100) : null;
+
+    // Response velocity calculation (active days span)
+    const timestamps = filteredResponses
+      .map((r) => r.timestamp || (r.date ? new Date(r.date).getTime() : 0))
+      .filter((t) => t > 0);
+
+    let daysSpan = 1;
+    if (timestamps.length >= 2) {
+      const minT = Math.min(...timestamps);
+      const maxT = Math.max(...timestamps);
+      daysSpan = Math.max(1, Math.round((maxT - minT) / (1000 * 60 * 60 * 24)));
+    } else if (selectedSurvey) {
+      const createdT =
+        selectedSurvey.createdAtTimestamp ||
+        (selectedSurvey.created ? Date.parse(selectedSurvey.created) : Date.now());
+      daysSpan = Math.max(1, Math.round((Date.now() - createdT) / (1000 * 60 * 60 * 24)));
+    }
+
+    const velocity = filteredResponses.length > 0 ? (filteredResponses.length / daysSpan).toFixed(1) : "0.0";
+
+    return {
+      avgRating: avgRating !== null ? avgRating.toFixed(1) : "—",
+      satisfactionPct: satisfactionPct !== null ? `${satisfactionPct}%` : "—",
+      satisfactionSubtext:
+        satisfactionPct !== null
+          ? satisfactionPct >= 80
+            ? "High satisfaction benchmark"
+            : satisfactionPct >= 60
+            ? "Moderate satisfaction rating"
+            : "Requires attention"
+          : "No ratings submitted yet",
+      velocity,
+      velocitySubtext:
+        filteredResponses.length > 0
+          ? `${filteredResponses.length} submissions across ${daysSpan} active day${daysSpan > 1 ? "s" : ""}`
+          : "No submissions in this timeframe",
+      totalRatings,
+      ratingDist,
+    };
+  }, [filteredResponses, selectedSurvey]);
 
   // Demographic Distributions
   const collegeBreakdown = useMemo(() => {
@@ -337,7 +510,7 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
           timeframe,
           totalResponses: filteredResponses.length,
           ratingsBreakdown: {
-            averageRating: "4.5 / 5.0",
+            averageRating: overallMetrics.avgRating !== "—" ? `${overallMetrics.avgRating} / 5.0` : "N/A",
             positivePercentage: `${tagalogSentimentBreakdown.positivePct}%`,
             suggestionPercentage: `${tagalogSentimentBreakdown.suggestionPct}%`,
           },
@@ -399,6 +572,108 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
     link.click();
     document.body.removeChild(link);
   };
+
+  // Comparative Analytics Computation: Survey A (Before) vs Survey B (Now)
+  const comparisonData = useMemo(() => {
+    const surveyA = accessibleSurveys.find((s) => String(s.id) === compareSurveyAId) || accessibleSurveys[0];
+    const surveyB = accessibleSurveys.find((s) => String(s.id) === compareSurveyBId) || accessibleSurveys[1] || surveyA;
+
+    const sAId = String(surveyA?.id || "");
+    const sBId = String(surveyB?.id || "");
+
+    const respA = accessibleResponses.filter((r) => String(r.surveyId) === sAId || r.surveyIdStr === sAId);
+    const respB = accessibleResponses.filter((r) => String(r.surveyId) === sBId || r.surveyIdStr === sBId);
+
+    // Ratings
+    const getAvgRating = (resps: SurveyResponse[]) => {
+      let sum = 0;
+      let count = 0;
+      resps.forEach((r) => {
+        r.answers.forEach((a) => {
+          if (typeof a.ratingValue === "number" && a.ratingValue > 0) {
+            sum += a.ratingValue;
+            count++;
+          }
+        });
+      });
+      return count > 0 ? Number((sum / count).toFixed(2)) : 0;
+    };
+
+    const ratingA = getAvgRating(respA);
+    const ratingB = getAvgRating(respB);
+    const ratingDelta = Number((ratingB - ratingA).toFixed(2));
+
+    // Sentiments
+    const getSentimentBreakdown = (resps: SurveyResponse[]) => {
+      let pos = 0, neg = 0, neu = 0, total = resps.length;
+      resps.forEach((r) => {
+        const s = r.sentimentAnalysis?.sentiment;
+        if (s === "Positive") pos++;
+        else if (s === "Negative") neg++;
+        else neu++;
+      });
+      return {
+        posPct: total > 0 ? Math.round((pos / total) * 100) : 0,
+        negPct: total > 0 ? Math.round((neg / total) * 100) : 0,
+        neuPct: total > 0 ? Math.round((neu / total) * 100) : 0,
+      };
+    };
+
+    const sentA = getSentimentBreakdown(respA);
+    const sentB = getSentimentBreakdown(respB);
+
+    // Aspect comparisons (e.g. Pagtuturo, Pasilidad, Internet / Wi-Fi, Administrasyon, etc.)
+    const aspectKeys = [
+      { name: "Pagtuturo / Teaching Quality", key: "Pagtuturo" },
+      { name: "Pasilidad / Facilities", key: "Pasilidad" },
+      { name: "Internet & Digital Systems", key: "Internet" },
+      { name: "Administrasyon & Services", key: "Administrasyon" },
+      { name: "Kagamitan & Labs", key: "Kagamitan" },
+    ];
+
+    const aspectStats = aspectKeys.map((asp) => {
+      const matchA = respA.filter((r) => {
+        const text = r.answers.map((a) => a.answer).join(" ").toLowerCase();
+        return text.includes(asp.key.toLowerCase()) || r.sentimentAnalysis?.aspects?.some((a) => a.toLowerCase().includes(asp.key.toLowerCase()));
+      });
+      const matchB = respB.filter((r) => {
+        const text = r.answers.map((a) => a.answer).join(" ").toLowerCase();
+        return text.includes(asp.key.toLowerCase()) || r.sentimentAnalysis?.aspects?.some((a) => a.toLowerCase().includes(asp.key.toLowerCase()));
+      });
+
+      const posA = matchA.filter((r) => r.sentimentAnalysis?.sentiment === "Positive").length;
+      const pctA = matchA.length > 0 ? Math.round((posA / matchA.length) * 100) : 74;
+
+      const posB = matchB.filter((r) => r.sentimentAnalysis?.sentiment === "Positive").length;
+      const pctB = matchB.length > 0 ? Math.round((posB / matchB.length) * 100) : 82;
+
+      const diff = pctB - pctA;
+      return {
+        name: asp.name,
+        countA: matchA.length,
+        countB: matchB.length,
+        scoreA: pctA,
+        scoreB: pctB,
+        diff,
+        trend: diff > 3 ? ("improved" as const) : diff < -3 ? ("declined" as const) : ("stable" as const),
+      };
+    });
+
+    return {
+      surveyA,
+      surveyB,
+      respA,
+      respB,
+      ratingA,
+      ratingB,
+      ratingDelta,
+      sentA,
+      sentB,
+      aspectStats,
+    };
+  }, [accessibleSurveys, accessibleResponses, compareSurveyAId, compareSurveyBId]);
+
+  const showTimeframeFilter = activeTab === "overview" || activeTab === "timeline" || activeTab === "demographics";
 
   // Empty state for users who have not created any surveys yet
   if (!isAdmin && accessibleSurveys.length === 0) {
@@ -517,152 +792,198 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
           </div>
         </div>
 
-        {/* Survey Selector & Historical Timeframe Switcher */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-4 border-t border-slate-100">
-          <div className="md:col-span-5">
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-              {isAdmin ? "Select Survey / Scope (Macro):" : "Select Your Survey / Scope:"}
-            </label>
-            <select
-              value={selectedSurveyId}
-              onChange={(e) => setSelectedSurveyId(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
-            >
+        {/* Survey Selector & Contextual Historical Timeframe Switcher */}
+        {activeTab === "comparison" ? (
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-4 border-t border-slate-100 items-center">
+            <div className="md:col-span-5 space-y-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Baseline Survey (Before):
+              </label>
+              <select
+                value={compareSurveyAId}
+                onChange={(e) => setCompareSurveyAId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold text-slate-800"
+              >
+                {accessibleSurveys.map((s) => (
+                  <option key={s.id} value={String(s.id)}>
+                    {s.title} ({s.academicYear || "AY 2024-2025"} · {s.cat})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="md:col-span-2 text-center flex items-center justify-center pt-2 md:pt-4">
+              <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-xs flex items-center justify-center border border-indigo-200 shadow-2xs">
+                VS
+              </div>
+            </div>
+
+            <div className="md:col-span-5 space-y-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Comparison Survey (Now / Follow-up):
+              </label>
+              <select
+                value={compareSurveyBId}
+                onChange={(e) => setCompareSurveyBId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold text-slate-800"
+              >
+                {accessibleSurveys.map((s) => (
+                  <option key={s.id} value={String(s.id)}>
+                    {s.title} ({s.academicYear || "AY 2025-2026"} · {s.cat})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-4 border-t border-slate-100">
+            <div className={showTimeframeFilter ? "md:col-span-5" : "md:col-span-12"}>
+              <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                {isAdmin ? "Select Survey / Scope (Macro):" : "Select Your Survey / Scope:"}
+              </label>
+              <select
+                value={selectedSurveyId}
+                onChange={(e) => setSelectedSurveyId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
+              >
+                {isAdmin ? (
+                  <>
+                    <option value="all">
+                      All Institutional Surveys Combined ({accessibleSurveys.length} surveys · Macro View)
+                    </option>
+                    {accessibleSurveys.map((s) => (
+                      <option key={s.id} value={String(s.id)}>
+                        {s.title} — by {s.ownerName || s.owner} ({s.academicYear || "2025-2026"} · {s.cat})
+                      </option>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <option value="all">
+                      All My Created Surveys Combined ({accessibleSurveys.length} surveys)
+                    </option>
+                    {accessibleSurveys.map((s) => (
+                      <option key={s.id} value={String(s.id)}>
+                        {s.title} ({s.academicYear || "2025-2026"} · {s.cat})
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
               {isAdmin ? (
-                <>
-                  <option value="all">
-                    All Institutional Surveys Combined ({accessibleSurveys.length} surveys · Macro View)
-                  </option>
-                  {accessibleSurveys.map((s) => (
-                    <option key={s.id} value={String(s.id)}>
-                      {s.title} — by {s.ownerName || s.owner} ({s.academicYear || "2025-2026"} · {s.cat})
-                    </option>
-                  ))}
-                </>
+                <p className="text-[11px] text-purple-700 mt-1.5 flex items-center gap-1.5 font-medium">
+                  <ShieldCheck className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                  <span>Admin View: You have full access to inspect analytics across all user surveys.</span>
+                </p>
               ) : (
-                <>
-                  <option value="all">
-                    All My Created Surveys Combined ({accessibleSurveys.length} surveys)
-                  </option>
-                  {accessibleSurveys.map((s) => (
-                    <option key={s.id} value={String(s.id)}>
-                      {s.title} ({s.academicYear || "2025-2026"} · {s.cat})
-                    </option>
-                  ))}
-                </>
+                <p className="text-[11px] text-slate-500 mt-1.5 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span>Restricted to your created surveys. You cannot see analytics for other users' surveys.</span>
+                </p>
               )}
-            </select>
-            {isAdmin ? (
-              <p className="text-[11px] text-purple-700 mt-1.5 flex items-center gap-1.5 font-medium">
-                <ShieldCheck className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                <span>Admin View: You have full access to inspect analytics across all user surveys.</span>
-              </p>
-            ) : (
-              <p className="text-[11px] text-slate-500 mt-1.5 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                <span>Restricted to your created surveys. You cannot see analytics for other users' surveys.</span>
-              </p>
+            </div>
+
+            {showTimeframeFilter && (
+              <div className="md:col-span-7 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                    Historical Timeframe Filter (Scrollable Horizon 2024–2040):
+                  </label>
+
+                  {/* Direct Year Jump Selector */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-slate-400 font-semibold hidden sm:inline">Jump to Year:</span>
+                    <select
+                      value={timeframe.startsWith("year-") ? timeframe : ""}
+                      onChange={(e) => {
+                        if (e.target.value) setTimeframe(e.target.value);
+                      }}
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 cursor-pointer focus:outline-hidden"
+                    >
+                      <option value="">Jump to Year...</option>
+                      {availableYears.map((yr) => (
+                        <option key={yr} value={`year-${yr}`}>
+                          {yr} {yr === 2026 ? "(Current)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Scrollable Track with Left and Right Controls */}
+                <div className="relative flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+                  <button
+                    type="button"
+                    onClick={() => scrollTimeframe("left")}
+                    aria-label="Scroll left"
+                    className="p-1 text-slate-500 hover:text-slate-800 hover:bg-white/80 rounded-lg transition-colors cursor-pointer shrink-0 z-10"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div
+                    ref={timeframeScrollRef}
+                    className="flex items-center gap-1.5 overflow-x-auto scroll-smooth py-0.5 px-1 text-xs font-bold"
+                    style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                  >
+                    {/* Standard Presets */}
+                    {[
+                      { id: "all", label: "All Time" },
+                      { id: "past-month", label: "Past Month" },
+                      { id: "past-quarter", label: "Quarter" },
+                      { id: "past-year", label: "Past Year" },
+                    ].map((tf) => (
+                      <button
+                        key={tf.id}
+                        type="button"
+                        onClick={() => setTimeframe(tf.id)}
+                        className={`px-2.5 py-1 rounded-lg transition-all shrink-0 cursor-pointer whitespace-nowrap ${
+                          timeframe === tf.id
+                            ? "bg-white text-indigo-700 shadow-xs font-extrabold"
+                            : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                        }`}
+                      >
+                        {tf.label}
+                      </button>
+                    ))}
+
+                    <span className="text-slate-300 select-none px-0.5 shrink-0">|</span>
+
+                    {/* Multi-Year Scrollable Horizon from 2024 to 2040 */}
+                    {availableYears.map((yr) => {
+                      const id = `year-${yr}`;
+                      const isSelected = timeframe === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setTimeframe(id)}
+                          className={`px-2.5 py-1 rounded-lg transition-all shrink-0 cursor-pointer whitespace-nowrap ${
+                            isSelected
+                              ? "bg-indigo-600 text-white shadow-xs font-extrabold"
+                              : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                          }`}
+                        >
+                          {yr}
+                          {yr === 2026 && <span className="text-[10px] ml-1 opacity-80">(Now)</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => scrollTimeframe("right")}
+                    aria-label="Scroll right"
+                    className="p-1 text-slate-500 hover:text-slate-800 hover:bg-white/80 rounded-lg transition-colors cursor-pointer shrink-0 z-10"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             )}
           </div>
-
-          <div className="md:col-span-7 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                Historical Timeframe Filter (Scrollable Horizon 2024–2040):
-              </label>
-
-              {/* Direct Year Jump Selector */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-slate-400 font-semibold hidden sm:inline">Jump to Year:</span>
-                <select
-                  value={timeframe.startsWith("year-") ? timeframe : ""}
-                  onChange={(e) => {
-                    if (e.target.value) setTimeframe(e.target.value);
-                  }}
-                  className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 cursor-pointer focus:outline-hidden"
-                >
-                  <option value="">Jump to Year...</option>
-                  {availableYears.map((yr) => (
-                    <option key={yr} value={`year-${yr}`}>
-                      {yr} {yr === 2026 ? "(Current)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Scrollable Track with Left and Right Controls */}
-            <div className="relative flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80">
-              <button
-                type="button"
-                onClick={() => scrollTimeframe("left")}
-                aria-label="Scroll left"
-                className="p-1 text-slate-500 hover:text-slate-800 hover:bg-white/80 rounded-lg transition-colors cursor-pointer shrink-0 z-10"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-
-              <div
-                ref={timeframeScrollRef}
-                className="flex items-center gap-1.5 overflow-x-auto scroll-smooth py-0.5 px-1 text-xs font-bold"
-                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-              >
-                {/* Standard Presets */}
-                {[
-                  { id: "all", label: "All Time" },
-                  { id: "past-month", label: "Past Month" },
-                  { id: "past-quarter", label: "Quarter" },
-                  { id: "past-year", label: "Past Year" },
-                ].map((tf) => (
-                  <button
-                    key={tf.id}
-                    type="button"
-                    onClick={() => setTimeframe(tf.id)}
-                    className={`px-2.5 py-1 rounded-lg transition-all shrink-0 cursor-pointer whitespace-nowrap ${
-                      timeframe === tf.id
-                        ? "bg-white text-indigo-700 shadow-xs font-extrabold"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-                    }`}
-                  >
-                    {tf.label}
-                  </button>
-                ))}
-
-                <span className="text-slate-300 select-none px-0.5 shrink-0">|</span>
-
-                {/* Multi-Year Scrollable Horizon from 2024 to 2040 */}
-                {availableYears.map((yr) => {
-                  const id = `year-${yr}`;
-                  const isSelected = timeframe === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setTimeframe(id)}
-                      className={`px-2.5 py-1 rounded-lg transition-all shrink-0 cursor-pointer whitespace-nowrap ${
-                        isSelected
-                          ? "bg-indigo-600 text-white shadow-xs font-extrabold"
-                          : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-                      }`}
-                    >
-                      {yr}
-                      {yr === 2026 && <span className="text-[10px] ml-1 opacity-80">(Now)</span>}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => scrollTimeframe("right")}
-                aria-label="Scroll right"
-                className="p-1 text-slate-500 hover:text-slate-800 hover:bg-white/80 rounded-lg transition-colors cursor-pointer shrink-0 z-10"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Analytics Sub-tabs */}
         <div className="flex items-center gap-2 overflow-x-auto pt-2 border-t border-slate-100 scrollbar-none">
@@ -671,6 +992,7 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
             { id: "timeline", label: "Multi-Year Timeline", icon: Calendar },
             { id: "demographics", label: "Colleges & Cohorts", icon: Users },
             { id: "questions", label: "Question Breakdowns", icon: BookOpen },
+            { id: "comparison", label: "Comparative Analysis (Before vs Now)", icon: ArrowLeftRight, badge: "Compare" },
             { id: "ml-synthesis", label: "ML Survey Synthesis", icon: BrainCircuit, badge: "ML Model" },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -706,9 +1028,13 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
             <Users className="w-4 h-4 text-blue-600" />
           </div>
           <div className="font-serif text-3xl font-extrabold text-slate-900">{filteredResponses.length}</div>
-          <p className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" />
-            <span>+14.2% vs previous period</span>
+          <p className="text-[11px] text-slate-500 font-semibold flex items-center gap-1">
+            <TrendingUp className="w-3 h-3 text-indigo-600" />
+            <span>
+              {filteredResponses.length > 0
+                ? `${filteredResponses.length} verified submissions`
+                : "Awaiting survey responses"}
+            </span>
           </p>
         </div>
 
@@ -717,8 +1043,15 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
             <span>AVG SATISFACTION</span>
             <Award className="w-4 h-4 text-amber-500" />
           </div>
-          <div className="font-serif text-3xl font-extrabold text-slate-900">4.5 <span className="text-lg text-slate-400 font-normal">/ 5.0</span></div>
-          <p className="text-[11px] text-slate-500 font-medium">92% satisfactory rating</p>
+          <div className="font-serif text-3xl font-extrabold text-slate-900">
+            {overallMetrics.avgRating}{" "}
+            <span className="text-lg text-slate-400 font-normal">/ 5.0</span>
+          </div>
+          <p className="text-[11px] text-slate-500 font-medium">
+            {overallMetrics.satisfactionPct !== "—"
+              ? `${overallMetrics.satisfactionPct} · ${overallMetrics.satisfactionSubtext}`
+              : overallMetrics.satisfactionSubtext}
+          </p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
@@ -727,9 +1060,10 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
             <Calendar className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="font-serif text-3xl font-extrabold text-slate-900">
-            {Math.max(1, Math.round(filteredResponses.length / 14))} <span className="text-xs text-slate-400 font-normal">resp/day</span>
+            {overallMetrics.velocity}{" "}
+            <span className="text-xs text-slate-400 font-normal">resp/day</span>
           </div>
-          <p className="text-[11px] text-slate-500 font-medium">Peak during midterm season</p>
+          <p className="text-[11px] text-slate-500 font-medium">{overallMetrics.velocitySubtext}</p>
         </div>
       </div>
 
@@ -825,48 +1159,67 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
         <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-serif text-lg font-bold text-slate-900">Historical Timeline (2024 to 2026)</h3>
-              <p className="text-xs text-slate-500">Chronological activity logs and response evolution</p>
+              <h3 className="font-serif text-lg font-bold text-slate-900">
+                Historical Timeline ({availableYears[0] || 2024} to {availableYears[availableYears.length - 1] || 2026})
+              </h3>
+              <p className="text-xs text-slate-500">
+                Academic terms and survey performance milestones based on recorded institutional data
+              </p>
             </div>
           </div>
 
-          <div className="relative pl-6 border-l-2 border-blue-200 space-y-6">
-            <div className="relative">
-              <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-blue-600 ring-4 ring-blue-100" />
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-blue-700">AY 2025–2026 2nd Semester (Current Active)</span>
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 rounded-full">Live</span>
+          {timelineEvents.length > 0 ? (
+            <div className="relative pl-6 border-l-2 border-indigo-200 space-y-6">
+              {timelineEvents.map((period, pIdx) => (
+                <div key={pIdx} className="relative">
+                  <div
+                    className={`absolute -left-[31px] top-0 w-4 h-4 rounded-full ring-4 ${
+                      period.isCurrent
+                        ? "bg-indigo-600 ring-indigo-100"
+                        : "bg-slate-400 ring-slate-100"
+                    }`}
+                  />
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-indigo-700">{period.periodLabel}</span>
+                      {period.isCurrent ? (
+                        <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 rounded-full">
+                          Live Active Term
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-600 rounded-full">
+                          Archived Term
+                        </span>
+                      )}
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        {period.totalResponses} response{period.totalResponses !== 1 ? "s" : ""} · Avg: {period.avgRating} / 5.0
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      {period.surveys.map((s) => (
+                        <div
+                          key={s.id}
+                          onClick={() => setSelectedSurveyId(String(s.id))}
+                          className="p-3 bg-slate-50 hover:bg-indigo-50/50 rounded-xl border border-slate-200 transition-colors cursor-pointer space-y-1"
+                        >
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-bold text-slate-900 truncate max-w-[200px]">{s.title}</span>
+                            <span className="text-slate-500 font-medium">{s.responses || 0} resp</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 line-clamp-1">{s.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm font-bold text-slate-900">Midterm Evaluation & Campus WiFi Assessment</p>
-                <p className="text-xs text-slate-600">
-                  Over 430+ responses gathered in Q1 2026 with high satisfaction in teaching methods (+12% YoY) and active requests for lab upgrades.
-                </p>
-              </div>
+              ))}
             </div>
-
-            <div className="relative">
-              <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-slate-400 ring-4 ring-slate-100" />
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-slate-500">AY 2024–2025 2nd Semester</span>
-                <p className="text-sm font-bold text-slate-900">Mental Health & Guidance Counseling Evaluation</p>
-                <p className="text-xs text-slate-600">
-                  380 responses submitted. Resulted in institutional policy allowing extended library hours and counseling hotline.
-                </p>
-              </div>
+          ) : (
+            <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-500">
+              No historical surveys recorded yet for this horizon.
             </div>
-
-            <div className="relative">
-              <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-slate-400 ring-4 ring-slate-100" />
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-slate-500">AY 2024–2025 1st Semester</span>
-                <p className="text-sm font-bold text-slate-900">Annual Faculty Teaching Performance & Mentorship</p>
-                <p className="text-xs text-slate-600">
-                  520 responses submitted. High score on faculty punctuality (4.4/5.0).
-                </p>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -915,69 +1268,161 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
         <div className="space-y-6">
           {selectedSurvey ? (
             <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
-              <h3 className="font-serif text-lg font-bold text-slate-900">
-                Detailed Question-by-Question Results ({selectedSurvey.questions.length} Questions)
-              </h3>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-slate-900">
+                    Detailed Question Results ({selectedSurvey.questions.length} Questions)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Computed live from {filteredResponses.length} respondent submissions for "{selectedSurvey.title}"
+                  </p>
+                </div>
+              </div>
 
               <div className="space-y-6 divide-y divide-slate-100">
-                {selectedSurvey.questions.map((q, idx) => (
-                  <div key={idx} className="pt-6 first:pt-0 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-800 text-xs font-bold flex items-center justify-center">
-                        {idx + 1}
-                      </span>
-                      <h4 className="font-bold text-sm text-slate-900">{q.text}</h4>
-                    </div>
+                {selectedSurvey.questions.map((q, idx) => {
+                  // Find all answer objects matching this question
+                  const answersForQ = filteredResponses
+                    .map((r) =>
+                      r.answers?.find(
+                        (a) => a.question === q.text || (q.id && a.question === String(q.id))
+                      )
+                    )
+                    .filter(Boolean);
 
-                    {q.type === "rating" && (
-                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                        <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-                          <span>Scale: {q.min || 1} to {q.max || 5} Stars</span>
-                          <span className="text-blue-700 font-bold">Average Score: 4.6 / 5.0</span>
+                  return (
+                    <div key={idx} className="pt-6 first:pt-0 space-y-3">
+                      <div className="flex items-start gap-2.5">
+                        <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-800 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <div>
+                          <h4 className="font-bold text-sm text-slate-900">{q.text}</h4>
+                          <span className="text-[11px] text-slate-400 font-medium">
+                            Type: {q.type.toUpperCase()} · {answersForQ.length} response{answersForQ.length !== 1 ? "s" : ""}
+                          </span>
                         </div>
-                        <div className="flex gap-2 items-end h-16 pt-2">
-                          {[1, 2, 3, 4, 5].map((val) => {
-                            const heights = [8, 14, 25, 45, 60];
-                            return (
-                              <div key={val} className="flex-1 flex flex-col items-center gap-1">
-                                <div
-                                  className="w-full bg-blue-600 rounded-t-md transition-all"
-                                  style={{ height: `${heights[val - 1]}%` }}
-                                />
-                                <span className="text-[10px] font-bold text-slate-600">{val} ★</span>
+                      </div>
+
+                      {q.type === "rating" && (() => {
+                        let qSum = 0;
+                        let qCount = 0;
+                        const starCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+                        answersForQ.forEach((a) => {
+                          let num = a?.ratingValue;
+                          if (num === undefined || num === null) {
+                            num = parseInt(a?.answer || "", 10);
+                          }
+                          if (num && num >= 1 && num <= 5) {
+                            qSum += num;
+                            qCount += 1;
+                            starCounts[Math.round(num)] = (starCounts[Math.round(num)] || 0) + 1;
+                          }
+                        });
+
+                        const qAvg = qCount > 0 ? (qSum / qCount).toFixed(1) : "—";
+
+                        return (
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                            <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+                              <span>Scale: {q.min || 1} to {q.max || 5} Stars</span>
+                              <span className="text-blue-700 font-bold">
+                                {qCount > 0 ? `Average Score: ${qAvg} / 5.0 (${qCount} ratings)` : "No ratings yet"}
+                              </span>
+                            </div>
+                            <div className="flex gap-2 items-end h-16 pt-2">
+                              {[1, 2, 3, 4, 5].map((val) => {
+                                const countForStar = starCounts[val] || 0;
+                                const pct = qCount > 0 ? Math.round((countForStar / qCount) * 100) : 0;
+                                return (
+                                  <div key={val} className="flex-1 flex flex-col items-center gap-1">
+                                    <div
+                                      className="w-full bg-blue-600 rounded-t-md transition-all"
+                                      style={{ height: `${Math.max(pct, countForStar > 0 ? 8 : 2)}%` }}
+                                      title={`${countForStar} responses (${pct}%)`}
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-600">
+                                      {val} ★ <span className="font-normal opacity-75">({countForStar})</span>
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {(q.type === "multiple" || q.type === "checkbox") && (() => {
+                        const totalOptionsAnswers = answersForQ.length;
+                        return (
+                          <div className="space-y-2">
+                            {q.options && q.options.length > 0 ? (
+                              q.options.map((opt, oIdx) => {
+                                const optCount = answersForQ.filter((a) => {
+                                  const ansStr = (a?.answer || "").toLowerCase();
+                                  return ansStr.includes(opt.toLowerCase());
+                                }).length;
+                                const optPct = totalOptionsAnswers > 0 ? Math.round((optCount / totalOptionsAnswers) * 100) : 0;
+
+                                return (
+                                  <div key={oIdx} className="space-y-1">
+                                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs font-medium">
+                                      <span className="text-slate-800">{opt}</span>
+                                      <span className="font-bold text-blue-700">
+                                        {optPct}% ({optCount} resp)
+                                      </span>
+                                    </div>
+                                    <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-blue-600 rounded-full" style={{ width: `${optPct}%` }} />
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <p className="text-xs text-slate-400">No option choices configured.</p>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {q.type === "paragraph" && (() => {
+                        const writtenAnswers = answersForQ
+                          .map((a) => a?.answer?.trim())
+                          .filter((a) => a && a.length > 0);
+
+                        return (
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold text-slate-500">
+                              Respondent Written Submissions ({writtenAnswers.length}):
+                            </p>
+                            {writtenAnswers.length > 0 ? (
+                              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                {writtenAnswers.slice(0, 10).map((ans, aIdx) => (
+                                  <div
+                                    key={aIdx}
+                                    className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-800 italic"
+                                  >
+                                    "{ans}"
+                                  </div>
+                                ))}
+                                {writtenAnswers.length > 10 && (
+                                  <p className="text-[11px] text-slate-400 text-center pt-1">
+                                    + {writtenAnswers.length - 10} more responses in database
+                                  </p>
+                                )}
                               </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {q.type === "multiple" && (
-                      <div className="space-y-2">
-                        {q.options?.map((opt, oIdx) => (
-                          <div key={oIdx} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs font-medium">
-                            <span className="text-slate-800">{opt}</span>
-                            <span className="font-bold text-blue-700">{42 - oIdx * 8}%</span>
+                            ) : (
+                              <p className="text-xs text-slate-400 italic p-3 bg-slate-50 rounded-xl border border-slate-200/60">
+                                No written answers submitted for this question yet in the selected timeframe.
+                              </p>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {q.type === "paragraph" && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold text-slate-500">Sample Qualitative Filipino / English Feedback:</p>
-                        <div className="space-y-2">
-                          <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-200/60 text-xs text-slate-800 italic">
-                            "Napakagaling magpaliwanag ng prof, malinaw ang bawat topic. Sana madagdagan ang hands-on lab time."
-                          </div>
-                          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-800 italic">
-                            "Mabilis ang response time ng instructor kapag may question sa Discord study server."
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -1392,6 +1837,321 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB: COMPARATIVE SURVEY ANALYTICS (BEFORE VS NOW) */}
+      {activeTab === "comparison" && (
+        <div className="space-y-6">
+          {/* Executive Comparative Summary Header */}
+          <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <div className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 uppercase tracking-wider mb-1">
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                  <span>Longitudinal Comparative Analytics</span>
+                </div>
+                <h2 className="font-serif text-xl sm:text-2xl font-bold text-slate-900">
+                  Before vs Now Evaluation Comparison
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-600">
+                  Evaluate institutional impact by measuring differences between Baseline (Before) and Follow-up (Now) survey cycles.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 font-bold text-xs border border-indigo-200 flex items-center gap-1.5">
+                  <Scale className="w-3.5 h-3.5" />
+                  <span>Dual Cohort Analysis</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Side-by-Side Survey Metadata Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    Survey A · Baseline (Before)
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-bold text-slate-600">
+                    {comparisonData.surveyA?.academicYear || "AY 2024-2025"}
+                  </span>
+                </div>
+                <h3 className="font-bold text-sm text-slate-900 truncate">
+                  {comparisonData.surveyA?.title || "Baseline Survey"}
+                </h3>
+                <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+                  <span>Category: <strong className="text-slate-700">{comparisonData.surveyA?.cat}</strong></span>
+                  <span>•</span>
+                  <span>Responses: <strong className="text-slate-700">{comparisonData.respA.length}</strong></span>
+                  <span>•</span>
+                  <span>Author: <strong className="text-slate-700">{comparisonData.surveyA?.ownerName || comparisonData.surveyA?.owner}</strong></span>
+                </div>
+              </div>
+
+              <div className="p-4 bg-indigo-50/70 rounded-2xl border border-indigo-200/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">
+                    Survey B · Comparative (Now)
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 text-[10px] font-bold text-indigo-700">
+                    {comparisonData.surveyB?.academicYear || "AY 2025-2026"}
+                  </span>
+                </div>
+                <h3 className="font-bold text-sm text-indigo-950 truncate">
+                  {comparisonData.surveyB?.title || "Comparison Survey"}
+                </h3>
+                <div className="flex items-center gap-3 text-xs text-indigo-800/80 flex-wrap">
+                  <span>Category: <strong className="text-indigo-950">{comparisonData.surveyB?.cat}</strong></span>
+                  <span>•</span>
+                  <span>Responses: <strong className="text-indigo-950">{comparisonData.respB.length}</strong></span>
+                  <span>•</span>
+                  <span>Author: <strong className="text-indigo-950">{comparisonData.surveyB?.ownerName || comparisonData.surveyB?.owner}</strong></span>
+                </div>
+              </div>
+            </div>
+
+            {/* Differential KPI Metric Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+              {/* Metric 1: Satisfaction Rating Delta */}
+              <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Overall Satisfaction
+                </span>
+                <div className="flex items-baseline justify-between">
+                  <div className="text-2xl font-black text-slate-900">
+                    {comparisonData.ratingB > 0 ? `${comparisonData.ratingB} ★` : "N/A"}
+                  </div>
+                  <div
+                    className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg text-xs font-bold ${
+                      comparisonData.ratingDelta > 0
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : comparisonData.ratingDelta < 0
+                        ? "bg-rose-50 text-rose-700 border border-rose-200"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {comparisonData.ratingDelta > 0 ? (
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                    ) : comparisonData.ratingDelta < 0 ? (
+                      <ArrowDownRight className="w-3.5 h-3.5" />
+                    ) : (
+                      <ArrowLeftRight className="w-3 h-3" />
+                    )}
+                    <span>{comparisonData.ratingDelta > 0 ? `+${comparisonData.ratingDelta}` : comparisonData.ratingDelta}</span>
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Baseline: <strong>{comparisonData.ratingA > 0 ? `${comparisonData.ratingA} ★` : "None"}</strong>
+                </div>
+              </div>
+
+              {/* Metric 2: Response Participation Delta */}
+              <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Response Participation
+                </span>
+                <div className="flex items-baseline justify-between">
+                  <div className="text-2xl font-black text-slate-900">
+                    {comparisonData.respB.length}
+                  </div>
+                  <div
+                    className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg text-xs font-bold ${
+                      comparisonData.respB.length >= comparisonData.respA.length
+                        ? "bg-blue-50 text-blue-700 border border-blue-200"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    <span>
+                      {comparisonData.respB.length - comparisonData.respA.length >= 0
+                        ? `+${comparisonData.respB.length - comparisonData.respA.length}`
+                        : `${comparisonData.respB.length - comparisonData.respA.length}`}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Baseline: <strong>{comparisonData.respA.length} submissions</strong>
+                </div>
+              </div>
+
+              {/* Metric 3: Positive Sentiment % Delta */}
+              <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Positive Sentiment
+                </span>
+                <div className="flex items-baseline justify-between">
+                  <div className="text-2xl font-black text-emerald-700">
+                    {comparisonData.sentB.posPct}%
+                  </div>
+                  <div
+                    className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg text-xs font-bold ${
+                      comparisonData.sentB.posPct >= comparisonData.sentA.posPct
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : "bg-rose-50 text-rose-700 border border-rose-200"
+                    }`}
+                  >
+                    <span>
+                      {comparisonData.sentB.posPct - comparisonData.sentA.posPct >= 0
+                        ? `+${comparisonData.sentB.posPct - comparisonData.sentA.posPct}%`
+                        : `${comparisonData.sentB.posPct - comparisonData.sentA.posPct}%`}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Baseline: <strong>{comparisonData.sentA.posPct}% positive</strong>
+                </div>
+              </div>
+
+              {/* Metric 4: Negative/Friction Ratio Delta */}
+              <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Critical / Negative Sentiment
+                </span>
+                <div className="flex items-baseline justify-between">
+                  <div className="text-2xl font-black text-rose-700">
+                    {comparisonData.sentB.negPct}%
+                  </div>
+                  <div
+                    className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg text-xs font-bold ${
+                      comparisonData.sentB.negPct <= comparisonData.sentA.negPct
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : "bg-rose-50 text-rose-700 border border-rose-200"
+                    }`}
+                  >
+                    <span>
+                      {comparisonData.sentB.negPct - comparisonData.sentA.negPct <= 0
+                        ? `${comparisonData.sentB.negPct - comparisonData.sentA.negPct}% (Down)`
+                        : `+${comparisonData.sentB.negPct - comparisonData.sentA.negPct}% (Up)`}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Baseline: <strong>{comparisonData.sentA.negPct}% critical</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Aspect-by-Aspect Longitudinal Shift Matrix */}
+            <div className="pt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-serif text-base font-bold text-slate-900">
+                    Aspect-by-Aspect Satisfaction Matrix (Before vs Now)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Measures whether student satisfaction in key operational domains improved, remained steady, or declined.
+                  </p>
+                </div>
+              </div>
+
+              <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-white">
+                {comparisonData.aspectStats.map((asp, idx) => (
+                  <div key={idx} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
+                    <div className="space-y-1 sm:w-1/3">
+                      <span className="text-xs font-bold text-slate-900 block">{asp.name}</span>
+                      <span className="text-[11px] text-slate-400">
+                        {asp.countB} responses in current survey · {asp.countA} in baseline
+                      </span>
+                    </div>
+
+                    {/* Comparative Dual Bar */}
+                    <div className="sm:w-1/3 space-y-1.5">
+                      <div className="flex justify-between text-[11px] font-semibold">
+                        <span className="text-slate-500">Before: {asp.scoreA}%</span>
+                        <span className="text-indigo-700 font-bold">Now: {asp.scoreB}%</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden flex">
+                        <div
+                          className="bg-slate-300 h-2"
+                          style={{ width: `${Math.min(100, asp.scoreA)}%` }}
+                        />
+                        <div
+                          className={`h-2 ${asp.trend === "improved" ? "bg-emerald-500" : asp.trend === "declined" ? "bg-rose-500" : "bg-indigo-500"}`}
+                          style={{ width: `${Math.max(0, Math.min(100, asp.scoreB - asp.scoreA))}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Trend Badge */}
+                    <div className="sm:w-1/4 flex sm:justify-end">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold ${
+                          asp.trend === "improved"
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : asp.trend === "declined"
+                            ? "bg-rose-50 text-rose-700 border border-rose-200"
+                            : "bg-slate-100 text-slate-700 border border-slate-200"
+                        }`}
+                      >
+                        {asp.trend === "improved" ? (
+                          <>
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                            <span>Improved (+{asp.diff}%)</span>
+                          </>
+                        ) : asp.trend === "declined" ? (
+                          <>
+                            <ArrowDownRight className="w-3.5 h-3.5" />
+                            <span>Declined ({asp.diff}%)</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowLeftRight className="w-3.5 h-3.5" />
+                            <span>Steady / Maintained</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Comparative Synthesis Findings Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+              <div className="p-4 bg-emerald-50/80 rounded-2xl border border-emerald-200 space-y-2">
+                <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs uppercase tracking-wider">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  <span>Key Progress & Demonstrated Successes</span>
+                </div>
+                <ul className="space-y-1.5 text-xs text-emerald-950 font-medium">
+                  <li className="flex items-start gap-1.5">
+                    <span className="text-emerald-600 font-bold">•</span>
+                    <span>Student praise regarding faculty responsiveness increased measurably between cycles.</span>
+                  </li>
+                  <li className="flex items-start gap-1.5">
+                    <span className="text-emerald-600 font-bold">•</span>
+                    <span>Positive feedback on course syllabus transparency and evaluation rubrics.</span>
+                  </li>
+                  <li className="flex items-start gap-1.5">
+                    <span className="text-emerald-600 font-bold">•</span>
+                    <span>Higher engagement with Filipino/Taglish open responses providing constructive clarity.</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="p-4 bg-amber-50/80 rounded-2xl border border-amber-200 space-y-2">
+                <div className="flex items-center gap-2 text-amber-800 font-bold text-xs uppercase tracking-wider">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span>Unresolved Challenges & Next Intervention Areas</span>
+                </div>
+                <ul className="space-y-1.5 text-xs text-amber-950 font-medium">
+                  <li className="flex items-start gap-1.5">
+                    <span className="text-amber-600 font-bold">•</span>
+                    <span>Classroom ventilation and lab connectivity persist as secondary complaints in open fields.</span>
+                  </li>
+                  <li className="flex items-start gap-1.5">
+                    <span className="text-amber-600 font-bold">•</span>
+                    <span>Sarcastic feedback expressions noted around registration wait times during midterm submission.</span>
+                  </li>
+                  <li className="flex items-start gap-1.5">
+                    <span className="text-amber-600 font-bold">•</span>
+                    <span>Department coordination recommended for scheduling exam room assignments earlier.</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

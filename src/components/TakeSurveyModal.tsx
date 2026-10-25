@@ -11,6 +11,11 @@ import {
   MessageSquare,
   Star,
   Send,
+  ShieldCheck,
+  UserCheck,
+  FileCheck,
+  ArrowRight,
+  AlertTriangle,
 } from "lucide-react";
 
 interface TakeSurveyModalProps {
@@ -18,7 +23,7 @@ interface TakeSurveyModalProps {
   currentUser: UserProfile | null;
   existingAnswers?: Answer[];
   onClose: () => void;
-  onSubmit: (answers: Answer[]) => Promise<void>;
+  onSubmit: (answers: Answer[], isAnonymous?: boolean) => Promise<void>;
 }
 
 export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
@@ -45,7 +50,16 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
     return {};
   });
 
-  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [isAnonymous, setIsAnonymous] = useState<boolean>(true);
+  const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+  const [submittedReceipt, setSubmittedReceipt] = useState<{
+    receiptId: string;
+    timestamp: string;
+    isAnonymous: boolean;
+    questionsCount: number;
+  } | null>(null);
+
+    const [submitting, setSubmitting] = useState<boolean>(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleRatingSelect = (qIdx: number, val: number, label?: string) => {
@@ -84,29 +98,36 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
     setAnswersState((prev) => ({ ...prev, [qIdx]: val }));
   };
 
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isReadOnly) return;
+  const validateForm = (): boolean => {
     setValidationError(null);
-
-    // Validate that required questions are answered
     for (let i = 0; i < survey.questions.length; i++) {
       const q = survey.questions[i];
       const ans = answersState[i];
       if (q.type === "rating" && !ans) {
         setValidationError(`Please provide a rating for Question #${i + 1}.`);
-        return;
+        return false;
       }
       if (q.type === "multiple" && !ans) {
         setValidationError(`Please select an option for Question #${i + 1}.`);
-        return;
+        return false;
       }
       if (q.type === "paragraph" && (!ans || !ans.trim())) {
         setValidationError(`Please provide your feedback response for Question #${i + 1}.`);
-        return;
+        return false;
       }
     }
+    return true;
+  };
 
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isReadOnly) return;
+    if (validateForm()) {
+      setShowConfirmModal(true);
+    }
+  };
+
+  const handleConfirmedSubmit = async () => {
     setSubmitting(true);
     try {
       const answers: Answer[] = survey.questions.map((q, idx) => {
@@ -129,16 +150,27 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
         };
       });
 
-      await onSubmit(answers);
+      await onSubmit(answers, isAnonymous);
+
+      const receiptId = `EVAL-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
+      setSubmittedReceipt({
+        receiptId,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric", year: "numeric" }),
+        isAnonymous,
+        questionsCount: survey.questions.length,
+      });
+
+      setShowConfirmModal(false);
 
       // Trigger celebratory confetti
       confetti({
-        particleCount: 80,
-        spread: 60,
+        particleCount: 90,
+        spread: 70,
         origin: { y: 0.6 },
       });
     } catch (err: any) {
       setValidationError(err?.message || "Failed to submit survey");
+      setShowConfirmModal(false);
     } finally {
       setSubmitting(false);
     }
@@ -153,7 +185,72 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
         className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 my-8 space-y-6 relative max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header */}
+        {/* SUCCESS RECEIPT WINDOW */}
+        {submittedReceipt ? (
+          <div className="py-6 text-center space-y-6 animate-in fade-in zoom-in-95">
+            <div className="w-16 h-16 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+              <CheckCircle2 className="w-9 h-9" />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-200 uppercase tracking-wider">
+                Submission Confirmed
+              </span>
+              <h2 className="font-serif text-2xl font-extrabold text-slate-900">
+                Evaluation Successfully Recorded!
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
+                Thank you for contributing to our institutional quality improvement. Your feedback has been safely stored and processed.
+              </p>
+            </div>
+
+            {/* Official Receipt Card */}
+            <div className="max-w-md mx-auto p-4 bg-slate-50 border border-slate-200 rounded-2xl text-left space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Official Receipt Reference</span>
+                <span className="font-mono text-xs font-bold text-slate-800">{submittedReceipt.receiptId}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Survey Title:</span>
+                <span className="font-bold text-slate-900 truncate max-w-[220px]">{survey.title}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Category:</span>
+                <span className="font-semibold text-blue-700">{survey.cat}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Submission Timestamp:</span>
+                <span className="font-medium text-slate-700">{submittedReceipt.timestamp}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Privacy Status:</span>
+                <span className="font-bold flex items-center gap-1.5">
+                  {submittedReceipt.isAnonymous ? (
+                    <span className="text-emerald-700 flex items-center gap-1">
+                      <Lock className="w-3.5 h-3.5" /> 100% Anonymous
+                    </span>
+                  ) : (
+                    <span className="text-indigo-700 flex items-center gap-1">
+                      <UserCheck className="w-3.5 h-3.5" /> Verified Profile ({currentUser?.name || "Student"})
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-8 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                Done & Return to Campus Surveys
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Modal Header */}
         <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-100">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
@@ -180,18 +277,56 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
           </button>
         </div>
 
-        {/* Anonymous Guarantee Callout */}
-        <div className="p-3.5 bg-blue-50/70 rounded-2xl border border-blue-200/60 flex items-center justify-between text-xs text-blue-900">
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-blue-700 shrink-0" />
-            <span className="font-semibold">
-              100% Anonymous Submission · Submissions in Tagalog, Taglish & English are welcome!
-            </span>
+        {/* Anonymity Selection Pill Bar */}
+        {!isReadOnly && (
+          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                Submission Privacy Mode
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">
+                {survey.questions.length} Evaluated Questions
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsAnonymous(true)}
+                className={`p-3 rounded-xl border text-left flex items-start gap-2.5 cursor-pointer transition-all ${
+                  isAnonymous
+                    ? "bg-blue-50/90 border-blue-400 text-blue-950 shadow-xs ring-1 ring-blue-300"
+                    : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                }`}
+              >
+                <Lock className={`w-4 h-4 mt-0.5 shrink-0 ${isAnonymous ? "text-blue-700" : "text-slate-400"}`} />
+                <div>
+                  <div className="text-xs font-bold">100% Anonymous (Default)</div>
+                  <div className="text-[11px] text-slate-500 leading-tight mt-0.5">
+                    Your name, student ID & email are kept private. Ideal for unbiased evaluation.
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsAnonymous(false)}
+                className={`p-3 rounded-xl border text-left flex items-start gap-2.5 cursor-pointer transition-all ${
+                  !isAnonymous
+                    ? "bg-indigo-50/90 border-indigo-400 text-indigo-950 shadow-xs ring-1 ring-indigo-300"
+                    : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                }`}
+              >
+                <UserCheck className={`w-4 h-4 mt-0.5 shrink-0 ${!isAnonymous ? "text-indigo-700" : "text-slate-400"}`} />
+                <div>
+                  <div className="text-xs font-bold">Verified Identity Submission</div>
+                  <div className="text-[11px] text-slate-500 leading-tight mt-0.5">
+                    Attaches verified student profile for clearance & direct department resolution.
+                  </div>
+                </div>
+              </button>
+            </div>
           </div>
-          <span className="text-[11px] text-blue-700 font-bold hidden sm:block">
-            {survey.questions.length} Questions
-          </span>
-        </div>
+        )}
 
         {validationError && (
           <div className="p-3.5 bg-rose-50 rounded-2xl border border-rose-200 text-xs font-bold text-rose-700 flex items-center gap-2">
@@ -363,6 +498,79 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
             )}
           </div>
         </form>
+        </>
+        )}
+
+        {/* CONFIRMATION MODAL OVERLAY */}
+        {showConfirmModal && (
+          <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
+              <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div className="text-center space-y-1">
+                <h3 className="font-serif text-lg font-bold text-slate-900">
+                  Confirm Survey Submission
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  You are about to submit your response for{" "}
+                  <span className="font-semibold text-slate-800">"{survey.title}"</span>.
+                </p>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Submission Mode:</span>
+                  <span className="font-bold flex items-center gap-1.5 text-slate-900">
+                    {isAnonymous ? (
+                      <span className="text-emerald-700 flex items-center gap-1">
+                        <Lock className="w-3.5 h-3.5" /> 100% Anonymous
+                      </span>
+                    ) : (
+                      <span className="text-indigo-700 flex items-center gap-1">
+                        <UserCheck className="w-3.5 h-3.5" /> Verified Profile ({currentUser?.name || "Student"})
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Total Questions:</span>
+                  <span className="font-bold text-slate-900">{survey.questions.length} Questions</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">NLP Engine:</span>
+                  <span className="font-bold text-blue-700">Tagalog/Taglish Sentiment Analysis</span>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => setShowConfirmModal(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Review Answers
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={handleConfirmedSubmit}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {submitting ? (
+                    <span>Submitting...</span>
+                  ) : (
+                    <>
+                      <span>Yes, Submit Feedback</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

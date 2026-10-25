@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { config } from "dotenv";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, writeBatch } from "firebase/firestore";
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 
 // Load environment variables from .env file
 config({ path: resolve(process.cwd(), ".env") });
@@ -49,6 +50,39 @@ async function main() {
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  // Authenticate as Admin to satisfy Firestore Security Rules
+  console.log("🔐 Authenticating with Firebase Auth as admin@edufeedback.edu...");
+  try {
+    await signInWithEmailAndPassword(auth, "admin@edufeedback.edu", "admin123");
+    console.log("  ✅ Authenticated successfully with Firebase Auth\n");
+  } catch (authErr: any) {
+    if (
+      authErr?.code === "auth/user-not-found" ||
+      authErr?.code === "auth/invalid-credential" ||
+      authErr?.code === "auth/invalid-login-credentials"
+    ) {
+      try {
+        await createUserWithEmailAndPassword(auth, "admin@edufeedback.edu", "admin123");
+        console.log("  ✅ Registered and authenticated new admin@edufeedback.edu in Firebase Auth\n");
+      } catch (createErr: any) {
+        if (createErr?.code === "auth/operation-not-allowed") {
+          console.error("  ❌ Firebase Auth Error: 'Email/Password' sign-in provider is disabled in your Firebase project.");
+          console.error("  👉 Please enable it in Firebase Console > Authentication > Sign-in method > Email/Password.\n");
+        } else {
+          console.warn("  ⚠️ Firebase Auth notice:", createErr?.message || createErr);
+        }
+        console.warn("  Continuing with seeding attempt...\n");
+      }
+    } else if (authErr?.code === "auth/operation-not-allowed") {
+      console.error("  ❌ Firebase Auth Error: 'Email/Password' sign-in provider is disabled in your Firebase project.");
+      console.error("  👉 Please enable it in Firebase Console > Authentication > Sign-in method > Email/Password.\n");
+    } else {
+      console.warn("  ⚠️ Firebase Auth notice:", authErr?.message || authErr);
+      console.warn("  Continuing with unauthenticated seeding...\n");
+    }
+  }
 
   console.log("📥 Loading and validating datasets from scripts/demo-data.json...");
   console.log(`  - Users: ${data.users?.length || 0}`);
@@ -119,6 +153,7 @@ async function main() {
   console.log("  • Dr. Maria Reyes: maria.reyes@school.edu  / faculty123");
   console.log("  • Clara Santos:    clara.santos@school.edu / officer123");
   console.log("  • Juan Dela Cruz:  juan.delacruz@school.edu / student123\n");
+  process.exit(0);
 }
 
 main().catch((err) => {

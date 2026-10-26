@@ -45,13 +45,42 @@ export class DatabaseService {
   // AUTHENTICATION
   // ==========================================
   static async login(email: string, password: string): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = email.trim();
 
     if (!cleanEmail) {
       return { success: false, error: "Please enter your university email address." };
     }
     if (!password) {
       return { success: false, error: "Please enter your account password." };
+    }
+
+    // Verify against local registered accounts first to detect case mismatch
+    const localUsers = LocalStorageManager.getUsers();
+    const exactUser = localUsers.find((u) => u.email === cleanEmail);
+    const caseMismatch = !exactUser && localUsers.find((u) => u.email.toLowerCase() === cleanEmail.toLowerCase());
+
+    // If an account exists with different letter casing, immediately report case mismatch
+    if (caseMismatch) {
+      return {
+        success: false,
+        error: `Email is case-sensitive! You entered "${cleanEmail}", but the registered account is "${caseMismatch.email}". Please match the exact capitalization.`,
+      };
+    }
+
+    let foundUser = exactUser;
+
+    // Special check for superadmin initial credential
+    if (!foundUser && cleanEmail === "admin@edufeedback.edu") {
+      const adminUser: UserProfile = {
+        email: "admin@edufeedback.edu",
+        name: "System Administrator",
+        pos: "Superadmin",
+        role: "superadmin",
+        status: "active",
+        joined: "Jan 15, 2024",
+      };
+      LocalStorageManager.addUser(adminUser);
+      foundUser = adminUser;
     }
 
     // If Firebase Auth is configured, attempt Firebase login
@@ -61,6 +90,12 @@ export class DatabaseService {
         // Fetch user profile from Firestore or local
         const cloudUser = await FirestoreUserService.getByEmail(cleanEmail);
         if (cloudUser) {
+          if (cloudUser.email !== cleanEmail) {
+            return {
+              success: false,
+              error: `Email is case-sensitive! You entered "${cleanEmail}", but the registered account is "${cloudUser.email}". Please match the exact capitalization.`,
+            };
+          }
           if (cloudUser.status === "suspended") {
             return { success: false, error: "This university account has been suspended by system administration." };
           }
@@ -83,7 +118,14 @@ export class DatabaseService {
       }
     }
 
-    // Verify password first
+    if (!foundUser) {
+      return {
+        success: false,
+        error: "Account not found with this email. Please check your credentials or register a new account.",
+      };
+    }
+
+    // Verify password for exact case-sensitive email
     const isValidPassword = LocalStorageManager.verifyPassword(cleanEmail, password);
     if (!isValidPassword) {
       return {
@@ -92,50 +134,33 @@ export class DatabaseService {
       };
     }
 
-    // Verify against local registered accounts
-    const localUsers = LocalStorageManager.getUsers();
-    let foundUser = localUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-
-    // Special check for superadmin initial credential
-    if (!foundUser && cleanEmail === "admin@edufeedback.edu") {
-      const adminUser: UserProfile = {
-        email: "admin@edufeedback.edu",
-        name: "System Administrator",
-        pos: "Superadmin",
-        role: "superadmin",
-        status: "active",
-        joined: "Jan 15, 2024",
+    if (foundUser.status === "suspended") {
+      return { success: false, error: "This university account has been suspended by system administration." };
+    }
+    if (foundUser.status === "pending_approval") {
+      return {
+        success: false,
+        error: "Your account is currently awaiting administrative approval from the System Administrator. Please check back once an administrator verifies your faculty/officer credentials.",
       };
-      LocalStorageManager.addUser(adminUser);
-      foundUser = adminUser;
     }
-
-    if (foundUser) {
-      if (foundUser.status === "suspended") {
-        return { success: false, error: "This university account has been suspended by system administration." };
-      }
-      if (foundUser.status === "pending_approval") {
-        return {
-          success: false,
-          error: "Your account is currently awaiting administrative approval from the System Administrator. Please check back once an administrator verifies your faculty/officer credentials.",
-        };
-      }
-      return { success: true, user: foundUser };
-    }
-
-    return {
-      success: false,
-      error: "Account not found with this email. Please check your credentials or register a new account.",
-    };
+    return { success: true, user: foundUser };
   }
 
   static async register(userProfile: UserProfile, password: string): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
-    const cleanEmail = userProfile.email.trim().toLowerCase();
+    const cleanEmail = userProfile.email.trim();
 
     // Check for existing account
-    const existing = LocalStorageManager.getUsers().find((u) => u.email.toLowerCase() === cleanEmail);
-    if (existing) {
+    const localUsers = LocalStorageManager.getUsers();
+    const exactExisting = localUsers.find((u) => u.email === cleanEmail);
+    if (exactExisting) {
       return { success: false, error: "An account with this university email address already exists. Please sign in." };
+    }
+    const caseMismatch = localUsers.find((u) => u.email.toLowerCase() === cleanEmail.toLowerCase());
+    if (caseMismatch) {
+      return {
+        success: false,
+        error: `An account already exists with different capitalization ("${caseMismatch.email}"). Please use that capitalization to sign in or choose a distinct email address.`,
+      };
     }
 
     const isFacultyOrOfficer = userProfile.pos === "Faculty" || userProfile.pos === "Student Officer";
@@ -148,7 +173,7 @@ export class DatabaseService {
       joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     };
 
-    // Save password locally
+    // Save password locally with exact case
     LocalStorageManager.savePassword(cleanEmail, password);
 
     // If Firebase is available, register to Firebase Auth & Firestore
@@ -268,7 +293,7 @@ export class DatabaseService {
       }
     }
     const current = LocalStorageManager.getUsers();
-    const updated = [user, ...current.filter((u) => u.email.toLowerCase() !== user.email.toLowerCase())];
+    const updated = [user, ...current.filter((u) => u.email !== user.email)];
     LocalStorageManager.saveUsers(updated);
   }
 

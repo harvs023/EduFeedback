@@ -282,11 +282,15 @@ export const FirestoreUserService = {
     if (!authInstance?.currentUser) {
       return null;
     }
-    const docId = email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, "_");
+    const cleanEmail = email.trim();
+    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, "_");
     try {
       const snap = await getDoc(doc(firestore, COLLECTIONS.USERS, docId));
       if (snap.exists()) {
-        return snap.data() as UserProfile;
+        const u = snap.data() as UserProfile;
+        if (u.email === cleanEmail) {
+          return u;
+        }
       }
       return null;
     } catch (err) {
@@ -298,9 +302,10 @@ export const FirestoreUserService = {
   async save(user: UserProfile): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) return;
-    const docId = user.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, "_");
+    const cleanEmail = user.email.trim();
+    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, "_");
     try {
-      await setDoc(doc(firestore, COLLECTIONS.USERS, docId), user, { merge: true });
+      await setDoc(doc(firestore, COLLECTIONS.USERS, docId), { ...user, email: cleanEmail }, { merge: true });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.USERS}/${docId}`);
     }
@@ -309,7 +314,8 @@ export const FirestoreUserService = {
   async delete(email: string): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) return;
-    const docId = email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, "_");
+    const cleanEmail = email.trim();
+    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, "_");
     try {
       await deleteDoc(doc(firestore, COLLECTIONS.USERS, docId));
     } catch (err) {
@@ -521,7 +527,7 @@ export async function seedFirestoreWithData(data: {
 
     currentCollection = COLLECTIONS.USERS;
     for (const user of data.users) {
-      currentDocId = user.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, "_");
+      currentDocId = user.email.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
       await setDoc(doc(firestore, COLLECTIONS.USERS, currentDocId), user);
     }
 

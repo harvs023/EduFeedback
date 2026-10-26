@@ -131,7 +131,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
 
       const newProfile: UserProfile = {
         name: regName.trim(),
-        email: regEmail.trim().toLowerCase(),
+        email: regEmail.trim(),
         pos: regPos as Position,
         role: roleType,
         status: initialStatus,
@@ -385,9 +385,12 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
             {mode === "login" ? (
               <form onSubmit={handleLoginSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    University Email Address
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      University Email Address
+                    </label>
+                    <span className="text-[10px] text-amber-400 font-medium">Case-sensitive</span>
+                  </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                       <Mail className="w-4 h-4" />
@@ -504,9 +507,12 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                    University Email Address
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      University Email Address
+                    </label>
+                    <span className="text-[10px] text-amber-400 font-medium">Case-sensitive</span>
+                  </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                       <Mail className="w-4 h-4" />

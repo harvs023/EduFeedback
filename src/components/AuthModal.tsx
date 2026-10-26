@@ -123,7 +123,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       const newUser: UserProfile = {
         name: regName.trim(),
-        email: regEmail.trim().toLowerCase(),
+        email: regEmail.trim(),
         pos: regPos,
         role: "user",
         status: initialStatus,
@@ -295,9 +295,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {mode === "login" && (
           <form onSubmit={handleLoginSubmit} className="space-y-4 text-xs">
             <div>
-              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                University Email Address
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                  University Email Address
+                </label>
+                <span className="text-[10px] text-amber-600 font-medium">Case-sensitive</span>
+              </div>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
@@ -395,9 +398,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div>
-              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                University Email Address
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                  University Email Address
+                </label>
+                <span className="text-[10px] text-amber-600 font-medium">Case-sensitive</span>
+              </div>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input

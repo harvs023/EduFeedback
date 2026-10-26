@@ -70,8 +70,8 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
     if (!currentUser?.email) {
       return [];
     }
-    const userEmail = currentUser.email.toLowerCase();
-    return surveys.filter((s) => s.owner?.toLowerCase() === userEmail);
+    const userEmail = currentUser.email;
+    return surveys.filter((s) => s.owner === userEmail);
   }, [surveys, isAdmin, currentUser]);
 
   const accessibleSurveyIds = useMemo(() => {
@@ -778,7 +778,7 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
                 className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl cursor-pointer transition-colors border border-indigo-200"
               >
                 <Database className="w-4 h-4" />
-                <span>Supplied Phrases ({mlDataset?.length || 55})</span>
+                <span>Supplied Phrases ({mlDataset?.length ?? 0})</span>
               </button>
             )}
 
@@ -1593,35 +1593,41 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
 
               {/* Scrollable list of supplied phrases */}
               <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
-                {mlDataset
-                  .filter((d) => phraseSentimentFilter === "All" || d.sentiment === phraseSentimentFilter)
-                  .map((sample) => (
-                    <div
-                      key={sample.id}
-                      className="p-2.5 bg-white rounded-xl border border-slate-200 text-xs flex items-center justify-between gap-3 hover:border-indigo-300 transition-colors"
-                    >
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
-                            sample.sentiment === "Positive"
-                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                              : sample.sentiment === "Negative"
-                              ? "bg-rose-50 text-rose-700 border border-rose-200"
-                              : sample.sentiment === "Constructive Suggestion"
-                              ? "bg-amber-50 text-amber-700 border border-amber-200"
-                              : "bg-slate-100 text-slate-700 border border-slate-200"
-                          }`}
-                        >
-                          {sample.sentiment}
-                        </span>
-                        <span className="text-slate-800 font-medium truncate">{sample.text}</span>
+                {mlDataset.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                    No training phrases supplied yet. Enter a phrase above to add to the model training corpus.
+                  </div>
+                ) : (
+                  mlDataset
+                    .filter((d) => phraseSentimentFilter === "All" || d.sentiment === phraseSentimentFilter)
+                    .map((sample) => (
+                      <div
+                        key={sample.id}
+                        className="p-2.5 bg-white rounded-xl border border-slate-200 text-xs flex items-center justify-between gap-3 hover:border-indigo-300 transition-colors"
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
+                              sample.sentiment === "Positive"
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : sample.sentiment === "Negative"
+                                ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                : sample.sentiment === "Constructive Suggestion"
+                                ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                : "bg-slate-100 text-slate-700 border border-slate-200"
+                            }`}
+                          >
+                            {sample.sentiment}
+                          </span>
+                          <span className="text-slate-800 font-medium truncate">{sample.text}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-slate-500 font-bold">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded-md">{sample.aspect}</span>
+                          <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-md">{sample.language}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-slate-500 font-bold">
-                        <span className="bg-slate-100 px-2 py-0.5 rounded-md">{sample.aspect}</span>
-                        <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-md">{sample.language}</span>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                )}
               </div>
             </div>
           )}

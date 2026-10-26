@@ -57,9 +57,20 @@ export default function App() {
   };
 
   const handleMarkAllNotificationsRead = () => {
-    const updated = LocalStorageManager.markAllNotificationsRead(currentUser?.email);
+    const updated = LocalStorageManager.markAllNotificationsRead(currentUser?.email || undefined);
     setNotifications(updated);
     showToast("All notifications marked as read.", "info");
+  };
+
+  const handleMarkNotificationRead = (id: string) => {
+    const updated = LocalStorageManager.markNotificationRead(id, currentUser?.email || undefined);
+    setNotifications(updated);
+  };
+
+  const handleClearAllNotifications = () => {
+    LocalStorageManager.clearNotifications(currentUser?.email || undefined);
+    setNotifications([]);
+    showToast("Notifications cleared.", "info");
   };
 
   // Initialize Storage Data & Cloud Readiness on Mount
@@ -109,6 +120,15 @@ export default function App() {
     }
     syncCloudIfConfigured();
   }, []);
+
+  // Sync notifications whenever currentUser changes
+  useEffect(() => {
+    if (currentUser?.email) {
+      setNotifications(LocalStorageManager.getNotifications(currentUser.email));
+    } else {
+      setNotifications(LocalStorageManager.getNotifications(""));
+    }
+  }, [currentUser]);
 
   const handleLogin = async (user: UserProfile) => {
     setCurrentUser(user);
@@ -238,6 +258,32 @@ export default function App() {
     setResponses(LocalStorageManager.getResponses());
     setLogs(LocalStorageManager.getLogs());
     setActiveSurveyForTaking(null);
+
+    // Dynamic Notification: Notify survey owner
+    const targetOwner = activeSurveyForTaking.creatorEmail || activeSurveyForTaking.owner;
+    if (targetOwner && targetOwner !== currentUser?.email) {
+      LocalStorageManager.addNotification(
+        targetOwner,
+        "📝 New Survey Response",
+        `A new response was submitted for "${activeSurveyForTaking.title}".`,
+        "📝",
+        "response",
+        { surveyId: activeSurveyForTaking.id }
+      );
+    }
+    // Dynamic Notification: Notify system admin desk if not admin
+    if (currentUser?.email !== "admin@edufeedback.edu") {
+      LocalStorageManager.addNotification(
+        "admin@edufeedback.edu",
+        "📊 Response Recorded",
+        `New response recorded for "${activeSurveyForTaking.title}" (${isAnonymous ? "Anonymous Student" : currentUser?.name || "Student"}).`,
+        "📊",
+        "response",
+        { surveyId: activeSurveyForTaking.id }
+      );
+    }
+    setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+
     showToast("Survey response submitted successfully!", "success");
   };
 
@@ -323,6 +369,20 @@ export default function App() {
     setLogs(LocalStorageManager.getLogs());
 
     setEditingSurvey(null);
+
+    // Dynamic Notification: Notify campus if survey is published
+    if (status === "published") {
+      LocalStorageManager.addNotification(
+        "all",
+        "📋 New Survey Available",
+        `"${newSurvey.title}" is now open for campus feedback.`,
+        "📋",
+        "survey",
+        { surveyId: newSurvey.id }
+      );
+    }
+    setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+
     showToast(`Survey "${newSurvey.title}" saved successfully!`, "success");
     setCurrentView("surveys");
   };
@@ -370,6 +430,18 @@ export default function App() {
       details: `Published institutional announcement: "${newPost.title}"`,
     });
     setLogs(LocalStorageManager.getLogs());
+
+    // Dynamic Notification: Broadcast announcement
+    LocalStorageManager.addNotification(
+      "all",
+      "📢 Campus Announcement",
+      newPost.title,
+      "📢",
+      "news",
+      { newsId: newPost.id }
+    );
+    setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+
     showToast("Campus announcement published!", "success");
   };
 
@@ -384,6 +456,19 @@ export default function App() {
     const updated = surveys.map((s) => (s.id === surveyId ? { ...s, flagged: false, flagReason: undefined } : s));
     LocalStorageManager.saveSurveys(updated);
     setSurveys(updated);
+
+    const srv = surveys.find((s) => s.id === surveyId);
+    if (srv?.owner) {
+      LocalStorageManager.addNotification(
+        srv.owner,
+        "✅ Survey Flag Cleared",
+        `Your survey "${srv.title}" has been reviewed and approved by administration.`,
+        "✅",
+        "flag_cleared",
+        { surveyId }
+      );
+      setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+    }
     showToast("Survey flag cleared and approved!", "success");
   };
 
@@ -391,6 +476,19 @@ export default function App() {
     const updated = surveys.map((s) => (s.id === surveyId ? { ...s, flagged: true, flagReason: reason } : s));
     LocalStorageManager.saveSurveys(updated);
     setSurveys(updated);
+
+    const srv = surveys.find((s) => s.id === surveyId);
+    if (srv?.owner) {
+      LocalStorageManager.addNotification(
+        srv.owner,
+        "⚠️ Survey Flagged for Review",
+        `Your survey "${srv.title}" was flagged: ${reason}`,
+        "⚠️",
+        "flag",
+        { surveyId }
+      );
+      setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+    }
     showToast("Survey flagged for administrative review.", "info");
   };
 
@@ -459,6 +557,18 @@ export default function App() {
     const updated = users.map((u) => (u.email === email ? { ...u, status: newStatus } : u));
     LocalStorageManager.saveUsers(updated);
     setUsers(updated);
+
+    if (newStatus === "active") {
+      LocalStorageManager.addNotification(
+        email,
+        "🛡️ Account Verified & Approved",
+        "Your institutional credentials have been verified and approved by the System Administrator. You can now access full authoring permissions.",
+        "🛡️",
+        "approval"
+      );
+      setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+    }
+
     showToast(`User status updated to ${newStatus.replace('_', ' ')}.`, "info");
   };
 
@@ -485,7 +595,7 @@ export default function App() {
       const updated = LocalStorageManager.updateUser(email, changes);
       setUsers(updated);
       setLogs(LocalStorageManager.getLogs());
-      if (currentUser && currentUser.email.toLowerCase() === email.toLowerCase()) {
+      if (currentUser && currentUser.email === email) {
         setCurrentUser({ ...currentUser, ...changes });
       }
       showToast("User details updated successfully.", "success");
@@ -745,6 +855,8 @@ export default function App() {
           unreadNewsCount={newsList.length}
           flaggedSurveysCount={flaggedCount}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+          onMarkNotificationRead={handleMarkNotificationRead}
+          onClearAllNotifications={handleClearAllNotifications}
         />
 
         {/* View Router */}

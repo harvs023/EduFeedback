@@ -147,7 +147,9 @@ export interface NotificationItem {
     | "profile_update"
     | "required_survey"
     | "account_approved"
-    | "account_pending";
+    | "account_pending"
+    | "survey"
+    | "approval";
   data?: Record<string, any>;
 }
 

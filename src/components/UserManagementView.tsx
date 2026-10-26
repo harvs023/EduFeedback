@@ -183,15 +183,20 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       return;
     }
 
-    const emailLower = addForm.email.trim().toLowerCase();
-    if (users.some((u) => u.email.toLowerCase() === emailLower)) {
-      setFormError(`An account with email "${addForm.email}" is already registered.`);
+    const cleanEmail = addForm.email.trim();
+    if (users.some((u) => u.email === cleanEmail)) {
+      setFormError(`An account with email "${cleanEmail}" is already registered.`);
+      return;
+    }
+    const caseMismatch = users.find((u) => u.email.toLowerCase() === cleanEmail.toLowerCase());
+    if (caseMismatch) {
+      setFormError(`An account with email "${caseMismatch.email}" is already registered with different capitalization. Emails are case-sensitive.`);
       return;
     }
 
     const newUser: UserProfile = {
       name: addForm.name.trim(),
-      email: emailLower,
+      email: cleanEmail,
       pos: addForm.pos,
       role: addForm.pos === "Superadmin" ? "superadmin" : "user",
       status: addForm.status,
@@ -462,7 +467,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {filteredUsers.length > 0 ? (
                 filteredUsers.map((u) => {
-                  const isCurrent = currentUser?.email.toLowerCase() === u.email.toLowerCase();
+                  const isCurrent = currentUser?.email === u.email;
                   const roleBadgeColor =
                     u.pos === "Superadmin"
                       ? "bg-purple-50 text-purple-700 border-purple-200"
@@ -533,7 +538,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                       {/* Surveys Authored */}
                       <td className="p-4">
                         <span className="font-bold text-slate-900 text-xs">
-                          {surveys ? surveys.filter((s) => s.creatorEmail?.toLowerCase() === u.email.toLowerCase() || (s.creatorRole === u.pos && !s.creatorEmail)).length : (u.surveys || 0)}
+                          {surveys ? surveys.filter((s) => s.creatorEmail === u.email || (s.creatorRole === u.pos && !s.creatorEmail)).length : (u.surveys || 0)}
                         </span>{" "}
                         <span className="text-[11px] text-slate-500">surveys</span>
                       </td>
@@ -708,7 +713,10 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
 
               {/* Email */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Institutional Email *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700">Institutional Email *</label>
+                  <span className="text-[10px] text-amber-600 font-medium">Case-sensitive</span>
+                </div>
                 <input
                   type="email"
                   required

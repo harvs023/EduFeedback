@@ -43,6 +43,8 @@ interface NavbarProps {
   unreadNewsCount?: number;
   flaggedSurveysCount?: number;
   onMarkAllNotificationsRead?: () => void;
+  onMarkNotificationRead?: (id: string) => void;
+  onClearAllNotifications?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -61,6 +63,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   unreadNewsCount = 0,
   flaggedSurveysCount = 0,
   onMarkAllNotificationsRead,
+  onMarkNotificationRead,
+  onClearAllNotifications,
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
@@ -168,13 +172,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                 setShowNotifMenu(!showNotifMenu);
                 setShowUserMenu(false);
               }}
-              className="relative p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-              title="Notifications"
+              className="relative p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors cursor-pointer"
+              title={unreadNotifsCount > 0 ? `${unreadNotifsCount} unread notification${unreadNotifsCount > 1 ? "s" : ""}` : "Notifications"}
             >
-              {unreadNotifsCount > 0 ? (
-                <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
-              ) : (
-                <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-indigo-500 rounded-full ring-2 ring-white" />
+              {unreadNotifsCount > 0 && (
+                <span className="absolute top-1 right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
+                  {unreadNotifsCount > 9 ? "9+" : unreadNotifsCount}
+                </span>
               )}
               <Bell className="w-5 h-5" />
             </button>
@@ -188,7 +192,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <p className="text-xs text-slate-500">System alerts & survey updates</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {unreadNotifsCount && unreadNotifsCount > 0 ? (
+                    {unreadNotifsCount > 0 && (
                       <button
                         onClick={() => {
                           if (onMarkAllNotificationsRead) {
@@ -201,9 +205,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                       >
                         Mark all read
                       </button>
-                    ) : null}
+                    )}
+                    {notifications.length > 0 && onClearAllNotifications && (
+                      <button
+                        onClick={onClearAllNotifications}
+                        className="text-[11px] font-bold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
                     <span className="px-2 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-full">
-                      {notifications.length} Total
+                      {notifications.length}
                     </span>
                   </div>
                 </div>
@@ -217,6 +229,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <div
                           key={n.id}
                           onClick={() => {
+                            if (onMarkNotificationRead) {
+                              onMarkNotificationRead(n.id);
+                            } else {
+                              LocalStorageManager.markNotificationRead(n.id, currentUser?.email);
+                            }
                             setShowNotifMenu(false);
                             if (n.type === "news") onNavigate("news");
                             else if (n.type === "response") onNavigate("analytics");

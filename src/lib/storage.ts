@@ -96,14 +96,14 @@ export class LocalStorageManager {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.PASSWORDS);
       const map = data ? JSON.parse(data) : {};
-      map[email.trim().toLowerCase()] = pass;
+      map[email.trim()] = pass;
       localStorage.setItem(STORAGE_KEYS.PASSWORDS, JSON.stringify(map));
     } catch {}
   }
 
   static getPassword(email: string): string | null {
     try {
-      const cleanEmail = email.trim().toLowerCase();
+      const cleanEmail = email.trim();
       if (DEMO_PASSWORDS_MAP[cleanEmail]) {
         return DEMO_PASSWORDS_MAP[cleanEmail];
       }
@@ -116,7 +116,7 @@ export class LocalStorageManager {
   }
 
   static verifyPassword(email: string, pass: string): boolean {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = email.trim();
     // Allow demo passwords or standard password
     if (DEMO_PASSWORDS_MAP[cleanEmail]) {
       const expected = DEMO_PASSWORDS_MAP[cleanEmail];
@@ -302,24 +302,13 @@ export class LocalStorageManager {
       const data = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
       if (data) {
         const all: NotificationItem[] = JSON.parse(data);
+        if (!userEmail) {
+          return all.filter((n) => n.userEmail === "all");
+        }
         return all.filter((n) => n.userEmail === userEmail || n.userEmail === "all");
       }
     } catch {}
-    const defaultNotifs: NotificationItem[] = [
-      {
-        id: "notif-welcome",
-        userEmail: userEmail,
-        title: "🎉 Maligayang Pagdating sa EduFeedback!",
-        message: "Your voice shapes the future of our institution. Start exploring themed surveys and campus updates.",
-        icon: "🎉",
-        time: new Date().toLocaleString(),
-        displayTime: "Just now",
-        read: false,
-        type: "welcome",
-      },
-    ];
-    LocalStorageManager.setNotifications(defaultNotifs);
-    return defaultNotifs;
+    return [];
   }
 
   static setNotifications(notifs: NotificationItem[]) {
@@ -335,7 +324,7 @@ export class LocalStorageManager {
     icon: string,
     type: NotificationItem["type"] = "general",
     data?: any
-  ) {
+  ): NotificationItem {
     const notifs: NotificationItem[] = [];
     try {
       const existing = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
@@ -343,7 +332,7 @@ export class LocalStorageManager {
     } catch {}
 
     const newNotif: NotificationItem = {
-      id: `notif-${Date.now()}`,
+      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       userEmail,
       title,
       message,
@@ -355,7 +344,21 @@ export class LocalStorageManager {
       data,
     };
     notifs.unshift(newNotif);
-    LocalStorageManager.setNotifications(notifs);
+    LocalStorageManager.setNotifications(notifs.slice(0, 100));
+    return newNotif;
+  }
+
+  static markNotificationRead(id: string, userEmail?: string): NotificationItem[] {
+    try {
+      const existing = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      if (!existing) return [];
+      const notifs: NotificationItem[] = JSON.parse(existing);
+      const updated = notifs.map((n) => (n.id === id ? { ...n, read: true } : n));
+      LocalStorageManager.setNotifications(updated);
+      return LocalStorageManager.getNotifications(userEmail || "");
+    } catch {
+      return [];
+    }
   }
 
   static markAllNotificationsRead(userEmail?: string): NotificationItem[] {
@@ -364,13 +367,28 @@ export class LocalStorageManager {
       if (!existing) return [];
       const notifs: NotificationItem[] = JSON.parse(existing);
       const updated = notifs.map((n) => {
-        if (!userEmail || n.userEmail === "all" || n.userEmail.toLowerCase() === userEmail.toLowerCase()) {
+        if (!userEmail || n.userEmail === "all" || n.userEmail === userEmail) {
           return { ...n, read: true };
         }
         return n;
       });
       LocalStorageManager.setNotifications(updated);
-      return updated;
+      return LocalStorageManager.getNotifications(userEmail || "");
+    } catch {
+      return [];
+    }
+  }
+
+  static clearNotifications(userEmail?: string): NotificationItem[] {
+    try {
+      const existing = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      if (!existing) return [];
+      const notifs: NotificationItem[] = JSON.parse(existing);
+      const remaining = userEmail
+        ? notifs.filter((n) => n.userEmail !== userEmail && n.userEmail !== "all")
+        : [];
+      LocalStorageManager.setNotifications(remaining);
+      return [];
     } catch {
       return [];
     }
@@ -398,7 +416,7 @@ export class LocalStorageManager {
   static addUser(newUser: UserProfile): UserProfile[] {
     const current = LocalStorageManager.getUsers();
     // Check if email already exists
-    const exists = current.some((u) => u.email.toLowerCase() === newUser.email.toLowerCase());
+    const exists = current.some((u) => u.email === newUser.email.trim());
     if (exists) {
       throw new Error(`A user with email ${newUser.email} already exists.`);
     }
@@ -416,7 +434,7 @@ export class LocalStorageManager {
   static updateUser(email: string, changes: Partial<UserProfile>): UserProfile[] {
     const current = LocalStorageManager.getUsers();
     const updated = current.map((u) => {
-      if (u.email.toLowerCase() === email.toLowerCase()) {
+      if (u.email === email.trim()) {
         return { ...u, ...changes };
       }
       return u;
@@ -425,7 +443,7 @@ export class LocalStorageManager {
 
     // If current logged in user was modified, sync session
     const cur = LocalStorageManager.getCurrentUser();
-    if (cur && cur.email.toLowerCase() === email.toLowerCase()) {
+    if (cur && cur.email === email.trim()) {
       LocalStorageManager.setCurrentUser({ ...cur, ...changes });
     }
 
@@ -440,8 +458,8 @@ export class LocalStorageManager {
 
   static deleteUser(email: string): UserProfile[] {
     const current = LocalStorageManager.getUsers();
-    const target = current.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    const updated = current.filter((u) => u.email.toLowerCase() !== email.toLowerCase());
+    const target = current.find((u) => u.email === email.trim());
+    const updated = current.filter((u) => u.email !== email.trim());
     LocalStorageManager.saveUsers(updated);
 
     LocalStorageManager.addLog({
@@ -544,8 +562,8 @@ export class LocalStorageManager {
 
       if (Array.isArray(data.users)) {
         const existing = LocalStorageManager.getUsers();
-        const existingEmails = new Set(existing.map((u) => u.email.toLowerCase()));
-        const toAdd = data.users.filter((u) => !existingEmails.has(u.email.toLowerCase()));
+        const existingEmails = new Set(existing.map((u) => u.email));
+        const toAdd = data.users.filter((u) => !existingEmails.has(u.email));
         LocalStorageManager.saveUsers([...existing, ...toAdd]);
       }
 

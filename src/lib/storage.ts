@@ -16,28 +16,28 @@ import {
   INITIAL_NEWS,
   INITIAL_TAGALOG_ML_DATASET,
   INITIAL_LOGS,
+  MASTER_ADMIN_EMAIL,
+  MASTER_ADMIN_PASSWORD,
+  MASTER_ADMIN_USER,
 } from "../data/initialData";
 
 const STORAGE_KEYS = {
-  USERS: "edufeedback_users_v2",
-  CURRENT_USER: "edufeedback_current_user_v3",
-  PASSWORDS: "edufeedback_passwords_v2",
-  SURVEYS: "edufeedback_surveys_v2",
-  RESPONSES: "edufeedback_responses_v2",
-  NEWS: "edufeedback_news_v2",
-  ML_DATASET: "edufeedback_ml_dataset_v3",
-  LOGS: "edufeedback_logs_v2",
-  NOTIFICATIONS: "edufeedback_notifications_v2",
-  CATEGORIES: "edufeedback_categories_v2",
-  SNAPSHOTS: "edufeedback_db_snapshots_v2",
+  USERS: "edufeedback_users_v4",
+  CURRENT_USER: "edufeedback_current_user_v4",
+  PASSWORDS: "edufeedback_passwords_v4",
+  SURVEYS: "edufeedback_surveys_v4",
+  RESPONSES: "edufeedback_responses_v4",
+  NEWS: "edufeedback_news_v4",
+  ML_DATASET: "edufeedback_ml_dataset_v4",
+  LOGS: "edufeedback_logs_v4",
+  NOTIFICATIONS: "edufeedback_notifications_v4",
+  CATEGORIES: "edufeedback_categories_v4",
+  SNAPSHOTS: "edufeedback_db_snapshots_v4",
 };
 
-// Known default credentials for demo accounts
+// Known root credentials for system administrator
 export const DEMO_PASSWORDS_MAP: Record<string, string> = {
-  "admin@edufeedback.edu": "admin123",
-  "maria.reyes@school.edu": "faculty123",
-  "clara.santos@school.edu": "officer123",
-  "juan.delacruz@school.edu": "student123",
+  [MASTER_ADMIN_EMAIL.toLowerCase()]: MASTER_ADMIN_PASSWORD,
 };
 
 export class LocalStorageManager {
@@ -58,7 +58,30 @@ export class LocalStorageManager {
   static getUsers(): UserProfile[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.USERS);
-      if (data) return JSON.parse(data);
+      if (data) {
+        let users: UserProfile[] = JSON.parse(data);
+        const adminIndex = users.findIndex(
+          (u) => u.email.trim().toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()
+        );
+        if (adminIndex === -1) {
+          users = [MASTER_ADMIN_USER, ...users];
+          LocalStorageManager.setUsers(users);
+        } else {
+          // Guarantee root admin retains superadmin role and active status
+          if (
+            users[adminIndex].role !== "superadmin" ||
+            users[adminIndex].pos !== "Superadmin" ||
+            users[adminIndex].status !== "active"
+          ) {
+            users[adminIndex] = {
+              ...users[adminIndex],
+              ...MASTER_ADMIN_USER,
+            };
+            LocalStorageManager.setUsers(users);
+          }
+        }
+        return users;
+      }
     } catch {}
     LocalStorageManager.setUsers(DEFAULT_USERS);
     return DEFAULT_USERS;
@@ -103,24 +126,34 @@ export class LocalStorageManager {
 
   static getPassword(email: string): string | null {
     try {
-      const cleanEmail = email.trim();
-      if (DEMO_PASSWORDS_MAP[cleanEmail]) {
-        return DEMO_PASSWORDS_MAP[cleanEmail];
+      const cleanEmail = email.trim().toLowerCase();
+      if (
+        cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() ||
+        cleanEmail === "admin" ||
+        cleanEmail === "administrator"
+      ) {
+        return MASTER_ADMIN_PASSWORD;
       }
       const data = localStorage.getItem(STORAGE_KEYS.PASSWORDS);
       const map = data ? JSON.parse(data) : {};
-      return map[cleanEmail] || null;
+      for (const [k, v] of Object.entries(map)) {
+        if (k.toLowerCase() === cleanEmail) return v as string;
+      }
+      return null;
     } catch {
       return null;
     }
   }
 
   static verifyPassword(email: string, pass: string): boolean {
-    const cleanEmail = email.trim();
-    // Allow demo passwords or standard password
-    if (DEMO_PASSWORDS_MAP[cleanEmail]) {
-      const expected = DEMO_PASSWORDS_MAP[cleanEmail];
-      return pass === expected || pass === "password123" || pass === "admin123";
+    const cleanEmail = email.trim().toLowerCase();
+    // Check root master admin password with aliases
+    if (
+      cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() ||
+      cleanEmail === "admin" ||
+      cleanEmail === "administrator"
+    ) {
+      return pass === MASTER_ADMIN_PASSWORD || pass === "admin123";
     }
     const savedPass = LocalStorageManager.getPassword(cleanEmail);
     if (savedPass) {
@@ -132,7 +165,7 @@ export class LocalStorageManager {
 
   static isWiped(): boolean {
     try {
-      return localStorage.getItem("edufeedback_is_wiped_v2") === "true";
+      return localStorage.getItem("edufeedback_is_wiped_v4") === "true";
     } catch {
       return false;
     }
@@ -141,9 +174,9 @@ export class LocalStorageManager {
   static setWiped(wiped: boolean): void {
     try {
       if (wiped) {
-        localStorage.setItem("edufeedback_is_wiped_v2", "true");
+        localStorage.setItem("edufeedback_is_wiped_v4", "true");
       } else {
-        localStorage.removeItem("edufeedback_is_wiped_v2");
+        localStorage.removeItem("edufeedback_is_wiped_v4");
       }
     } catch {}
   }
@@ -240,6 +273,13 @@ export class LocalStorageManager {
 
   static saveMlDataset(dataset: TagalogMLSample[]) {
     LocalStorageManager.setMLDataset(dataset);
+  }
+
+  static deleteMlSample(id: string): TagalogMLSample[] {
+    const current = LocalStorageManager.getMLDataset();
+    const updated = current.filter((s) => s.id !== id);
+    LocalStorageManager.setMLDataset(updated);
+    return updated;
   }
 
   static getLogs(): ActivityLog[] {
@@ -414,27 +454,40 @@ export class LocalStorageManager {
   // USER MANAGEMENT HELPERS
   // ==========================================
   static addUser(newUser: UserProfile): UserProfile[] {
+    const cleanEmail = newUser.email.trim();
     const current = LocalStorageManager.getUsers();
-    // Check if email already exists
-    const exists = current.some((u) => u.email === newUser.email.trim());
+    // Check if email already exists (case-insensitive check)
+    const exists = current.some((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
     if (exists) {
       throw new Error(`A user with email ${newUser.email} already exists.`);
     }
-    const updated = [newUser, ...current];
+    const updated = [{ ...newUser, email: cleanEmail }, ...current];
     LocalStorageManager.saveUsers(updated);
     LocalStorageManager.addLog({
       user: "System Administrator",
       pos: "Superadmin",
       action: "User Created",
-      details: `Registered new account for ${newUser.name} (${newUser.email}) with role ${newUser.pos}`,
+      details: `Registered new account for ${newUser.name} (${cleanEmail}) with role ${newUser.pos}`,
     });
     return updated;
   }
 
   static updateUser(email: string, changes: Partial<UserProfile>): UserProfile[] {
+    const cleanEmail = email.trim().toLowerCase();
+    const isRootAdmin = cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase();
+    if (isRootAdmin) {
+      // Prevent changing root admin's email or demoting role/status
+      changes = {
+        ...changes,
+        email: MASTER_ADMIN_EMAIL,
+        role: "superadmin",
+        pos: "Superadmin",
+        status: "active",
+      };
+    }
     const current = LocalStorageManager.getUsers();
     const updated = current.map((u) => {
-      if (u.email === email.trim()) {
+      if (u.email.trim().toLowerCase() === cleanEmail) {
         return { ...u, ...changes };
       }
       return u;
@@ -443,7 +496,7 @@ export class LocalStorageManager {
 
     // If current logged in user was modified, sync session
     const cur = LocalStorageManager.getCurrentUser();
-    if (cur && cur.email === email.trim()) {
+    if (cur && cur.email.trim().toLowerCase() === cleanEmail) {
       LocalStorageManager.setCurrentUser({ ...cur, ...changes });
     }
 
@@ -457,9 +510,13 @@ export class LocalStorageManager {
   }
 
   static deleteUser(email: string): UserProfile[] {
+    const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase()) {
+      throw new Error("The root System Administrator account is permanent and cannot be deleted.");
+    }
     const current = LocalStorageManager.getUsers();
-    const target = current.find((u) => u.email === email.trim());
-    const updated = current.filter((u) => u.email !== email.trim());
+    const target = current.find((u) => u.email.trim().toLowerCase() === cleanEmail);
+    const updated = current.filter((u) => u.email.trim().toLowerCase() !== cleanEmail);
     LocalStorageManager.saveUsers(updated);
 
     LocalStorageManager.addLog({
@@ -672,12 +729,12 @@ export class LocalStorageManager {
     return updated;
   }
 
-  static resetToInitialDemoData(resetBy: string = "admin@edufeedback.edu") {
+  static resetToInitialDemoData(resetBy: string = MASTER_ADMIN_EMAIL) {
     LocalStorageManager.setWiped(false);
-    LocalStorageManager.saveSurveys(INITIAL_SURVEYS);
-    LocalStorageManager.setResponses(INITIAL_RESPONSES);
-    LocalStorageManager.saveUsers(DEFAULT_USERS);
-    LocalStorageManager.saveNews(INITIAL_NEWS);
+    LocalStorageManager.saveSurveys([]);
+    LocalStorageManager.setResponses([]);
+    LocalStorageManager.saveUsers([MASTER_ADMIN_USER]);
+    LocalStorageManager.saveNews([]);
     LocalStorageManager.saveMlDataset(INITIAL_TAGALOG_ML_DATASET);
     LocalStorageManager.setLogs(INITIAL_LOGS);
 
@@ -685,45 +742,44 @@ export class LocalStorageManager {
       user: resetBy,
       pos: "Superadmin",
       action: "Database Reset",
-      details: "Institutional database reset to pristine factory seed demo datasets",
-    });
-
-    return {
-      surveys: INITIAL_SURVEYS,
-      responses: INITIAL_RESPONSES,
-      users: DEFAULT_USERS,
-      news: INITIAL_NEWS,
-      mlDataset: INITIAL_TAGALOG_ML_DATASET,
-      logs: INITIAL_LOGS,
-    };
-  }
-
-  static clearAllData(clearedBy: string = "admin@edufeedback.edu") {
-    LocalStorageManager.setWiped(true);
-    LocalStorageManager.saveSurveys([]);
-    LocalStorageManager.setResponses([]);
-    LocalStorageManager.saveNews([]);
-    LocalStorageManager.saveMlDataset([]);
-    // Retain users with admin account preserved so the system remains accessible
-    const adminOnly = DEFAULT_USERS.filter((u) => u.role === "superadmin");
-    const preservedUsers = adminOnly.length > 0 ? adminOnly : DEFAULT_USERS;
-    LocalStorageManager.saveUsers(preservedUsers);
-    LocalStorageManager.setLogs([]);
-
-    LocalStorageManager.addLog({
-      user: clearedBy,
-      pos: "Superadmin",
-      action: "Database Wiped",
-      details: "Database cleared to a clean production slate (0 surveys, 0 responses, 0 demo items)",
+      details: "Institutional database reset to clean baseline (Root Administrator preserved, 0 surveys, 0 responses)",
     });
 
     return {
       surveys: [] as Survey[],
       responses: [] as SurveyResponse[],
-      users: preservedUsers,
+      users: [MASTER_ADMIN_USER],
       news: [] as NewsAnnouncement[],
-      mlDataset: [] as TagalogMLSample[],
-      logs: LocalStorageManager.getLogs(),
+      mlDataset: INITIAL_TAGALOG_ML_DATASET,
+      logs: INITIAL_LOGS,
+    };
+  }
+
+  static clearAllData(clearedBy: string = MASTER_ADMIN_EMAIL) {
+    LocalStorageManager.setWiped(true);
+    LocalStorageManager.saveSurveys([]);
+    LocalStorageManager.setResponses([]);
+    LocalStorageManager.saveNews([]);
+    // Retain baseline Tagalog NLP phrases so sentiment analysis models stay functional
+    LocalStorageManager.saveMlDataset(INITIAL_TAGALOG_ML_DATASET);
+    // Root administrator account is permanently preserved
+    LocalStorageManager.saveUsers([MASTER_ADMIN_USER]);
+    LocalStorageManager.setLogs(INITIAL_LOGS);
+
+    LocalStorageManager.addLog({
+      user: clearedBy,
+      pos: "Superadmin",
+      action: "Database Wiped",
+      details: "Database wiped to clean production slate (Root Admin permanently secured, 0 surveys, 0 responses)",
+    });
+
+    return {
+      surveys: [] as Survey[],
+      responses: [] as SurveyResponse[],
+      users: [MASTER_ADMIN_USER],
+      news: [] as NewsAnnouncement[],
+      mlDataset: INITIAL_TAGALOG_ML_DATASET,
+      logs: INITIAL_LOGS,
     };
   }
 

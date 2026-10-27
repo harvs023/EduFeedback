@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { UserProfile } from "../types";
-import { DEPARTMENTS_DATA, PROGRAMS_BY_DEPARTMENT } from "../data/initialData";
+import { DEPARTMENTS_DATA, PROGRAMS_BY_DEPARTMENT, MASTER_ADMIN_EMAIL, MASTER_ADMIN_PASSWORD } from "../data/initialData";
 import { DatabaseService } from "../lib/databaseService";
 import { LocalStorageManager } from "../lib/storage";
 import {
@@ -145,7 +145,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             details: `${newUser.name} registered as ${newUser.pos} (${newUser.email}) and awaits admin approval.`,
           });
           LocalStorageManager.addNotification(
-            "admin@edufeedback.edu",
+            MASTER_ADMIN_EMAIL,
             "🛡️ New Account Pending Approval",
             `${newUser.name} registered as ${newUser.pos} (${newUser.email}) and requires admin verification.`,
             "🛡️",
@@ -299,16 +299,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <label className="block font-bold text-slate-700 uppercase tracking-wider">
                   University Email Address
                 </label>
-                <span className="text-[10px] text-amber-600 font-medium">Case-sensitive</span>
+                <span className="text-[10px] text-slate-500 font-medium">Email or "admin"</span>
               </div>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
-                  type="email"
+                  type="text"
+                  autoCapitalize="none"
+                  autoComplete="username"
                   required
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
-                  placeholder="name@school.edu.ph"
+                  placeholder="admin@edufeedback.edu or name@school.edu"
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 transition-all"
                 />
               </div>

@@ -3,6 +3,7 @@ import { UserProfile, Position } from "../types";
 import {
   DEPARTMENTS_DATA,
   PROGRAMS_BY_DEPARTMENT,
+  MASTER_ADMIN_EMAIL,
 } from "../data/initialData";
 import { DatabaseService } from "../lib/databaseService";
 import { LocalStorageManager } from "../lib/storage";
@@ -157,7 +158,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
             details: `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and awaits admin approval.`,
           });
           LocalStorageManager.addNotification(
-            "admin@edufeedback.edu",
+            MASTER_ADMIN_EMAIL,
             "🛡️ New Account Pending Approval",
             `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and requires admin verification.`,
             "🛡️",
@@ -373,9 +374,26 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
 
             {/* Error Banner */}
             {error && (
-              <div className="mb-5 p-3.5 rounded-xl bg-rose-950/60 border border-rose-800/80 text-rose-300 text-xs flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <div className="leading-relaxed">{error}</div>
+              <div className="mb-5 p-3.5 rounded-xl bg-rose-950/60 border border-rose-800/80 text-rose-300 text-xs flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed">{error}</div>
+                </div>
+                {error.includes("Create Account") && (
+                  <div className="pl-6.5 pt-1 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode("register");
+                        if (loginEmail) setRegEmail(loginEmail);
+                        setError(null);
+                      }}
+                      className="py-1 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      Go to Create Account
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -384,22 +402,24 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
             {/* ======================================================== */}
             {mode === "login" ? (
               <form onSubmit={handleLoginSubmit} className="space-y-4">
+
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
                       University Email Address
                     </label>
-                    <span className="text-[10px] text-amber-400 font-medium">Case-sensitive</span>
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                       <Mail className="w-4 h-4" />
                     </div>
                     <input
-                      type="email"
+                      type="text"
+                      autoCapitalize="none"
+                      autoComplete="username"
                       value={loginEmail}
                       onChange={(e) => setLoginEmail(e.target.value)}
-                      placeholder="e.g. admin@edufeedback.edu"
+                      placeholder="e.g. name@university.edu"
                       required
                       className="w-full pl-10 pr-4 py-3 bg-slate-950/70 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                     />
@@ -444,17 +464,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                     />
                     <span>Remember this session</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLoginEmail("admin@edufeedback.edu");
-                      setLoginPassword("admin123");
-                      setError(null);
-                    }}
-                    className="text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
-                  >
-                    Quick fill admin
-                  </button>
+                  <span className="text-[11px] text-slate-500">Institutional Single Sign-On</span>
                 </div>
 
                 <button
@@ -478,7 +488,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                 <div className="mt-4 p-3 bg-slate-950/50 rounded-xl border border-slate-800 text-[11px] text-slate-400 flex items-start gap-2">
                   <HelpCircle className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
                   <span>
-                    New user without an account? Click <strong>Create Account</strong> above or click any demo credential card on the left to test.
+                    New student or faculty member? Click <strong>Create Account</strong> above to register your official credentials.
                   </span>
                 </div>
               </form>

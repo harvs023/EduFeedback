@@ -248,7 +248,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
     onResetDatabase();
     setShowResetModal(false);
     setResetConfirmText("");
-    showToast("Database successfully reset to pristine factory demo seed data.", "success");
+    showToast("Database successfully reset to clean production baseline.", "success");
   };
 
   // Complete Database Wipe / Clean Slate
@@ -778,15 +778,15 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-          {/* Option 1: Reset to Demo Seeds */}
+          {/* Option 1: Reset to Baseline */}
           <div className="p-4 bg-white rounded-2xl border border-rose-100 flex flex-col justify-between gap-3 shadow-xs">
             <div>
               <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                <span>Reset to Demo Seeds</span>
+                <span>Reset to Clean Baseline</span>
               </div>
               <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                Repopulates the 5 sample surveys, 14 student evaluations, Filipino NLP sentences, and demo user accounts for testing and demonstrations.
+                Clears custom surveys and responses to an initial clean slate while preserving the Tagalog ML dataset and the permanent System Administrator account.
               </p>
             </div>
             <button
@@ -796,7 +796,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
               }}
               className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-colors"
             >
-              Reset to Demo Seeds
+              Reset to Baseline
             </button>
           </div>
 
@@ -962,10 +962,10 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
 
             <div className="space-y-1">
               <h3 className="font-serif text-lg font-bold text-slate-900">
-                Confirm Factory Database Reset
+                Confirm Reset to Clean Baseline
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                This action will wipe all customized surveys and responses, reverting the platform back to the initial sample datasets.
+                This action will reset surveys, responses, and news to 0, while keeping the root System Administrator account secured and the Tagalog ML dataset active.
               </p>
             </div>
 
@@ -998,7 +998,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                     : "bg-slate-200 text-slate-400 cursor-not-allowed"
                 }`}
               >
-                Reset to Demo Seeds
+                Reset to Baseline
               </button>
             </div>
           </div>

@@ -397,6 +397,16 @@ export const FirestoreMLService = {
       handleFirestoreError(err, OperationType.CREATE, `${COLLECTIONS.ML_DATASET}/${sample.id}`);
     }
   },
+
+  async delete(id: string): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return;
+    try {
+      await deleteDoc(doc(firestore, COLLECTIONS.ML_DATASET, id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `${COLLECTIONS.ML_DATASET}/${id}`);
+    }
+  },
 };
 
 /**

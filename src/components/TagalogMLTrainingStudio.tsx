@@ -860,9 +860,11 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
                       {onDeleteSample && (
                         <button
                           onClick={() => onDeleteSample(sample.id)}
-                          className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
+                          className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center group"
+                          title="Delete phrase from training dataset"
+                          aria-label="Delete training sample"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4 text-slate-400 group-hover:text-rose-600 transition-colors" />
                         </button>
                       )}
                     </td>

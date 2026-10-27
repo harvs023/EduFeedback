@@ -28,7 +28,7 @@
         },
         "status": {
           "type": "string",
-          "enum": ["active", "suspended"],
+          "enum": ["active", "suspended", "pending_approval", "invited"],
           "description": "Account status"
         },
         "department": {

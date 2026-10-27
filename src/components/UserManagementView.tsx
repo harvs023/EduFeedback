@@ -443,6 +443,54 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
         )}
       </div>
 
+      {/* Pending Accounts Approval Action Callout */}
+      {stats.pending > 0 && (
+        <div className="p-5 rounded-3xl bg-amber-500/10 border border-amber-300 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0 text-amber-700">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-amber-900 text-sm">
+                  {stats.pending} Account{stats.pending > 1 ? "s" : ""} Pending Administrative Approval
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10px] font-extrabold uppercase">
+                  Action Required
+                </span>
+              </div>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Faculty and Student Council Officers must be verified by System Administration before they can author surveys.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                setStatusFilter("pending_approval");
+              }}
+              className="px-3.5 py-2 bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              Filter Pending Only
+            </button>
+            <button
+              onClick={() => {
+                const pendingUsers = users.filter((u) => u.status === "pending_approval");
+                pendingUsers.forEach((u) => {
+                  if (onApproveUser) onApproveUser(u.email);
+                  else onToggleUserStatus(u.email, "active");
+                });
+              }}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Approve All ({stats.pending})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* User Directory Table */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
@@ -925,6 +973,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
                   >
                     <option value="active">Active (Authorized)</option>
+                    <option value="pending_approval">Pending Approval (Awaiting Verification)</option>
                     <option value="suspended">Suspended (Restricted)</option>
                   </select>
                 </div>

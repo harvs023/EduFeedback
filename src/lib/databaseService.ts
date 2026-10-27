@@ -29,6 +29,10 @@ import {
   ActivityLog,
   AccountStatus,
 } from "../types";
+import {
+  MASTER_ADMIN_EMAIL,
+  MASTER_ADMIN_USER,
+} from "../data/initialData";
 
 // Automatically activates Firebase if valid configuration environment keys are present
 export const USE_FIREBASE = isFirebaseConfigured();
@@ -45,92 +49,78 @@ export class DatabaseService {
   // AUTHENTICATION
   // ==========================================
   static async login(email: string, password: string): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
-    const cleanEmail = email.trim();
+    const rawEmail = (email || "").trim();
 
-    if (!cleanEmail) {
+    if (!rawEmail) {
       return { success: false, error: "Please enter your university email address." };
     }
     if (!password) {
       return { success: false, error: "Please enter your account password." };
     }
 
-    // Verify against local registered accounts first to detect case mismatch
+    const lowerInput = rawEmail.toLowerCase();
+    const isAdminIdentifier =
+      lowerInput === MASTER_ADMIN_EMAIL.toLowerCase() ||
+      lowerInput === "admin" ||
+      lowerInput === "administrator";
+
     const localUsers = LocalStorageManager.getUsers();
-    const exactUser = localUsers.find((u) => u.email === cleanEmail);
-    const caseMismatch = !exactUser && localUsers.find((u) => u.email.toLowerCase() === cleanEmail.toLowerCase());
+    // Case-insensitive user lookup
+    let foundUser = localUsers.find((u) => {
+      const uEmail = u.email.trim().toLowerCase();
+      if (isAdminIdentifier && (uEmail === MASTER_ADMIN_EMAIL.toLowerCase() || u.role === "superadmin")) {
+        return true;
+      }
+      return uEmail === lowerInput;
+    });
 
-    // If an account exists with different letter casing, immediately report case mismatch
-    if (caseMismatch) {
-      return {
-        success: false,
-        error: `Email is case-sensitive! You entered "${cleanEmail}", but the registered account is "${caseMismatch.email}". Please match the exact capitalization.`,
-      };
-    }
-
-    let foundUser = exactUser;
-
-    // Special check for superadmin initial credential
-    if (!foundUser && cleanEmail === "admin@edufeedback.edu") {
-      const adminUser: UserProfile = {
-        email: "admin@edufeedback.edu",
-        name: "System Administrator",
-        pos: "Superadmin",
-        role: "superadmin",
-        status: "active",
-        joined: "Jan 15, 2024",
-      };
-      LocalStorageManager.addUser(adminUser);
-      foundUser = adminUser;
+    // Special check for master root admin initial credential
+    if (!foundUser && isAdminIdentifier) {
+      foundUser = MASTER_ADMIN_USER;
+      try {
+        LocalStorageManager.addUser(MASTER_ADMIN_USER);
+      } catch {}
     }
 
     // If Firebase Auth is configured, attempt Firebase login
     if (isFirebaseConfigured()) {
       try {
-        await FirebaseAuthService.signIn(cleanEmail, password);
+        await FirebaseAuthService.signIn(rawEmail, password);
         // Fetch user profile from Firestore or local
-        const cloudUser = await FirestoreUserService.getByEmail(cleanEmail);
+        const cloudUser = await FirestoreUserService.getByEmail(rawEmail);
         if (cloudUser) {
-          if (cloudUser.email !== cleanEmail) {
-            return {
-              success: false,
-              error: `Email is case-sensitive! You entered "${cleanEmail}", but the registered account is "${cloudUser.email}". Please match the exact capitalization.`,
-            };
-          }
           if (cloudUser.status === "suspended") {
             return { success: false, error: "This university account has been suspended by system administration." };
+          }
+          if (cloudUser.status === "pending_approval") {
+            return {
+              success: false,
+              error: "Your account is currently awaiting administrative approval from the System Administrator. Please check back once an administrator verifies your faculty/officer credentials.",
+            };
           }
           return { success: true, user: cloudUser };
         }
       } catch (err: any) {
-        console.warn("Firebase Auth attempt failed:", err?.message);
-        // If user not found in Firebase Auth yet and valid local password, register them into Firebase Auth
-        if (
-          err?.code === "auth/user-not-found" ||
-          err?.code === "auth/invalid-credential" ||
-          err?.code === "auth/invalid-login-credentials"
-        ) {
-          try {
-            await FirebaseAuthService.register(cleanEmail, password);
-          } catch (regErr) {
-            console.warn("Firebase Auth auto-register attempt:", regErr);
-          }
-        }
+        return { success: false, error: "Invalid email or password." };
       }
     }
 
     if (!foundUser) {
       return {
         success: false,
-        error: "Account not found with this email. Please check your credentials or register a new account.",
+        error: `No account found for "${rawEmail}". If you haven't registered yet, click "Create Account" above to register, or sign in using the System Administrator credentials (${MASTER_ADMIN_EMAIL}).`,
       };
     }
 
-    // Verify password for exact case-sensitive email
-    const isValidPassword = LocalStorageManager.verifyPassword(cleanEmail, password);
+    // Verify password for email or admin alias
+    const isValidPassword = LocalStorageManager.verifyPassword(
+      isAdminIdentifier ? MASTER_ADMIN_EMAIL : foundUser.email,
+      password
+    );
     if (!isValidPassword) {
       return {
         success: false,
-        error: "Incorrect password. Please verify your credentials or select a demo user card.",
+        error: "Incorrect password. Please verify your credentials and try again.",
       };
     }
 
@@ -276,7 +266,33 @@ export class DatabaseService {
     if (isFirebaseConfigured()) {
       try {
         const cloudUsers = await FirestoreUserService.getAll();
-        if (cloudUsers.length > 0) return cloudUsers;
+        if (cloudUsers.length > 0) {
+          const localUsers = LocalStorageManager.getUsers();
+          // Reconcile: If a user was approved locally (status === "active"), ensure it's not reverted back to pending_approval
+          const merged = cloudUsers.map((cu) => {
+            const local = localUsers.find(
+              (lu) => lu.email.trim().toLowerCase() === cu.email.trim().toLowerCase()
+            );
+            if (local && local.status === "active" && cu.status === "pending_approval") {
+              // Local was approved by admin; auto-heal Firestore to match active status
+              FirestoreUserService.save({ ...cu, status: "active" }).catch((err) =>
+                console.warn("Auto-heal Firestore user status error:", err)
+              );
+              return { ...cu, status: "active" as const };
+            }
+            return cu;
+          });
+
+          // Also keep any registered users that exist locally but haven't synced to cloud
+          localUsers.forEach((lu) => {
+            if (!merged.some((m) => m.email.trim().toLowerCase() === lu.email.trim().toLowerCase())) {
+              merged.push(lu);
+            }
+          });
+
+          LocalStorageManager.saveUsers(merged);
+          return merged;
+        }
       } catch (err) {
         console.warn("Firestore users fetch failed:", err);
       }
@@ -285,27 +301,37 @@ export class DatabaseService {
   }
 
   static async saveUser(user: UserProfile): Promise<void> {
+    const cleanEmail = user.email.trim();
+    const normalizedUser: UserProfile = { ...user, email: cleanEmail };
+
     if (isFirebaseConfigured()) {
       try {
-        await FirestoreUserService.save(user);
+        await FirestoreUserService.save(normalizedUser);
       } catch (err) {
         console.warn("Firestore user save failed:", err);
       }
     }
     const current = LocalStorageManager.getUsers();
-    const updated = [user, ...current.filter((u) => u.email !== user.email)];
+    const updated = [
+      normalizedUser,
+      ...current.filter((u) => u.email.trim().toLowerCase() !== cleanEmail.toLowerCase()),
+    ];
     LocalStorageManager.saveUsers(updated);
   }
 
   static async deleteUser(email: string): Promise<void> {
+    const cleanEmail = email.trim();
+    if (cleanEmail.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+      throw new Error("The root System Administrator account is permanent and cannot be deleted.");
+    }
     if (isFirebaseConfigured()) {
       try {
-        await FirestoreUserService.delete(email);
+        await FirestoreUserService.delete(cleanEmail);
       } catch (err) {
         console.warn("Firestore user delete failed:", err);
       }
     }
-    LocalStorageManager.deleteUser(email);
+    LocalStorageManager.deleteUser(cleanEmail);
   }
 
   // ==========================================
@@ -374,6 +400,17 @@ export class DatabaseService {
     }
     const current = LocalStorageManager.getMLDataset();
     LocalStorageManager.saveMlDataset([sample, ...current]);
+  }
+
+  static async deleteMLSample(id: string): Promise<void> {
+    if (isFirebaseConfigured()) {
+      try {
+        await FirestoreMLService.delete(id);
+      } catch (err) {
+        console.warn("Firestore ML sample delete failed:", err);
+      }
+    }
+    LocalStorageManager.deleteMlSample(id);
   }
 
   // ==========================================

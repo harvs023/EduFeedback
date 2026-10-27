@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Survey, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem } from "./types";
 import { LocalStorageManager } from "./lib/storage";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
+import { MASTER_ADMIN_EMAIL } from "./data/initialData";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
 import { HistoricalAnalyticsView } from "./components/HistoricalAnalyticsView";
@@ -272,9 +273,9 @@ export default function App() {
       );
     }
     // Dynamic Notification: Notify system admin desk if not admin
-    if (currentUser?.email !== "admin@edufeedback.edu") {
+    if (currentUser?.email !== MASTER_ADMIN_EMAIL) {
       LocalStorageManager.addNotification(
-        "admin@edufeedback.edu",
+        MASTER_ADMIN_EMAIL,
         "📊 Response Recorded",
         `New response recorded for "${activeSurveyForTaking.title}" (${isAnonymous ? "Anonymous Student" : currentUser?.name || "Student"}).`,
         "📊",
@@ -410,6 +411,23 @@ export default function App() {
     });
     setLogs(LocalStorageManager.getLogs());
     showToast("New Tagalog sample added to machine learning corpus!", "success");
+  };
+
+  const handleDeleteMlSample = async (id: string) => {
+    try {
+      await DatabaseService.deleteMLSample(id);
+      setMlDataset((prev) => prev.filter((s) => s.id !== id));
+      LocalStorageManager.addLog({
+        user: currentUser?.name || "Admin",
+        pos: currentUser?.pos || "Superadmin",
+        action: "ML Dataset Sample Deleted",
+        details: `Deleted training phrase with ID ${id} from NLP corpus`,
+      });
+      setLogs(LocalStorageManager.getLogs());
+      showToast("Training sample removed from corpus.", "info");
+    } catch (err: any) {
+      showToast(err?.message || "Failed to remove training sample.", "info");
+    }
   };
 
   // News Announcements Handlers
@@ -554,13 +572,24 @@ export default function App() {
   };
 
   const handleToggleUserStatus = (email: string, newStatus: "active" | "suspended" | "pending_approval") => {
-    const updated = users.map((u) => (u.email === email ? { ...u, status: newStatus } : u));
+    const cleanEmail = email.trim();
+    const updated = users.map((u) => {
+      if (u.email.trim().toLowerCase() === cleanEmail.toLowerCase()) {
+        return { ...u, status: newStatus };
+      }
+      return u;
+    });
     LocalStorageManager.saveUsers(updated);
     setUsers(updated);
 
+    const targetUser = updated.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
+    if (targetUser) {
+      DatabaseService.saveUser(targetUser);
+    }
+
     if (newStatus === "active") {
       LocalStorageManager.addNotification(
-        email,
+        cleanEmail,
         "🛡️ Account Verified & Approved",
         "Your institutional credentials have been verified and approved by the System Administrator. You can now access full authoring permissions.",
         "🛡️",
@@ -569,19 +598,45 @@ export default function App() {
       setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
     }
 
-    showToast(`User status updated to ${newStatus.replace('_', ' ')}.`, "info");
+    LocalStorageManager.addLog({
+      user: currentUser?.name || "System Administrator",
+      pos: "Superadmin",
+      action: newStatus === "active" ? "User Approved" : "User Status Changed",
+      details: `${newStatus === "active" ? "Approved and authorized" : `Changed status to ${newStatus} for`} account: ${cleanEmail}`,
+    });
+    setLogs(LocalStorageManager.getLogs());
+
+    showToast(
+      newStatus === "active"
+        ? `Account ${cleanEmail} approved and activated successfully!`
+        : `User status updated to ${newStatus.replace("_", " ")}.`,
+      "success"
+    );
   };
 
   const handlePromoteUser = (email: string, newPos: UserProfile["pos"]) => {
-    const updated = users.map((u) => (u.email === email ? { ...u, pos: newPos } : u));
-    LocalStorageManager.saveUsers(updated);
+    const cleanEmail = email.trim();
+    const updated = users.map((u) => {
+      if (u.email.trim().toLowerCase() === cleanEmail.toLowerCase()) {
+        return { ...u, pos: newPos, role: newPos === "Superadmin" ? "superadmin" : "user" };
+      }
+      return u;
+    });
     setUsers(updated);
+
+    const targetUser = updated.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
+    if (targetUser) {
+      DatabaseService.saveUser(targetUser);
+    } else {
+      LocalStorageManager.saveUsers(updated);
+    }
     showToast(`User promoted to ${newPos}.`, "success");
   };
 
   const handleAddUser = (newUser: UserProfile) => {
     try {
       const updated = LocalStorageManager.addUser(newUser);
+      DatabaseService.saveUser(newUser);
       setUsers(updated);
       setLogs(LocalStorageManager.getLogs());
       showToast(`User ${newUser.name} created successfully!`, "success");
@@ -592,10 +647,15 @@ export default function App() {
 
   const handleUpdateUser = (email: string, changes: Partial<UserProfile>) => {
     try {
-      const updated = LocalStorageManager.updateUser(email, changes);
+      const cleanEmail = email.trim();
+      const updated = LocalStorageManager.updateUser(cleanEmail, changes);
+      const targetUser = updated.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
+      if (targetUser) {
+        DatabaseService.saveUser(targetUser);
+      }
       setUsers(updated);
       setLogs(LocalStorageManager.getLogs());
-      if (currentUser && currentUser.email === email) {
+      if (currentUser && currentUser.email.trim().toLowerCase() === cleanEmail.toLowerCase()) {
         setCurrentUser({ ...currentUser, ...changes });
       }
       showToast("User details updated successfully.", "success");
@@ -606,7 +666,9 @@ export default function App() {
 
   const handleDeleteUser = (email: string) => {
     try {
-      const updated = LocalStorageManager.deleteUser(email);
+      const cleanEmail = email.trim();
+      const updated = LocalStorageManager.deleteUser(cleanEmail);
+      DatabaseService.deleteUser(cleanEmail);
       setUsers(updated);
       setLogs(LocalStorageManager.getLogs());
       showToast("User account permanently removed.", "info");
@@ -645,7 +707,7 @@ export default function App() {
       setLogs(resetData.logs);
       setNewsList(resetData.news);
       setCurrentUser(LocalStorageManager.getCurrentUser());
-      showToast("System database reset to initial demonstration state.", "info");
+      showToast("System database reset to clean baseline (Root Administrator preserved).", "info");
     } catch (err: any) {
       showToast(err.message || "Failed to reset database.", "info");
     }
@@ -955,6 +1017,7 @@ export default function App() {
                 surveys={surveys}
                 responses={responses}
                 onAddSample={handleAddMlSample}
+                onDeleteSample={handleDeleteMlSample}
               />
             ) : (
               <div className="bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-xs max-w-lg mx-auto mt-12 space-y-4">

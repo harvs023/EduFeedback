@@ -1123,52 +1123,9 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                   <strong>Wrong Database Tab:</strong> Ensure you are in <strong>"Firestore Database" &gt; Rules</strong>, not "Realtime Database".
                 </li>
                 <li>
-                  <strong>Auth Requirement in Rules:</strong> If rules check <code>request.auth</code>, but Email/Password is not enabled under <em>Authentication &gt; Sign-in method</em>, unauthenticated writes fail.
+                  <strong>Auth Requirement in Rules:</strong> If rules check <code>request.auth</code>, an active authenticated session with an authorized role is required.
                 </li>
               </ul>
-
-              <div className="space-y-1.5 pt-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-800 text-xs">Production Working Ruleset:</span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(`rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if false;\n    }\n    function isSignedIn() {\n      return request.auth != null;\n    }\n    function isAdmin() {\n      return isSignedIn() && (\n        request.auth.token.email == 'admin@edufeedback.edu' ||\n        request.auth.token.email == 'azalrob023@gmail.com'\n      );\n    }\n    match /users/{userId} {\n      allow read, write: if isSignedIn();\n    }\n    match /surveys/{surveyId} {\n      allow read: if true;\n      allow write: if isSignedIn();\n    }\n    match /responses/{responseId} {\n      allow read: if true;\n      allow create: if true;\n      allow update, delete: if isAdmin();\n    }\n    match /news/{newsId} {\n      allow read: if true;\n      allow write: if isSignedIn();\n    }\n    match /ml_dataset/{sampleId} {\n      allow read: if true;\n      allow write: if isSignedIn();\n    }\n    match /logs/{logId} {\n      allow read: if true;\n      allow create: if true;\n      allow update, delete: if isAdmin();\n    }\n  }\n}`);
-                      setCopiedRule(true);
-                      setTimeout(() => setCopiedRule(false), 2000);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>{copiedRule ? "Copied!" : "Copy Rule"}</span>
-                  </button>
-                </div>
-                <pre className="p-3 bg-slate-900 text-amber-300 rounded-xl font-mono text-[10px] leading-relaxed overflow-x-auto max-h-48">
-{`rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
-    }
-    function isSignedIn() { return request.auth != null; }
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'admin@edufeedback.edu' ||
-        request.auth.token.email == 'azalrob023@gmail.com'
-      );
-    }
-    match /users/{userId} { allow read, write: if isSignedIn(); }
-    match /surveys/{surveyId} { allow read: if true; allow write: if isSignedIn(); }
-    match /responses/{responseId} { allow read: if true; allow create: if true; allow update, delete: if isAdmin(); }
-    match /news/{newsId} { allow read: if true; allow write: if isSignedIn(); }
-    match /ml_dataset/{sampleId} { allow read: if true; allow write: if isSignedIn(); }
-    match /logs/{logId} { allow read: if true; allow create: if true; allow update, delete: if isAdmin(); }
-  }
-}`}
-                </pre>
-                <p className="text-[10px] text-slate-500">
-                  Paste this into <strong>Firebase Console &gt; Firestore Database &gt; Rules</strong>, click <strong className="text-slate-800">Publish</strong>, and press <strong>Sync Firestore Cloud</strong> again.
-                </p>
-              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">

@@ -1,54 +1,152 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 1. Global Security Helpers
-    function isSignedIn() {
-      return request.auth != null;
+
+    function signedIn() {
+      return request.auth != null && 'email' in request.auth.token;
     }
 
-    // Verified administrator gate
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function emailKey(email) {
+      return email.lower().replace('[^a-z0-9_-]', '_');
+    }
+
+    function myKey() {
+      return emailKey(request.auth.token.email);
+    }
+
+    function myProfilePath() {
+      return /databases/$(database)/documents/users/$(myKey());
+    }
+
+    function isActive() {
+      return signedIn()
+        && exists(myProfilePath())
+        && get(myProfilePath()).data.status == 'active';
+    }
+
+    function myRole() {
+      return get(myProfilePath()).data.role;
+    }
+
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'admin@edufeedback.edu' ||
-        request.auth.token.email == 'azalrob023@gmail.com'
-      );
+      return isActive() && myRole() == 'superadmin';
     }
 
-    // 2. Users Collection
+    function isAuthor() {
+      return isActive() && myRole() in ['faculty', 'officer', 'superadmin'];
+    }
+
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // ---------------------------------------------------------------- users
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+
+      allow get: if isAdmin() || (signedIn() && userId.lower() == myKey());
+      allow list: if isAdmin();
+
+      allow create: if signedIn()
+        && userId.lower() == myKey()
+        && request.resource.data.email.lower() == myEmail()
+        && (
+          (request.resource.data.pos == 'Student'
+            && request.resource.data.role in ['user', 'student']
+            && request.resource.data.status == 'active')
+          ||
+          (request.resource.data.pos == 'Faculty'
+            && request.resource.data.role == 'faculty'
+            && request.resource.data.status == 'pending_approval')
+          ||
+          (request.resource.data.pos == 'Student Officer'
+            && request.resource.data.role == 'officer'
+            && request.resource.data.status == 'pending_approval')
+        );
+
+      allow update: if signedIn()
+        && userId.lower() == myKey()
+        && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['role', 'pos', 'status', 'email', 'joined']);
+
+      allow create, update, delete: if isAdmin();
     }
 
-    // 3. Surveys & Responses
+    // -------------------------------------------------------------- surveys
     match /surveys/{surveyId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+
+      allow read: if isActive();
+
+      allow create: if isAuthor()
+        && request.resource.data.owner.lower() == myEmail();
+
+      allow update: if isAdmin()
+        || (isAuthor()
+            && resource.data.owner.lower() == myEmail()
+            && request.resource.data.owner == resource.data.owner)
+        || (isActive()
+            && onlyChanges(['responses'])
+            && request.resource.data.responses >= resource.data.responses
+            && request.resource.data.responses <= resource.data.responses + 1);
+
+      allow delete: if isAdmin()
+        || (isAuthor() && resource.data.owner.lower() == myEmail());
+    }
+
+    // ------------------------------------------------------------ responses
+    function surveyPath(sid) {
+      return /databases/$(database)/documents/surveys/$(string(sid));
     }
 
     match /responses/{responseId} {
-      allow read: if true;
-      allow create: if true;
+
+      allow create: if isActive()
+        && request.resource.data.surveyId != null
+        && exists(surveyPath(request.resource.data.surveyId))
+        && get(surveyPath(request.resource.data.surveyId)).data.status == 'published'
+        && (
+          (request.resource.data.get('isAnonymous', false) == true
+            && request.resource.data.userEmail == 'anonymous@school.edu.ph')
+          ||
+          request.resource.data.userEmail.lower() == myEmail()
+        );
+
+      allow read: if isAdmin()
+        || (isAuthor()
+            && exists(surveyPath(resource.data.surveyId))
+            && get(surveyPath(resource.data.surveyId)).data.owner.lower() == myEmail())
+        || (isActive()
+            && resource.data.get('isAnonymous', false) == false
+            && resource.data.userEmail.lower() == myEmail());
+
       allow update, delete: if isAdmin();
     }
 
-    // 4. Campus News & Announcements
+    // ----------------------------------------------------------------- news
     match /news/{newsId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+      allow read: if isActive();
+      allow write: if isAdmin();
+
+      allow update: if isActive()
+        && onlyChanges(['likesCount'])
+        && (request.resource.data.likesCount == resource.data.likesCount + 1
+            || request.resource.data.likesCount == resource.data.likesCount - 1);
     }
 
-    // 5. Tagalog NLP ML Training Dataset
+    // ----------------------------------------------------------- ml_dataset
     match /ml_dataset/{sampleId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+      allow read: if isAuthor();
+      allow write: if isAdmin();
     }
 
-    // 6. System Activity & Audit Logs
+    // ----------------------------------------------------------------- logs
     match /logs/{logId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if isAdmin();
+      allow create: if isActive();
+      allow read, update, delete: if isAdmin();
     }
   }
 }

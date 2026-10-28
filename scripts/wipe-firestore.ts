@@ -62,8 +62,7 @@ async function main() {
     let deletedUsers = 0;
     for (const d of usersSnap.docs) {
       const uData = d.data();
-      const email = (uData.email || "").toLowerCase();
-      if (email !== "admin@edufeedback.edu" && email !== "azalrob023@gmail.com") {
+      if (uData.role !== "superadmin") {
         await deleteDoc(doc(db, "users", d.id));
         deletedUsers++;
       }

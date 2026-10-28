@@ -545,47 +545,35 @@ export async function seedFirestoreWithData(data: {
       return { success: false, message: "Firebase is not initialized. Please verify configuration keys." };
     }
 
-    // Ensure Firebase Auth session exists with admin privileges for Firestore security rules
+    // Ensure Firebase Auth session exists and user has role === 'superadmin'
     const authInstance = getFirebaseAuth();
-    if (authInstance) {
-      const currentEmail = authInstance.currentUser?.email?.toLowerCase();
-      const isAdminEmail = currentEmail === "admin@edufeedback.edu" || currentEmail === "azalrob023@gmail.com";
+    if (!authInstance?.currentUser) {
+      return { success: false, message: "Admin login is required to perform this action." };
+    }
 
-      if (!isAdminEmail) {
-        try {
-          await signInWithEmailAndPassword(authInstance, "admin@edufeedback.edu", "admin123");
-        } catch (authErr: any) {
-          if (
-            authErr?.code === "auth/user-not-found" ||
-            authErr?.code === "auth/invalid-credential" ||
-            authErr?.code === "auth/invalid-login-credentials"
-          ) {
-            try {
-              await createUserWithEmailAndPassword(authInstance, "admin@edufeedback.edu", "admin123");
-            } catch (createErr: any) {
-              console.warn("Could not auto-create admin in Firebase Auth:", createErr);
-              if (createErr?.code === "auth/operation-not-allowed") {
-                return {
-                  success: false,
-                  message: "Firebase Auth Error: Email/Password provider is disabled. Please go to Firebase Console > Authentication > Sign-in method and enable 'Email/Password'.",
-                };
-              }
-            }
-          } else if (authErr?.code === "auth/operation-not-allowed") {
-            return {
-              success: false,
-              message: "Firebase Auth Error: Email/Password provider is disabled in your Firebase Console. Go to Firebase Console > Authentication > Sign-in method and enable 'Email/Password'.",
-            };
-          } else if (authErr?.code === "auth/unauthorized-domain") {
-            return {
-              success: false,
-              message: "Firebase Auth Error: Current domain is not authorized. Please access the app via http://localhost:3000 instead of IP address, or add your domain to Firebase Console > Authentication > Settings > Authorized domains.",
-            };
-          } else {
-            console.warn("Firebase Auth signIn notice:", authErr?.message || authErr);
-          }
-        }
+    const currentEmail = authInstance.currentUser.email?.toLowerCase() || "";
+    let userRole = "";
+
+    try {
+      const { LocalStorageManager } = await import("./storage");
+      const localUser = LocalStorageManager.getCurrentUser();
+      if (localUser && localUser.email.toLowerCase() === currentEmail) {
+        userRole = localUser.role;
       }
+    } catch {}
+
+    if (userRole !== "superadmin") {
+      try {
+        const userDocId = currentEmail.replace(/[^a-z0-9_-]/g, "_");
+        const userDoc = await getDoc(doc(firestore, COLLECTIONS.USERS, userDocId));
+        if (userDoc.exists()) {
+          userRole = userDoc.data()?.role || "";
+        }
+      } catch {}
+    }
+
+    if (userRole !== "superadmin") {
+      return { success: false, message: "Admin login is required to perform this action." };
     }
 
     currentCollection = "";
@@ -666,19 +654,35 @@ export async function wipeFirestoreCloudData(): Promise<{
       return { success: false, message: "Firebase is not initialized. Please verify configuration keys." };
     }
 
-    // Ensure Firebase Auth session exists with admin privileges
+    // Ensure Firebase Auth session exists and user has role === 'superadmin'
     const authInstance = getFirebaseAuth();
-    if (authInstance) {
-      const currentEmail = authInstance.currentUser?.email?.toLowerCase();
-      const isAdminEmail = currentEmail === "admin@edufeedback.edu" || currentEmail === "azalrob023@gmail.com";
+    if (!authInstance?.currentUser) {
+      return { success: false, message: "Admin login is required to perform this action." };
+    }
 
-      if (!isAdminEmail) {
-        try {
-          await signInWithEmailAndPassword(authInstance, "admin@edufeedback.edu", "admin123");
-        } catch (authErr: any) {
-          console.warn("Admin sign-in notice during cloud wipe:", authErr?.message);
-        }
+    const currentEmail = authInstance.currentUser.email?.toLowerCase() || "";
+    let userRole = "";
+
+    try {
+      const { LocalStorageManager } = await import("./storage");
+      const localUser = LocalStorageManager.getCurrentUser();
+      if (localUser && localUser.email.toLowerCase() === currentEmail) {
+        userRole = localUser.role;
       }
+    } catch {}
+
+    if (userRole !== "superadmin") {
+      try {
+        const userDocId = currentEmail.replace(/[^a-z0-9_-]/g, "_");
+        const userDoc = await getDoc(doc(firestore, COLLECTIONS.USERS, userDocId));
+        if (userDoc.exists()) {
+          userRole = userDoc.data()?.role || "";
+        }
+      } catch {}
+    }
+
+    if (userRole !== "superadmin") {
+      return { success: false, message: "Admin login is required to perform this action." };
     }
 
     const collectionsToClear = [
@@ -704,8 +708,7 @@ export async function wipeFirestoreCloudData(): Promise<{
     let deletedUsers = 0;
     for (const d of usersSnap.docs) {
       const uData = d.data();
-      const userEmail = (uData.email || "").toLowerCase();
-      if (userEmail !== "admin@edufeedback.edu" && userEmail !== "azalrob023@gmail.com") {
+      if (uData.role !== "superadmin") {
         await deleteDoc(doc(firestore, COLLECTIONS.USERS, d.id));
         deletedUsers++;
       }

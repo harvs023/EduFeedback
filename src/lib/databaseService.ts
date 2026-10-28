@@ -17,6 +17,8 @@ import {
   FirestoreLogsService,
   FirebaseAuthService,
   isFirebaseConfigured,
+  getFirebaseAuth,
+  firebaseConfig,
   seedFirestoreWithData,
   wipeFirestoreCloudData,
 } from "./firebase";
@@ -49,20 +51,19 @@ export class DatabaseService {
   // AUTHENTICATION
   // ==========================================
   static async login(email: string, password: string): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
-    const rawEmail = (email || "").trim();
+    const cleanEmail = (email || "").trim().toLowerCase();
 
-    if (!rawEmail) {
+    if (!cleanEmail) {
       return { success: false, error: "Please enter your university email address." };
     }
     if (!password) {
       return { success: false, error: "Please enter your account password." };
     }
 
-    const lowerInput = rawEmail.toLowerCase();
     const isAdminIdentifier =
-      lowerInput === MASTER_ADMIN_EMAIL.toLowerCase() ||
-      lowerInput === "admin" ||
-      lowerInput === "administrator";
+      cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() ||
+      cleanEmail === "admin" ||
+      cleanEmail === "administrator";
 
     const localUsers = LocalStorageManager.getUsers();
     // Case-insensitive user lookup
@@ -71,7 +72,7 @@ export class DatabaseService {
       if (isAdminIdentifier && (uEmail === MASTER_ADMIN_EMAIL.toLowerCase() || u.role === "superadmin")) {
         return true;
       }
-      return uEmail === lowerInput;
+      return uEmail === cleanEmail;
     });
 
     // Special check for master root admin initial credential
@@ -84,31 +85,109 @@ export class DatabaseService {
 
     // If Firebase Auth is configured, attempt Firebase login
     if (isFirebaseConfigured()) {
+      let firebaseAuthSuccess = false;
+      let firebaseError: any = null;
+
       try {
-        await FirebaseAuthService.signIn(rawEmail, password);
-        // Fetch user profile from Firestore or local
-        const cloudUser = await FirestoreUserService.getByEmail(rawEmail);
-        if (cloudUser) {
-          if (cloudUser.status === "suspended") {
-            return { success: false, error: "This university account has been suspended by system administration." };
-          }
-          if (cloudUser.status === "pending_approval") {
-            return {
-              success: false,
-              error: "Your account is currently awaiting administrative approval from the System Administrator. Please check back once an administrator verifies your faculty/officer credentials.",
+        await FirebaseAuthService.signIn(cleanEmail, password);
+        firebaseAuthSuccess = true;
+      } catch (err: any) {
+        firebaseError = err;
+        console.warn("Firebase Auth signIn error:", err?.code, err?.message);
+      }
+
+      if (firebaseAuthSuccess) {
+        // Fetch user profile from Firestore or construct it
+        let cloudUser = await FirestoreUserService.getByEmail(cleanEmail);
+        if (!cloudUser) {
+          // If master admin, initialize MASTER_ADMIN_USER in Firestore
+          if (isAdminIdentifier || cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase()) {
+            cloudUser = MASTER_ADMIN_USER;
+          } else if (foundUser) {
+            cloudUser = foundUser;
+          } else {
+            const authInstance = getFirebaseAuth();
+            cloudUser = {
+              name: authInstance?.currentUser?.displayName || cleanEmail.split("@")[0],
+              email: cleanEmail,
+              department: "General Administration",
+              pos: "Superadmin",
+              role: "superadmin",
+              status: "active",
+              joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
             };
           }
-          return { success: true, user: cloudUser };
+          await FirestoreUserService.save(cloudUser).catch(() => {});
         }
-      } catch (err: any) {
-        return { success: false, error: "Invalid email or password." };
+
+        if (cloudUser.status === "suspended") {
+          return { success: false, error: "This university account has been suspended by system administration." };
+        }
+        if (cloudUser.status === "pending_approval") {
+          return {
+            success: false,
+            error: "Your account is currently awaiting administrative approval from the System Administrator. Please check back once an administrator verifies your faculty/officer credentials.",
+          };
+        }
+        return { success: true, user: cloudUser };
       }
+
+      // If Firebase Auth sign in failed:
+      // 1. Check if admin password matches local credentials as a fallback
+      if (isAdminIdentifier && LocalStorageManager.verifyPassword(MASTER_ADMIN_EMAIL, password)) {
+        return { success: true, user: MASTER_ADMIN_USER };
+      }
+
+      // 2. Specific message if Email/Password sign-in method is disabled in Firebase Console
+      if (
+        firebaseError?.code === "auth/operation-not-allowed" ||
+        firebaseError?.message?.includes("PASSWORD_LOGIN_DISABLED") ||
+        firebaseError?.message?.includes("operation-not-allowed")
+      ) {
+        return {
+          success: false,
+          error: "Email/Password sign-in is disabled in your Firebase project. In the Firebase Console, navigate to Build > Authentication > Sign-in method, click 'Email/Password', and enable it.",
+        };
+      }
+
+      // 3. User not found in Firebase Auth
+      if (firebaseError?.code === "auth/user-not-found") {
+        return {
+          success: false,
+          error: `No account found for "${cleanEmail}" in Firebase Authentication (Project: ${firebaseConfig.projectId}). If you configured this account in a different Firebase project, ensure the project configuration is synced, or click "Create Account".`,
+        };
+      }
+
+      // 4. Invalid credentials / wrong password
+      if (
+        firebaseError?.code === "auth/wrong-password" ||
+        firebaseError?.code === "auth/invalid-credential" ||
+        firebaseError?.code === "auth/invalid-login-credentials"
+      ) {
+        return {
+          success: false,
+          error: "Incorrect password for this Firebase account. Please verify your credentials and try again.",
+        };
+      }
+
+      // 5. Too many requests
+      if (firebaseError?.code === "auth/too-many-requests") {
+        return {
+          success: false,
+          error: "Too many failed attempts. Access to this account has been temporarily disabled. Please reset your password or try again later.",
+        };
+      }
+
+      return {
+        success: false,
+        error: firebaseError?.message || "Invalid email or password.",
+      };
     }
 
     if (!foundUser) {
       return {
         success: false,
-        error: `No account found for "${rawEmail}". If you haven't registered yet, click "Create Account" above to register, or sign in using the System Administrator credentials (${MASTER_ADMIN_EMAIL}).`,
+        error: `No account found for "${cleanEmail}". If you haven't registered yet, click "Create Account" above to register, or sign in using the System Administrator credentials (${MASTER_ADMIN_EMAIL}).`,
       };
     }
 
@@ -137,20 +216,13 @@ export class DatabaseService {
   }
 
   static async register(userProfile: UserProfile, password: string): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
-    const cleanEmail = userProfile.email.trim();
+    const cleanEmail = userProfile.email.trim().toLowerCase();
 
     // Check for existing account
     const localUsers = LocalStorageManager.getUsers();
-    const exactExisting = localUsers.find((u) => u.email === cleanEmail);
+    const exactExisting = localUsers.find((u) => u.email.trim().toLowerCase() === cleanEmail);
     if (exactExisting) {
       return { success: false, error: "An account with this university email address already exists. Please sign in." };
-    }
-    const caseMismatch = localUsers.find((u) => u.email.toLowerCase() === cleanEmail.toLowerCase());
-    if (caseMismatch) {
-      return {
-        success: false,
-        error: `An account already exists with different capitalization ("${caseMismatch.email}"). Please use that capitalization to sign in or choose a distinct email address.`,
-      };
     }
 
     const isFacultyOrOfficer = userProfile.pos === "Faculty" || userProfile.pos === "Student Officer";
@@ -163,7 +235,7 @@ export class DatabaseService {
       joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     };
 
-    // Save password locally with exact case
+    // Save password locally with lowercase email
     LocalStorageManager.savePassword(cleanEmail, password);
 
     // If Firebase is available, register to Firebase Auth & Firestore
@@ -196,7 +268,8 @@ export class DatabaseService {
   // SURVEYS
   // ==========================================
   static async getSurveys(): Promise<Survey[]> {
-    if (isFirebaseConfigured()) {
+    const authInstance = getFirebaseAuth();
+    if (isFirebaseConfigured() && authInstance?.currentUser) {
       try {
         const cloudSurveys = await FirestoreSurveyService.getAll();
         if (cloudSurveys.length > 0) return cloudSurveys;
@@ -236,16 +309,67 @@ export class DatabaseService {
   // ==========================================
   // SURVEY RESPONSES
   // ==========================================
-  static async getResponses(): Promise<SurveyResponse[]> {
+  static async getResponses(currentUser?: UserProfile | null, ownedSurveys?: Survey[]): Promise<SurveyResponse[]> {
+    if (!currentUser) return [];
+
+    const isSuperadmin = currentUser.role === "superadmin" || currentUser.pos === "Superadmin";
+
+    // 1. Superadmin: loads everything with getAll()
+    if (isSuperadmin) {
+      if (isFirebaseConfigured()) {
+        try {
+          const cloudResponses = await FirestoreResponseService.getAll();
+          return cloudResponses;
+        } catch {
+          return [];
+        }
+      }
+      return LocalStorageManager.getResponses();
+    }
+
+    // 2. All non-admin users (any position):
+    // (1) responses where surveyId is one of the surveys they own (queried with where('surveyId','==',id) per survey, using survey's owner email)
+    // (2) their own named responses where userEmail equals their email, skipping anonymous ones
+    const userEmail = currentUser.email.trim().toLowerCase();
+    const myOwnedSurveyIds = (ownedSurveys || [])
+      .filter((s) => (s.owner || "").trim().toLowerCase() === userEmail)
+      .map((s) => s.id);
+
     if (isFirebaseConfigured()) {
       try {
-        const cloudResponses = await FirestoreResponseService.getAll();
-        if (cloudResponses.length > 0) return cloudResponses;
-      } catch (err) {
-        console.warn("Firestore response fetch failed:", err);
+        const promises: Promise<SurveyResponse[]>[] = [];
+        for (const id of myOwnedSurveyIds) {
+          promises.push(FirestoreResponseService.getBySurveyId(id));
+        }
+        promises.push(FirestoreResponseService.getByUserEmail(userEmail));
+
+        const results = await Promise.all(promises);
+        const combined = results.flat();
+        const seen = new Set<string>();
+        return combined.filter((r) => {
+          const key = String(r.id);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      } catch {
+        return [];
       }
     }
-    return LocalStorageManager.getResponses();
+
+    const localAll = LocalStorageManager.getResponses();
+    const seen = new Set<string>();
+    return localAll.filter((r) => {
+      const isOwnedSurvey = myOwnedSurveyIds.includes(r.surveyId);
+      const isOwnNamedResponse = !r.isAnonymous && r.userEmail && r.userEmail.trim().toLowerCase() === userEmail;
+      if (isOwnedSurvey || isOwnNamedResponse) {
+        const key = String(r.id);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }
+      return false;
+    });
   }
 
   static async saveResponse(response: SurveyResponse): Promise<void> {
@@ -262,7 +386,12 @@ export class DatabaseService {
   // ==========================================
   // USERS
   // ==========================================
-  static async getUsers(): Promise<UserProfile[]> {
+  static async getUsers(currentUser?: UserProfile | null): Promise<UserProfile[]> {
+    // For students and non-admins, do not load the users list at all
+    if (!currentUser || (currentUser.role !== "superadmin" && currentUser.pos !== "Superadmin")) {
+      return [];
+    }
+
     if (isFirebaseConfigured()) {
       try {
         const cloudUsers = await FirestoreUserService.getAll();
@@ -275,9 +404,7 @@ export class DatabaseService {
             );
             if (local && local.status === "active" && cu.status === "pending_approval") {
               // Local was approved by admin; auto-heal Firestore to match active status
-              FirestoreUserService.save({ ...cu, status: "active" }).catch((err) =>
-                console.warn("Auto-heal Firestore user status error:", err)
-              );
+              FirestoreUserService.save({ ...cu, status: "active" }).catch(() => {});
               return { ...cu, status: "active" as const };
             }
             return cu;
@@ -293,15 +420,15 @@ export class DatabaseService {
           LocalStorageManager.saveUsers(merged);
           return merged;
         }
-      } catch (err) {
-        console.warn("Firestore users fetch failed:", err);
+      } catch {
+        return [];
       }
     }
     return LocalStorageManager.getUsers();
   }
 
   static async saveUser(user: UserProfile): Promise<void> {
-    const cleanEmail = user.email.trim();
+    const cleanEmail = user.email.trim().toLowerCase();
     const normalizedUser: UserProfile = { ...user, email: cleanEmail };
 
     if (isFirebaseConfigured()) {
@@ -314,14 +441,14 @@ export class DatabaseService {
     const current = LocalStorageManager.getUsers();
     const updated = [
       normalizedUser,
-      ...current.filter((u) => u.email.trim().toLowerCase() !== cleanEmail.toLowerCase()),
+      ...current.filter((u) => u.email.trim().toLowerCase() !== cleanEmail),
     ];
     LocalStorageManager.saveUsers(updated);
   }
 
   static async deleteUser(email: string): Promise<void> {
-    const cleanEmail = email.trim();
-    if (cleanEmail.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+    const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase()) {
       throw new Error("The root System Administrator account is permanent and cannot be deleted.");
     }
     if (isFirebaseConfigured()) {
@@ -338,7 +465,8 @@ export class DatabaseService {
   // NEWS & ANNOUNCEMENTS
   // ==========================================
   static async getNews(): Promise<NewsAnnouncement[]> {
-    if (isFirebaseConfigured()) {
+    const authInstance = getFirebaseAuth();
+    if (isFirebaseConfigured() && authInstance?.currentUser) {
       try {
         const cloudNews = await FirestoreNewsService.getAll();
         if (cloudNews.length > 0) return cloudNews;
@@ -350,7 +478,8 @@ export class DatabaseService {
   }
 
   static async saveNews(newsItem: NewsAnnouncement): Promise<void> {
-    if (isFirebaseConfigured()) {
+    const authInstance = getFirebaseAuth();
+    if (isFirebaseConfigured() && authInstance?.currentUser) {
       try {
         await FirestoreNewsService.save(newsItem);
       } catch (err) {
@@ -363,7 +492,8 @@ export class DatabaseService {
   }
 
   static async likeNews(id: string): Promise<void> {
-    if (isFirebaseConfigured()) {
+    const authInstance = getFirebaseAuth();
+    if (isFirebaseConfigured() && authInstance?.currentUser) {
       try {
         await FirestoreNewsService.incrementLike(id);
       } catch (err) {
@@ -378,8 +508,15 @@ export class DatabaseService {
   // ==========================================
   // MACHINE LEARNING DATASET SAMPLES
   // ==========================================
-  static async getMLDataset(): Promise<TagalogMLSample[]> {
-    if (isFirebaseConfigured()) {
+  static async getMLDataset(currentUser?: UserProfile | null): Promise<TagalogMLSample[]> {
+    const authInstance = getFirebaseAuth();
+    const isAuthor =
+      currentUser?.role === "superadmin" ||
+      currentUser?.pos === "Superadmin" ||
+      currentUser?.role === "faculty" ||
+      currentUser?.role === "officer";
+
+    if (isFirebaseConfigured() && authInstance?.currentUser && isAuthor) {
       try {
         const cloudDataset = await FirestoreMLService.getAll();
         if (cloudDataset.length > 0) return cloudDataset;
@@ -391,7 +528,8 @@ export class DatabaseService {
   }
 
   static async addMLSample(sample: TagalogMLSample): Promise<void> {
-    if (isFirebaseConfigured()) {
+    const authInstance = getFirebaseAuth();
+    if (isFirebaseConfigured() && authInstance?.currentUser) {
       try {
         await FirestoreMLService.add(sample);
       } catch (err) {
@@ -403,7 +541,8 @@ export class DatabaseService {
   }
 
   static async deleteMLSample(id: string): Promise<void> {
-    if (isFirebaseConfigured()) {
+    const authInstance = getFirebaseAuth();
+    if (isFirebaseConfigured() && authInstance?.currentUser) {
       try {
         await FirestoreMLService.delete(id);
       } catch (err) {
@@ -416,8 +555,11 @@ export class DatabaseService {
   // ==========================================
   // ACTIVITY LOGS
   // ==========================================
-  static async getLogs(): Promise<ActivityLog[]> {
-    if (isFirebaseConfigured()) {
+  static async getLogs(currentUser?: UserProfile | null): Promise<ActivityLog[]> {
+    const authInstance = getFirebaseAuth();
+    const isAdmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
+
+    if (isFirebaseConfigured() && authInstance?.currentUser && isAdmin) {
       try {
         const cloudLogs = await FirestoreLogsService.getAll();
         if (cloudLogs.length > 0) return cloudLogs;

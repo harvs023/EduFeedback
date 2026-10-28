@@ -1,12 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Global Deny default safety net
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
     // 1. Global Security Helpers
     function isSignedIn() {
       return request.auth != null;

@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import appletConfig from "./firebase-applet-config.json";
 
 dotenv.config();
 
@@ -10,6 +11,66 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: "10mb" }));
+
+// In-memory rate limiting map: userId -> { count: number, resetTime: number }
+const userRateLimits = new Map<string, { count: number; resetTime: number }>();
+
+// Authentication and rate limiting middleware for all /api/* endpoints
+app.use("/api/*", async (req, res, next) => {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+
+  if (!token) {
+    return res.status(401).json({ error: "Missing or invalid authorization token" });
+  }
+
+  const apiKey =
+    process.env.VITE_FIREBASE_API_KEY ||
+    process.env.FIREBASE_API_KEY ||
+    appletConfig?.apiKey ||
+    "";
+
+  try {
+    const verifyRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: token }),
+      }
+    );
+
+    if (!verifyRes.ok) {
+      return res.status(401).json({ error: "Invalid authentication token" });
+    }
+
+    const data = (await verifyRes.json()) as any;
+    if (!data.users || data.users.length === 0) {
+      return res.status(401).json({ error: "User not found for token" });
+    }
+
+    const user = data.users[0];
+    const userId = user.localId || user.email || token;
+
+    // Rate limiting: 30 requests per minute per user
+    const now = Date.now();
+    const rateData = userRateLimits.get(userId);
+
+    if (!rateData || now > rateData.resetTime) {
+      userRateLimits.set(userId, { count: 1, resetTime: now + 60000 });
+    } else {
+      if (rateData.count >= 30) {
+        return res.status(429).json({ error: "Rate limit exceeded. Maximum 30 requests per minute." });
+      }
+      rateData.count++;
+    }
+
+    (req as any).user = user;
+    next();
+  } catch {
+    return res.status(401).json({ error: "Authentication verification failed" });
+  }
+});
 
 // Dynamic helper to get Gemini API Key (re-reads .env if modified)
 function getGeminiApiKey(): string {

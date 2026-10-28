@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Survey, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem } from "./types";
 import { LocalStorageManager } from "./lib/storage";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
+import { authFetch, getFirebaseAuth } from "./lib/firebase";
 import { MASTER_ADMIN_EMAIL } from "./data/initialData";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
@@ -77,34 +78,74 @@ export default function App() {
   // Initialize Storage Data & Cloud Readiness on Mount
   useEffect(() => {
     LocalStorageManager.init();
-    setSurveys(LocalStorageManager.getSurveys());
-    setResponses(LocalStorageManager.getResponses());
+    const initialUser = LocalStorageManager.getCurrentUser();
+    const isSuperadmin = initialUser?.role === "superadmin" || initialUser?.pos === "Superadmin";
+    setCurrentUser(initialUser);
+    const initialSurveys = LocalStorageManager.getSurveys();
+    setSurveys(initialSurveys);
+
+    // Scoped initial responses
+    if (initialUser) {
+      if (isSuperadmin) {
+        setResponses(LocalStorageManager.getResponses());
+      } else {
+        const userEmail = initialUser.email.trim().toLowerCase();
+        const myIds = initialSurveys
+          .filter((s) => (s.owner || "").trim().toLowerCase() === userEmail)
+          .map((s) => s.id);
+        const seen = new Set<string>();
+        setResponses(
+          LocalStorageManager.getResponses().filter((r) => {
+            const isOwned = myIds.includes(r.surveyId);
+            const isOwnNamed = !r.isAnonymous && r.userEmail && r.userEmail.trim().toLowerCase() === userEmail;
+            if (isOwned || isOwnNamed) {
+              const key = String(r.id);
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            }
+            return false;
+          })
+        );
+      }
+    } else {
+      setResponses([]);
+    }
+
     setMlDataset(LocalStorageManager.getMlDataset());
     setNewsList(LocalStorageManager.getNews());
-    setLogs(LocalStorageManager.getLogs());
-    setUsers(LocalStorageManager.getUsers());
-    setCurrentUser(LocalStorageManager.getCurrentUser());
-    setNotifications(LocalStorageManager.getNotifications(LocalStorageManager.getCurrentUser()?.email || ""));
+    setLogs(isSuperadmin ? LocalStorageManager.getLogs() : []);
+    // For students and non-admins, do not load the users list at all
+    setUsers(isSuperadmin ? LocalStorageManager.getUsers() : []);
+    setNotifications(LocalStorageManager.getNotifications(initialUser?.email || ""));
 
     // If Firebase is configured with active keys, sync cloud data
     async function syncCloudIfConfigured() {
       if (USE_FIREBASE) {
         try {
-          const [cloudSurveys, cloudResponses, cloudUsers, cloudNews, cloudMl, cloudLogs] = await Promise.all([
-            DatabaseService.getSurveys(),
-            DatabaseService.getResponses(),
-            DatabaseService.getUsers(),
-            DatabaseService.getNews(),
-            DatabaseService.getMLDataset(),
-            DatabaseService.getLogs(),
-          ]);
+          const user = LocalStorageManager.getCurrentUser();
+          const authUser = getFirebaseAuth()?.currentUser;
+          // In accordance with strict security rules, only authenticated active users query cloud collections
+          if (!user || !authUser) return;
+
+          const isAdmin = user?.role === "superadmin" || user?.pos === "Superadmin";
+          const isAuthor = isAdmin || user?.role === "faculty" || user?.role === "officer";
+
+          const cloudSurveys = await DatabaseService.getSurveys().catch(() => []);
           if (cloudSurveys.length > 0) setSurveys(cloudSurveys);
           else if (LocalStorageManager.isWiped()) setSurveys([]);
 
-          if (cloudResponses.length > 0) setResponses(cloudResponses);
-          else if (LocalStorageManager.isWiped()) setResponses([]);
+          const targetSurveys = cloudSurveys.length > 0 ? cloudSurveys : initialSurveys;
+          const [cloudResponses, cloudUsers, cloudNews, cloudMl, cloudLogs] = await Promise.all([
+            DatabaseService.getResponses(user, targetSurveys).catch(() => []),
+            isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
+            DatabaseService.getNews().catch(() => []),
+            isAuthor ? DatabaseService.getMLDataset(user).catch(() => []) : Promise.resolve([]),
+            isAdmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
+          ]);
 
-          if (cloudUsers.length > 0) setUsers(cloudUsers);
+          setResponses(cloudResponses);
+          setUsers(cloudUsers);
 
           if (cloudNews.length > 0) setNewsList(cloudNews);
           else if (LocalStorageManager.isWiped()) setNewsList([]);
@@ -114,8 +155,8 @@ export default function App() {
 
           if (cloudLogs.length > 0) setLogs(cloudLogs);
           else if (LocalStorageManager.isWiped()) setLogs([]);
-        } catch (err) {
-          console.warn("Cloud synchronization standby:", err);
+        } catch {
+          // Wrapped in try/catch so a permission error shows an empty list instead of crashing
         }
       }
     }
@@ -134,23 +175,28 @@ export default function App() {
   const handleLogin = async (user: UserProfile) => {
     setCurrentUser(user);
     LocalStorageManager.setCurrentUser(user);
-    setUsers(LocalStorageManager.getUsers());
+    const isAdmin = user.role === "superadmin" || user.pos === "Superadmin";
+    // For students and non-admins, do not load the users list at all
+    setUsers(isAdmin ? LocalStorageManager.getUsers() : []);
     LocalStorageManager.addLog({
       user: user.name,
       pos: user.pos,
       action: "User Authentication",
       details: `User signed in: ${user.name} (${user.email})`,
     });
-    setLogs(LocalStorageManager.getLogs());
+    setLogs(isAdmin ? LocalStorageManager.getLogs() : []);
     showToast(`Welcome back, ${user.name}!`, "success");
 
-    if (USE_FIREBASE) {
-      try {
-        const cloudUsers = await DatabaseService.getUsers();
-        if (cloudUsers.length > 0) setUsers(cloudUsers);
-      } catch (err) {
-        console.warn("User sync on login:", err);
-      }
+    try {
+      const activeSurveys = surveys.length > 0 ? surveys : await DatabaseService.getSurveys().catch(() => []);
+      const [scopedResponses, scopedUsers] = await Promise.all([
+        DatabaseService.getResponses(user, activeSurveys).catch(() => []),
+        isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
+      ]);
+      setResponses(scopedResponses);
+      setUsers(scopedUsers);
+    } catch {
+      // Permission error shows an empty list instead of crashing
     }
   };
 
@@ -167,6 +213,8 @@ export default function App() {
     await DatabaseService.signOut();
     setCurrentUser(null);
     LocalStorageManager.setCurrentUser(null);
+    setUsers([]);
+    setResponses([]);
     showToast("Signed out successfully.", "info");
   };
 
@@ -186,7 +234,7 @@ export default function App() {
 
     if (paragraphAns) {
       try {
-        const res = await fetch("/api/ml/analyze-tagalog", {
+        const res = await authFetch("/api/ml/analyze-tagalog", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

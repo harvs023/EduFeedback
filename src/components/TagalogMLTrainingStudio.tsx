@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { TagalogMLSample, TagalogMLMetrics, Survey, SurveyResponse } from "../types";
+import { authFetch } from "../lib/firebase";
 import {
   BrainCircuit,
   Sparkles,
@@ -162,7 +163,7 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
     if (!inputText.trim()) return;
     setAnalyzing(true);
     try {
-      const res = await fetch("/api/ml/analyze-tagalog", {
+      const res = await authFetch("/api/ml/analyze-tagalog", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -195,7 +196,7 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
     }
 
     try {
-      const res = await fetch("/api/ml/train-batch", {
+      const res = await authFetch("/api/ml/train-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset }),
@@ -302,7 +303,7 @@ export const TagalogMLTrainingStudio: React.FC<TagalogMLTrainingStudioProps> = (
       .filter((s) => s.length > 0);
 
     try {
-      const res = await fetch("/api/ml/generate-analytics-recommendations", {
+      const res = await authFetch("/api/ml/generate-analytics-recommendations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

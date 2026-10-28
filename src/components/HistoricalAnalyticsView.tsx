@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from "react";
 import { Survey, SurveyResponse, TimeframeFilter, TagalogMLSample, UserProfile } from "../types";
+import { authFetch } from "../lib/firebase";
 import {
   BarChart3,
   Calendar,
@@ -501,7 +502,7 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
     setActiveTab("ml-synthesis");
     try {
       const sampleTexts = filteredResponses.flatMap((r) => r.answers.map((a) => a.answer)).slice(0, 15);
-      const res = await fetch("/api/ml/survey-synthesis", {
+      const res = await authFetch("/api/ml/survey-synthesis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

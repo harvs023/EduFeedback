@@ -19,6 +19,7 @@ import {
   updateDoc,
   deleteDoc,
   query,
+  where,
   orderBy,
   limit,
   Firestore,
@@ -40,16 +41,22 @@ import {
   TagalogMLSample,
   ActivityLog,
 } from "../types";
+import appletConfig from "../../firebase-applet-config.json";
 
-// Firebase Web Configuration loaded from environment variables
+// Firebase Web Configuration loaded from applet config and environment variables
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "",
+  apiKey: appletConfig.apiKey || import.meta.env.VITE_FIREBASE_API_KEY || "",
+  authDomain: appletConfig.authDomain || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
+  projectId: appletConfig.projectId || import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
+  storageBucket: appletConfig.storageBucket || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
+  messagingSenderId: appletConfig.messagingSenderId || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+  appId: appletConfig.appId || import.meta.env.VITE_FIREBASE_APP_ID || "",
 };
+
+export const firestoreDatabaseId: string =
+  appletConfig.firestoreDatabaseId ||
+  import.meta.env.VITE_FIREBASE_DATABASE_ID ||
+  "";
 
 /**
  * Check if the user has provided valid Firebase configuration keys.
@@ -60,7 +67,8 @@ export function isFirebaseConfigured(): boolean {
     firebaseConfig.apiKey !== "YOUR_API_KEY_HERE" &&
     firebaseConfig.apiKey.length > 5 &&
     Boolean(firebaseConfig.projectId) &&
-    firebaseConfig.projectId !== "your-project-id"
+    firebaseConfig.projectId !== "your-project-id" &&
+    firebaseConfig.projectId !== "remixed-project-id"
   );
 }
 
@@ -81,7 +89,9 @@ export function getFirebaseDb(): Firestore | null {
   if (!db) {
     const firebaseApp = getFirebaseApp();
     if (firebaseApp) {
-      db = getFirestore(firebaseApp);
+      db = firestoreDatabaseId
+        ? getFirestore(firebaseApp, firestoreDatabaseId)
+        : getFirestore(firebaseApp);
     }
   }
   return db;
@@ -95,6 +105,32 @@ export function getFirebaseAuth(): Auth | null {
     }
   }
   return auth;
+}
+
+/**
+ * Executes a fetch request with the current user's auth.currentUser.getIdToken()
+ * as the Bearer token in the Authorization header.
+ */
+export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const authInstance = getFirebaseAuth();
+  let token = "";
+  if (authInstance?.currentUser) {
+    try {
+      token = await authInstance.currentUser.getIdToken();
+    } catch (e) {
+      console.warn("Failed to retrieve Firebase ID token:", e);
+    }
+  }
+
+  const headers = new Headers(init.headers || {});
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  return fetch(input, {
+    ...init,
+    headers,
+  });
 }
 
 // Error handling conforming to Firebase Integration Skill
@@ -252,6 +288,38 @@ export const FirestoreResponseService = {
       handleFirestoreError(err, OperationType.CREATE, `${COLLECTIONS.RESPONSES}/${docId}`);
     }
   },
+
+  async getBySurveyId(surveyId: string | number): Promise<SurveyResponse[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    try {
+      const q = query(collection(firestore, COLLECTIONS.RESPONSES), where("surveyId", "==", surveyId));
+      const snap = await getDocs(q);
+      return snap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      })) as SurveyResponse[];
+    } catch {
+      return [];
+    }
+  },
+
+  async getByUserEmail(email: string): Promise<SurveyResponse[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    try {
+      const q = query(collection(firestore, COLLECTIONS.RESPONSES), where("userEmail", "==", email.trim().toLowerCase()));
+      const snap = await getDocs(q);
+      return snap.docs
+        .map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }))
+        .filter((r: any) => !r.isAnonymous && r.userEmail) as SurveyResponse[];
+    } catch {
+      return [];
+    }
+  },
 };
 
 /**
@@ -282,14 +350,14 @@ export const FirestoreUserService = {
     if (!authInstance?.currentUser) {
       return null;
     }
-    const cleanEmail = email.trim();
-    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const cleanEmail = email.trim().toLowerCase();
+    const docId = cleanEmail.replace(/[^a-z0-9_-]/g, "_");
     try {
       const snap = await getDoc(doc(firestore, COLLECTIONS.USERS, docId));
       if (snap.exists()) {
         const u = snap.data() as UserProfile;
-        if (u.email === cleanEmail) {
-          return u;
+        if (u.email.toLowerCase() === cleanEmail) {
+          return { ...u, email: cleanEmail };
         }
       }
       return null;
@@ -302,8 +370,8 @@ export const FirestoreUserService = {
   async save(user: UserProfile): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) return;
-    const cleanEmail = user.email.trim();
-    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const cleanEmail = user.email.trim().toLowerCase();
+    const docId = cleanEmail.replace(/[^a-z0-9_-]/g, "_");
     try {
       await setDoc(doc(firestore, COLLECTIONS.USERS, docId), { ...user, email: cleanEmail }, { merge: true });
     } catch (err) {
@@ -314,8 +382,8 @@ export const FirestoreUserService = {
   async delete(email: string): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) return;
-    const cleanEmail = email.trim();
-    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const cleanEmail = email.trim().toLowerCase();
+    const docId = cleanEmail.replace(/[^a-z0-9_-]/g, "_");
     try {
       await deleteDoc(doc(firestore, COLLECTIONS.USERS, docId));
     } catch (err) {
@@ -537,8 +605,9 @@ export async function seedFirestoreWithData(data: {
 
     currentCollection = COLLECTIONS.USERS;
     for (const user of data.users) {
-      currentDocId = user.email.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
-      await setDoc(doc(firestore, COLLECTIONS.USERS, currentDocId), user);
+      const cleanEmail = user.email.trim().toLowerCase();
+      currentDocId = cleanEmail.replace(/[^a-z0-9_-]/g, "_");
+      await setDoc(doc(firestore, COLLECTIONS.USERS, currentDocId), { ...user, email: cleanEmail });
     }
 
     currentCollection = COLLECTIONS.NEWS;

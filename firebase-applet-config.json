@@ -1,0 +1,12 @@
+{
+  "projectId": "edufeedback-v2",
+  "appId": "1:140011916674:web:4a9276b0342ab8a3a7539b",
+  "apiKey": "AIzaSyCvejuUYGkclDkD0M8oelw3Mx45tx7N_JY",
+  "authDomain": "edufeedback-v2.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-edufeedback-288e6e27-4b83-42e7-aea4-51fe1f51dda3",
+  "storageBucket": "edufeedback-v2.firebasestorage.app",
+  "messagingSenderId": "140011916674",
+  "measurementId": "",
+  "oAuthClientId": "140011916674-2ghbpfs3igc1e527ptg9cmv6e73d2te3.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}

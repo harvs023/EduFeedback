@@ -32,14 +32,21 @@ async function main() {
   const db = getFirestore(app);
   const auth = getAuth(app);
 
-  // Authenticate as Admin
-  console.log("🔐 Authenticating with Firebase Auth as admin@edufeedback.edu...");
-  try {
-    await signInWithEmailAndPassword(auth, "admin@edufeedback.edu", "admin123");
-    console.log("  ✅ Authenticated as administrator\n");
-  } catch (authErr: any) {
-    console.warn("  ⚠️ Firebase Auth notice:", authErr?.message || authErr);
-    console.warn("  Proceeding with wipe attempt...\n");
+  const adminEmail = process.env.ADMIN_EMAIL || "";
+  const adminPassword = process.env.ADMIN_PASSWORD || "";
+
+  // Authenticate as Admin if credentials provided
+  if (adminEmail && adminPassword) {
+    console.log(`🔐 Authenticating with Firebase Auth as ${adminEmail}...`);
+    try {
+      await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
+      console.log("  ✅ Authenticated as administrator\n");
+    } catch (authErr: any) {
+      console.warn("  ⚠️ Firebase Auth notice:", authErr?.message || authErr);
+      console.warn("  Proceeding with wipe attempt...\n");
+    }
+  } else {
+    console.log("⚠️ No ADMIN_EMAIL / ADMIN_PASSWORD configured in environment. Proceeding with wipe...\n");
   }
 
   const collectionsToClear = ["surveys", "responses", "news", "ml_dataset", "logs"];

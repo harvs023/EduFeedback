@@ -52,36 +52,43 @@ async function main() {
   const db = getFirestore(app);
   const auth = getAuth(app);
 
-  // Authenticate as Admin to satisfy Firestore Security Rules
-  console.log("🔐 Authenticating with Firebase Auth as admin@edufeedback.edu...");
-  try {
-    await signInWithEmailAndPassword(auth, "admin@edufeedback.edu", "admin123");
-    console.log("  ✅ Authenticated successfully with Firebase Auth\n");
-  } catch (authErr: any) {
-    if (
-      authErr?.code === "auth/user-not-found" ||
-      authErr?.code === "auth/invalid-credential" ||
-      authErr?.code === "auth/invalid-login-credentials"
-    ) {
-      try {
-        await createUserWithEmailAndPassword(auth, "admin@edufeedback.edu", "admin123");
-        console.log("  ✅ Registered and authenticated new admin@edufeedback.edu in Firebase Auth\n");
-      } catch (createErr: any) {
-        if (createErr?.code === "auth/operation-not-allowed") {
-          console.error("  ❌ Firebase Auth Error: 'Email/Password' sign-in provider is disabled in your Firebase project.");
-          console.error("  👉 Please enable it in Firebase Console > Authentication > Sign-in method > Email/Password.\n");
-        } else {
-          console.warn("  ⚠️ Firebase Auth notice:", createErr?.message || createErr);
+  const adminEmail = process.env.ADMIN_EMAIL || "";
+  const adminPassword = process.env.ADMIN_PASSWORD || "";
+
+  // Authenticate as Admin to satisfy Firestore Security Rules if credentials provided
+  if (adminEmail && adminPassword) {
+    console.log(`🔐 Authenticating with Firebase Auth as ${adminEmail}...`);
+    try {
+      await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
+      console.log("  ✅ Authenticated successfully with Firebase Auth\n");
+    } catch (authErr: any) {
+      if (
+        authErr?.code === "auth/user-not-found" ||
+        authErr?.code === "auth/invalid-credential" ||
+        authErr?.code === "auth/invalid-login-credentials"
+      ) {
+        try {
+          await createUserWithEmailAndPassword(auth, adminEmail, adminPassword);
+          console.log(`  ✅ Registered and authenticated new ${adminEmail} in Firebase Auth\n`);
+        } catch (createErr: any) {
+          if (createErr?.code === "auth/operation-not-allowed") {
+            console.error("  ❌ Firebase Auth Error: 'Email/Password' sign-in provider is disabled in your Firebase project.");
+            console.error("  👉 Please enable it in Firebase Console > Authentication > Sign-in method > Email/Password.\n");
+          } else {
+            console.warn("  ⚠️ Firebase Auth notice:", createErr?.message || createErr);
+          }
+          console.warn("  Continuing with seeding attempt...\n");
         }
-        console.warn("  Continuing with seeding attempt...\n");
+      } else if (authErr?.code === "auth/operation-not-allowed") {
+        console.error("  ❌ Firebase Auth Error: 'Email/Password' sign-in provider is disabled in your Firebase project.");
+        console.error("  👉 Please enable it in Firebase Console > Authentication > Sign-in method > Email/Password.\n");
+      } else {
+        console.warn("  ⚠️ Firebase Auth notice:", authErr?.message || authErr);
+        console.warn("  Continuing with unauthenticated seeding...\n");
       }
-    } else if (authErr?.code === "auth/operation-not-allowed") {
-      console.error("  ❌ Firebase Auth Error: 'Email/Password' sign-in provider is disabled in your Firebase project.");
-      console.error("  👉 Please enable it in Firebase Console > Authentication > Sign-in method > Email/Password.\n");
-    } else {
-      console.warn("  ⚠️ Firebase Auth notice:", authErr?.message || authErr);
-      console.warn("  Continuing with unauthenticated seeding...\n");
     }
+  } else {
+    console.log("⚠️ No ADMIN_EMAIL / ADMIN_PASSWORD configured in environment. Continuing...\n");
   }
 
   console.log("📥 Loading and validating datasets from scripts/demo-data.json...");
@@ -148,11 +155,11 @@ async function main() {
   console.log("===============================================================");
   console.log("\nYou can now open your Firebase Console at:");
   console.log(`👉 https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore`);
-  console.log("\nDemo users are ready to sign in:");
-  console.log("  • Admin:           admin@edufeedback.edu   / admin123");
-  console.log("  • Dr. Maria Reyes: maria.reyes@school.edu  / faculty123");
-  console.log("  • Clara Santos:    clara.santos@school.edu / officer123");
-  console.log("  • Juan Dela Cruz:  juan.delacruz@school.edu / student123\n");
+  console.log("\nDemo user accounts seeded:");
+  console.log("  • Admin:           " + (adminEmail || "Configured Administrator"));
+  console.log("  • Dr. Maria Reyes: maria.reyes@school.edu");
+  console.log("  • Clara Santos:    clara.santos@school.edu");
+  console.log("  • Juan Dela Cruz:  juan.delacruz@school.edu\n");
   process.exit(0);
 }
 

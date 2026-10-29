@@ -37,10 +37,6 @@ service cloud.firestore {
       return isActive() && myRole() == 'superadmin';
     }
 
-    function isAuthor() {
-      return isActive() && myRole() in ['faculty', 'officer', 'superadmin'];
-    }
-
     function onlyChanges(keys) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
@@ -81,11 +77,11 @@ service cloud.firestore {
 
       allow read: if isActive();
 
-      allow create: if isAuthor()
+      allow create: if isActive()
         && request.resource.data.owner.lower() == myEmail();
 
       allow update: if isAdmin()
-        || (isAuthor()
+        || (isActive()
             && resource.data.owner.lower() == myEmail()
             && request.resource.data.owner == resource.data.owner)
         || (isActive()
@@ -94,7 +90,7 @@ service cloud.firestore {
             && request.resource.data.responses <= resource.data.responses + 1);
 
       allow delete: if isAdmin()
-        || (isAuthor() && resource.data.owner.lower() == myEmail());
+        || (isActive() && resource.data.owner.lower() == myEmail());
     }
 
     // ------------------------------------------------------------ responses
@@ -116,7 +112,7 @@ service cloud.firestore {
         );
 
       allow read: if isAdmin()
-        || (isAuthor()
+        || (isActive()
             && exists(surveyPath(resource.data.surveyId))
             && get(surveyPath(resource.data.surveyId)).data.owner.lower() == myEmail())
         || (isActive()
@@ -139,7 +135,7 @@ service cloud.firestore {
 
     // ----------------------------------------------------------- ml_dataset
     match /ml_dataset/{sampleId} {
-      allow read: if isAuthor();
+      allow read: if isAdmin();
       allow write: if isAdmin();
     }
 

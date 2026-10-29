@@ -153,6 +153,9 @@ export class LocalStorageManager {
       cleanEmail === "admin" ||
       cleanEmail === "administrator"
     ) {
+      if (!MASTER_ADMIN_PASSWORD) {
+        return false;
+      }
       return pass === MASTER_ADMIN_PASSWORD;
     }
     const savedPass = LocalStorageManager.getPassword(cleanEmail);

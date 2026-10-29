@@ -61,7 +61,7 @@ export const MASTER_ADMIN_EMAIL = (
 
 export const MASTER_ADMIN_PASSWORD = (
   import.meta.env?.VITE_ADMIN_PASSWORD ||
-  "admin123"
+  ""
 ).trim();
 
 export const MASTER_ADMIN_NAME = (

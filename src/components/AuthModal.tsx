@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { UserProfile } from "../types";
-import { DEPARTMENTS_DATA, PROGRAMS_BY_DEPARTMENT, MASTER_ADMIN_EMAIL, MASTER_ADMIN_PASSWORD } from "../data/initialData";
+import { DEPARTMENTS_DATA, PROGRAMS_BY_DEPARTMENT, MASTER_ADMIN_EMAIL } from "../data/initialData";
 import { DatabaseService } from "../lib/databaseService";
-import { LocalStorageManager } from "../lib/storage";
 import {
   X,
   LogIn,
@@ -138,20 +137,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const result = await DatabaseService.register(newUser, regPassword);
       if (result.success && result.user) {
         if (isApprovalRequired) {
-          LocalStorageManager.addLog({
-            user: newUser.name,
-            pos: newUser.pos,
-            action: "Faculty/Officer Registration Submitted",
-            details: `${newUser.name} registered as ${newUser.pos} (${newUser.email}) and awaits admin approval.`,
-          });
-          LocalStorageManager.addNotification(
-            MASTER_ADMIN_EMAIL,
-            "🛡️ New Account Pending Approval",
-            `${newUser.name} registered as ${newUser.pos} (${newUser.email}) and requires admin verification.`,
-            "🛡️",
-            "account_pending",
-            { email: newUser.email }
-          );
+          try {
+            await DatabaseService.addLog({
+              user: newUser.name,
+              pos: newUser.pos,
+              action: "Faculty/Officer Registration Submitted",
+              details: `${newUser.name} registered as ${newUser.pos} (${newUser.email}) and awaits admin approval.`,
+            });
+          } catch (logErr) {
+            console.warn("Failed to log registration:", logErr);
+          }
+          try {
+            await DatabaseService.addNotification({
+              to: MASTER_ADMIN_EMAIL.toLowerCase(),
+              title: "🛡️ New Account Pending Approval",
+              message: `${newUser.name} registered as ${newUser.pos} (${newUser.email}) and requires admin verification.`,
+              icon: "🛡️",
+              type: "account_pending",
+              data: { email: newUser.email },
+            });
+          } catch (notifErr) {
+            console.warn("Failed to send pending approval notification:", notifErr);
+          }
           setPendingNotice({
             name: newUser.name,
             pos: newUser.pos,

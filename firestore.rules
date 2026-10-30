@@ -144,5 +144,17 @@ service cloud.firestore {
       allow create: if isActive();
       allow read, update, delete: if isAdmin();
     }
+
+    match /notifications/{notificationId} {
+      allow read: if isActive() && resource.data.to == myEmail();
+      allow create: if isActive()
+        && request.resource.data.to is string
+        && request.resource.data.to == request.resource.data.to.lower();
+      allow update: if isActive()
+        && resource.data.to == myEmail()
+        && onlyChanges(['read']);
+      allow delete: if isActive() && resource.data.to == myEmail();
+      allow read, update, delete: if isAdmin();
+    }
   }
 }

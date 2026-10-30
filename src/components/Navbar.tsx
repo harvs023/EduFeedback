@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { UserProfile, NotificationItem } from "../types";
-import { LocalStorageManager } from "../lib/storage";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -195,11 +194,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {unreadNotifsCount > 0 && (
                       <button
                         onClick={() => {
-                          if (onMarkAllNotificationsRead) {
-                            onMarkAllNotificationsRead();
-                          } else {
-                            LocalStorageManager.markAllNotificationsRead(currentUser?.email);
-                          }
+                          onMarkAllNotificationsRead?.();
                         }}
                         className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
                       >
@@ -229,11 +224,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <div
                           key={n.id}
                           onClick={() => {
-                            if (onMarkNotificationRead) {
-                              onMarkNotificationRead(n.id);
-                            } else {
-                              LocalStorageManager.markNotificationRead(n.id, currentUser?.email);
-                            }
+                            onMarkNotificationRead?.(n.id);
                             setShowNotifMenu(false);
                             if (n.type === "news") onNavigate("news");
                             else if (n.type === "response") onNavigate("analytics");

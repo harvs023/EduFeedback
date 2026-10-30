@@ -9,7 +9,7 @@
 
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import {
-  getFirestore,
+  initializeFirestore,
   collection,
   getDocs,
   doc,
@@ -18,6 +18,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  increment,
   query,
   where,
   orderBy,
@@ -40,7 +41,16 @@ import {
   NewsAnnouncement,
   TagalogMLSample,
   ActivityLog,
+  NotificationItem,
 } from "../types";
+import {
+  INITIAL_SURVEYS,
+  INITIAL_RESPONSES,
+  DEFAULT_USERS,
+  INITIAL_NEWS,
+  INITIAL_TAGALOG_ML_DATASET,
+  INITIAL_LOGS,
+} from "../data/initialData";
 import appletConfig from "../../firebase-applet-config.json";
 
 // Firebase Web Configuration loaded from applet config and environment variables
@@ -90,8 +100,8 @@ export function getFirebaseDb(): Firestore | null {
     const firebaseApp = getFirebaseApp();
     if (firebaseApp) {
       db = firestoreDatabaseId
-        ? getFirestore(firebaseApp, firestoreDatabaseId)
-        : getFirestore(firebaseApp);
+        ? initializeFirestore(firebaseApp, { ignoreUndefinedProperties: true }, firestoreDatabaseId)
+        : initializeFirestore(firebaseApp, { ignoreUndefinedProperties: true });
     }
   }
   return db;
@@ -180,6 +190,7 @@ export const COLLECTIONS = {
   NEWS: "news",
   ML_DATASET: "ml_dataset",
   LOGS: "logs",
+  NOTIFICATIONS: "notifications",
 };
 
 /**
@@ -248,12 +259,25 @@ export const FirestoreSurveyService = {
 
   async delete(surveyId: string | number): Promise<void> {
     const firestore = getFirebaseDb();
-    if (!firestore) return;
+    if (!firestore) throw new Error("Firestore is not initialized.");
     const docId = String(surveyId);
     try {
       await deleteDoc(doc(firestore, COLLECTIONS.SURVEYS, docId));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `${COLLECTIONS.SURVEYS}/${docId}`);
+    }
+  },
+
+  async incrementResponses(surveyId: string | number): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    const docId = String(surveyId);
+    try {
+      await updateDoc(doc(firestore, COLLECTIONS.SURVEYS, docId), {
+        responses: increment(1),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.SURVEYS}/${docId}`);
     }
   },
 };
@@ -497,13 +521,123 @@ export const FirestoreLogsService = {
     }
   },
 
-  async add(log: ActivityLog): Promise<void> {
+  async add(log: Omit<ActivityLog, "id" | "time"> | ActivityLog): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    const logId = ("id" in log && log.id) ? log.id : `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const fullLog: ActivityLog = {
+      id: logId,
+      time: ("time" in log && log.time) ? log.time : "Just now",
+      timestamp: log.timestamp || Date.now(),
+      ...log,
+    };
+    try {
+      await setDoc(doc(firestore, COLLECTIONS.LOGS, logId), fullLog);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `${COLLECTIONS.LOGS}/${logId}`);
+    }
+  },
+};
+
+/**
+ * Firestore Notifications Collection Service
+ */
+export const FirestoreNotificationService = {
+  async getByEmail(email: string): Promise<NotificationItem[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore || !email) return [];
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      const q = query(
+        collection(firestore, COLLECTIONS.NOTIFICATIONS),
+        where("to", "==", cleanEmail)
+      );
+      const snap = await getDocs(q);
+      const items = snap.docs.map((docSnap) => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          to: d.to,
+          userEmail: d.to,
+          title: d.title || "",
+          message: d.message || "",
+          read: Boolean(d.read),
+          timestamp: d.timestamp || Date.now(),
+          time: d.time || "Just now",
+          icon: d.icon || "🔔",
+          type: d.type || "general",
+          data: d.data,
+        } as NotificationItem;
+      });
+      items.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      return items;
+    } catch (err) {
+      console.warn("Failed to get notifications:", err);
+      return [];
+    }
+  },
+
+  async add(item: {
+    to: string;
+    title: string;
+    message: string;
+    icon?: string;
+    type?: string;
+    data?: any;
+  }): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return;
+    const cleanEmail = item.to.trim().toLowerCase();
+    const docId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const newDoc = {
+      to: cleanEmail,
+      title: item.title,
+      message: item.message,
+      read: false,
+      timestamp: Date.now(),
+      ...(item.icon ? { icon: item.icon } : {}),
+      ...(item.type ? { type: item.type } : {}),
+      ...(item.data ? { data: item.data } : {}),
+    };
+    try {
+      await setDoc(doc(firestore, COLLECTIONS.NOTIFICATIONS, docId), newDoc);
+    } catch (err) {
+      console.warn("Failed to add notification:", err);
+    }
+  },
+
+  async markAsRead(id: string): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) return;
     try {
-      await setDoc(doc(firestore, COLLECTIONS.LOGS, log.id), log);
+      await updateDoc(doc(firestore, COLLECTIONS.NOTIFICATIONS, id), {
+        read: true,
+      });
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `${COLLECTIONS.LOGS}/${log.id}`);
+      console.warn("Failed to mark notification read:", err);
+    }
+  },
+
+  async markAllAsRead(notifications: NotificationItem[]): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return;
+    const unread = notifications.filter((n) => !n.read);
+    await Promise.all(
+      unread.map((n) =>
+        updateDoc(doc(firestore, COLLECTIONS.NOTIFICATIONS, n.id), {
+          read: true,
+        }).catch((err) => console.warn("Failed to mark notification read:", err))
+      )
+    );
+  },
+
+  async delete(id: string): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return;
+    try {
+      await deleteDoc(doc(firestore, COLLECTIONS.NOTIFICATIONS, id));
+    } catch (err) {
+      console.warn("Failed to delete notification:", err);
     }
   },
 };
@@ -513,14 +647,13 @@ export const FirestoreLogsService = {
  */
 export async function seedFirestoreWithInitialDemoData(): Promise<{ success: boolean; message: string }> {
   try {
-    const { LocalStorageManager } = await import("./storage");
     return seedFirestoreWithData({
-      surveys: LocalStorageManager.getSurveys(),
-      responses: LocalStorageManager.getResponses(),
-      users: LocalStorageManager.getUsers(),
-      news: LocalStorageManager.getNews(),
-      mlDataset: LocalStorageManager.getMlDataset(),
-      logs: LocalStorageManager.getLogs(),
+      surveys: INITIAL_SURVEYS,
+      responses: INITIAL_RESPONSES,
+      users: DEFAULT_USERS,
+      news: INITIAL_NEWS,
+      mlDataset: INITIAL_TAGALOG_ML_DATASET,
+      logs: INITIAL_LOGS,
     });
   } catch (err: any) {
     return { success: false, message: err?.message || "Failed to load datasets for seeding." };
@@ -555,22 +688,12 @@ export async function seedFirestoreWithData(data: {
     let userRole = "";
 
     try {
-      const { LocalStorageManager } = await import("./storage");
-      const localUser = LocalStorageManager.getCurrentUser();
-      if (localUser && localUser.email.toLowerCase() === currentEmail) {
-        userRole = localUser.role;
+      const userDocId = currentEmail.replace(/[^a-z0-9_-]/g, "_");
+      const userDoc = await getDoc(doc(firestore, COLLECTIONS.USERS, userDocId));
+      if (userDoc.exists()) {
+        userRole = userDoc.data()?.role || "";
       }
     } catch {}
-
-    if (userRole !== "superadmin") {
-      try {
-        const userDocId = currentEmail.replace(/[^a-z0-9_-]/g, "_");
-        const userDoc = await getDoc(doc(firestore, COLLECTIONS.USERS, userDocId));
-        if (userDoc.exists()) {
-          userRole = userDoc.data()?.role || "";
-        }
-      } catch {}
-    }
 
     if (userRole !== "superadmin") {
       return { success: false, message: "Admin login is required to perform this action." };
@@ -664,22 +787,12 @@ export async function wipeFirestoreCloudData(): Promise<{
     let userRole = "";
 
     try {
-      const { LocalStorageManager } = await import("./storage");
-      const localUser = LocalStorageManager.getCurrentUser();
-      if (localUser && localUser.email.toLowerCase() === currentEmail) {
-        userRole = localUser.role;
+      const userDocId = currentEmail.replace(/[^a-z0-9_-]/g, "_");
+      const userDoc = await getDoc(doc(firestore, COLLECTIONS.USERS, userDocId));
+      if (userDoc.exists()) {
+        userRole = userDoc.data()?.role || "";
       }
     } catch {}
-
-    if (userRole !== "superadmin") {
-      try {
-        const userDocId = currentEmail.replace(/[^a-z0-9_-]/g, "_");
-        const userDoc = await getDoc(doc(firestore, COLLECTIONS.USERS, userDocId));
-        if (userDoc.exists()) {
-          userRole = userDoc.data()?.role || "";
-        }
-      } catch {}
-    }
 
     if (userRole !== "superadmin") {
       return { success: false, message: "Admin login is required to perform this action." };

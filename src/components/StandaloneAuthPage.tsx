@@ -6,7 +6,6 @@ import {
   MASTER_ADMIN_EMAIL,
 } from "../data/initialData";
 import { DatabaseService } from "../lib/databaseService";
-import { LocalStorageManager } from "../lib/storage";
 import { isFirebaseConfigured } from "../lib/firebase";
 import {
   ShieldCheck,
@@ -151,20 +150,28 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
       const result = await DatabaseService.register(newProfile, regPassword);
       if (result.success && result.user) {
         if (isApprovalRequired) {
-          LocalStorageManager.addLog({
-            user: newProfile.name,
-            pos: newProfile.pos,
-            action: "Faculty/Officer Registration Submitted",
-            details: `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and awaits admin approval.`,
-          });
-          LocalStorageManager.addNotification(
-            MASTER_ADMIN_EMAIL,
-            "🛡️ New Account Pending Approval",
-            `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and requires admin verification.`,
-            "🛡️",
-            "account_pending",
-            { email: newProfile.email }
-          );
+          try {
+            await DatabaseService.addLog({
+              user: newProfile.name,
+              pos: newProfile.pos,
+              action: "Faculty/Officer Registration Submitted",
+              details: `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and awaits admin approval.`,
+            });
+          } catch (logErr) {
+            console.warn("Failed to log registration:", logErr);
+          }
+          try {
+            await DatabaseService.addNotification({
+              to: MASTER_ADMIN_EMAIL.toLowerCase(),
+              title: "🛡️ New Account Pending Approval",
+              message: `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and requires admin verification.`,
+              icon: "🛡️",
+              type: "account_pending",
+              data: { email: newProfile.email },
+            });
+          } catch (notifErr) {
+            console.warn("Failed to send pending approval notification:", notifErr);
+          }
           setPendingNotice({
             name: newProfile.name,
             pos: newProfile.pos,

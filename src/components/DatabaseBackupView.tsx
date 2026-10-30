@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import {
   Survey,
   SurveyResponse,
@@ -9,7 +9,6 @@ import {
   SystemBackupData,
   DatabaseSnapshot,
 } from "../types";
-import { LocalStorageManager } from "../lib/storage";
 import {
   Database,
   Download,
@@ -33,13 +32,11 @@ import {
   Layers,
   Sparkles,
   Flame,
-  Server,
   Code,
-  Copy,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { isFirebaseConfigured, seedFirestoreWithInitialDemoData, firebaseConfig } from "../lib/firebase";
+import { isFirebaseConfigured } from "../lib/firebase";
 import { USE_FIREBASE } from "../lib/databaseService";
 
 interface DatabaseBackupViewProps {
@@ -51,8 +48,6 @@ interface DatabaseBackupViewProps {
   mlDataset: TagalogMLSample[];
   currentUser: UserProfile | null;
   onRestoreBackup: (backupData: SystemBackupData, mode: "overwrite" | "merge") => void;
-  onResetDatabase: () => void;
-  onClearDatabase?: () => void;
   showToast: (text: string, type?: "success" | "info") => void;
 }
 
@@ -65,8 +60,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   mlDataset,
   currentUser,
   onRestoreBackup,
-  onResetDatabase,
-  onClearDatabase,
   showToast,
 }) => {
   // Snapshots State
@@ -82,32 +75,54 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Factory Reset Safety State
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [resetConfirmText, setResetConfirmText] = useState("");
-  const [showClearModal, setShowClearModal] = useState(false);
-  const [clearConfirmText, setClearConfirmText] = useState("");
-  const [isWipingDatabase, setIsWipingDatabase] = useState(false);
-
-  // Firestore Sync Diagnostics Modal
-  const [showSyncErrorModal, setShowSyncErrorModal] = useState(false);
-  const [syncErrorMessage, setSyncErrorMessage] = useState("");
-  const [copiedRule, setCopiedRule] = useState(false);
-
   // Storage footprint calculation
   const storageMetrics = useMemo(() => {
-    return LocalStorageManager.calculateStorageMetrics();
+    const rawData = { surveys, responses, users, logs, newsList, mlDataset };
+    const rawJson = JSON.stringify(rawData);
+    const sizeBytes = new Blob([rawJson]).size;
+    const sizeKb = Number((sizeBytes / 1024).toFixed(2));
+    const sizeMb = Number((sizeBytes / (1024 * 1024)).toFixed(3));
+    return {
+      surveysCount: surveys.length,
+      responsesCount: responses.length,
+      usersCount: users.length,
+      logsCount: logs.length,
+      newsCount: newsList.length,
+      mlDatasetCount: mlDataset.length,
+      totalRecords: surveys.length + responses.length + users.length + logs.length + newsList.length + mlDataset.length,
+      sizeBytes,
+      sizeKb,
+      sizeMb,
+      formattedSize: sizeKb > 1024 ? `${sizeMb} MB` : `${sizeKb} KB`,
+    };
   }, [surveys, responses, users, logs, newsList, mlDataset]);
-
-  // Load existing snapshots on mount
-  useEffect(() => {
-    setSnapshots(LocalStorageManager.getSnapshots());
-  }, []);
 
   // Handle Export Full Database
   const handleExportDatabase = () => {
     try {
-      const backup = LocalStorageManager.exportFullDatabase(currentUser?.email || "admin@edufeedback.edu");
+      const backup: SystemBackupData = {
+        app: "EduFeedback Institutional Evaluation Platform",
+        version: "2.5.0-production",
+        exportedAt: new Date().toLocaleString(),
+        exportTimestamp: Date.now(),
+        exportedBy: currentUser?.email || "admin@edufeedback.edu",
+        stats: {
+          surveysCount: surveys.length,
+          responsesCount: responses.length,
+          usersCount: users.length,
+          mlSamplesCount: mlDataset.length,
+          logsCount: logs.length,
+          newsCount: newsList.length,
+        },
+        data: {
+          surveys,
+          responses,
+          users,
+          mlDataset,
+          logs,
+          news: newsList,
+        },
+      };
       const jsonString = JSON.stringify(backup, null, 2);
       const blob = new Blob([jsonString], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -123,12 +138,32 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      // Also create a local snapshot record
-      const newSnap = LocalStorageManager.createSnapshot(
-        `Exported Archive (${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`,
-        currentUser?.email
-      );
-      setSnapshots(LocalStorageManager.getSnapshots());
+      // Also create an in-memory snapshot record
+      const newSnap: DatabaseSnapshot = {
+        id: `snap_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name: `Exported Archive (${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`,
+        createdAt: new Date().toLocaleString(),
+        timestamp: Date.now(),
+        createdBy: currentUser?.email || "admin@edufeedback.edu",
+        sizeBytes: storageMetrics.sizeBytes,
+        stats: {
+          surveysCount: surveys.length,
+          responsesCount: responses.length,
+          usersCount: users.length,
+          mlSamplesCount: mlDataset.length,
+          logsCount: logs.length,
+          newsCount: newsList.length,
+        },
+        data: {
+          surveys,
+          responses,
+          users,
+          mlDataset,
+          logs,
+          news: newsList,
+        },
+      };
+      setSnapshots((prev) => [newSnap, ...prev]);
 
       showToast("System database backup successfully downloaded as JSON!", "success");
     } catch (err: any) {
@@ -141,8 +176,31 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
     e.preventDefault();
     try {
       const name = snapshotCustomName.trim() || `Snapshot ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-      LocalStorageManager.createSnapshot(name, currentUser?.email || "admin@edufeedback.edu");
-      setSnapshots(LocalStorageManager.getSnapshots());
+      const newSnap: DatabaseSnapshot = {
+        id: `snap_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        createdAt: new Date().toLocaleString(),
+        timestamp: Date.now(),
+        createdBy: currentUser?.email || "admin@edufeedback.edu",
+        sizeBytes: storageMetrics.sizeBytes,
+        stats: {
+          surveysCount: surveys.length,
+          responsesCount: responses.length,
+          usersCount: users.length,
+          mlSamplesCount: mlDataset.length,
+          logsCount: logs.length,
+          newsCount: newsList.length,
+        },
+        data: {
+          surveys,
+          responses,
+          users,
+          mlDataset,
+          logs,
+          news: newsList,
+        },
+      };
+      setSnapshots((prev) => [newSnap, ...prev]);
       setIsCreatingSnapshot(false);
       setSnapshotCustomName("");
       showToast(`Snapshot "${name}" saved to local recovery points.`, "success");
@@ -233,71 +291,13 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   // Delete Snapshot
   const handleDeleteSnapshot = (id: string, name: string) => {
     if (window.confirm(`Delete snapshot "${name}"?`)) {
-      const updated = LocalStorageManager.deleteSnapshot(id);
-      setSnapshots(updated);
+      setSnapshots((prev) => prev.filter((s) => s.id !== id));
       showToast("Snapshot deleted.", "info");
     }
   };
 
-  // Factory Reset
-  const handleFactoryReset = () => {
-    if (resetConfirmText.trim().toUpperCase() !== "RESET") {
-      showToast("Please type RESET exactly to confirm factory reset.", "info");
-      return;
-    }
-    onResetDatabase();
-    setShowResetModal(false);
-    setResetConfirmText("");
-    showToast("Database successfully reset to clean production baseline.", "success");
-  };
-
-  // Complete Database Wipe / Clean Slate
-  const handleClearData = async () => {
-    if (clearConfirmText.trim().toUpperCase() !== "CLEAR") {
-      showToast("Please type CLEAR exactly to confirm database wipe.", "info");
-      return;
-    }
-    setIsWipingDatabase(true);
-    try {
-      if (onClearDatabase) {
-        await onClearDatabase();
-      }
-      setShowClearModal(false);
-      setClearConfirmText("");
-    } catch (err: any) {
-      showToast(err?.message || "Failed to wipe database.", "info");
-    } finally {
-      setIsWipingDatabase(false);
-    }
-  };
-
-  // Firebase Seed & Readiness State
+  // Firebase Readiness Guide Toggle
   const [showFirebaseGuide, setShowFirebaseGuide] = useState(true);
-  const [isSeedingFirestore, setIsSeedingFirestore] = useState(false);
-
-  const handleSeedFirestore = async () => {
-    if (!isFirebaseConfigured()) {
-      showToast("Firebase credentials not configured yet. Please update src/lib/firebase.ts or .env first.", "info");
-      return;
-    }
-    setIsSeedingFirestore(true);
-    try {
-      const res = await seedFirestoreWithInitialDemoData();
-      if (res.success) {
-        showToast(res.message, "success");
-      } else {
-        setSyncErrorMessage(res.message);
-        setShowSyncErrorModal(true);
-        showToast("Firestore write blocked. Click details to resolve.", "info");
-      }
-    } catch (e: any) {
-      setSyncErrorMessage(e?.message || "Failed to seed Firestore.");
-      setShowSyncErrorModal(true);
-      showToast(e?.message || "Failed to seed Firestore.", "info");
-    } finally {
-      setIsSeedingFirestore(false);
-    }
-  };
 
   return (
     <div className="space-y-8 pb-12">
@@ -703,7 +703,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
 
         {showFirebaseGuide && (
           <div className="space-y-4 pt-2 border-t border-amber-200/60 text-xs">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Step 1 */}
               <div className="bg-white p-4 rounded-2xl border border-amber-100 shadow-xs space-y-2">
                 <div className="flex items-center gap-2 font-bold text-slate-900">
@@ -731,97 +731,9 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                   Rules: <span className="font-mono font-bold text-amber-600">firestore.rules ready</span>
                 </div>
               </div>
-
-              {/* Step 3 */}
-              <div className="bg-white p-4 rounded-2xl border border-amber-100 shadow-xs space-y-2 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 font-bold text-slate-900">
-                    <span className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[11px] font-bold">3</span>
-                    <span>Sync Initial Schema</span>
-                  </div>
-                  <p className="text-slate-500 text-[11px] mt-1">
-                    Upload initial university surveys, question templates, and academic categories to Firestore.
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleSeedFirestore}
-                  disabled={isSeedingFirestore || !isFirebaseConfigured()}
-                  className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
-                    isFirebaseConfigured()
-                      ? "bg-amber-600 hover:bg-amber-700 text-white shadow-xs cursor-pointer"
-                      : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
-                  }`}
-                >
-                  <Server className="w-3.5 h-3.5" />
-                  <span>{isSeedingFirestore ? "Syncing Cloud..." : "Sync Firestore Cloud"}</span>
-                </button>
-              </div>
             </div>
           </div>
         )}
-      </div>
-
-      {/* Danger Zone: Reset & Clean Slate */}
-      <div className="bg-rose-50/50 rounded-3xl border border-rose-200 p-6 sm:p-8 space-y-6">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-1.5 text-rose-700 text-xs font-bold uppercase tracking-wider">
-            <AlertTriangle className="w-4 h-4" />
-            <span>Administrative Danger Zone</span>
-          </div>
-          <h3 className="font-serif text-lg font-bold text-slate-900">
-            Database State & Production Cleanup Tools
-          </h3>
-          <p className="text-xs text-slate-600">
-            Choose between restoring the default demonstration seed datasets or wiping the database to an empty clean slate for fresh production deployment.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-          {/* Option 1: Reset to Baseline */}
-          <div className="p-4 bg-white rounded-2xl border border-rose-100 flex flex-col justify-between gap-3 shadow-xs">
-            <div>
-              <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                <span>Reset to Clean Baseline</span>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                Clears custom surveys and responses to an initial clean slate while preserving the Tagalog ML dataset and the permanent System Administrator account.
-              </p>
-            </div>
-            <button
-              onClick={() => {
-                setResetConfirmText("");
-                setShowResetModal(true);
-              }}
-              className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-colors"
-            >
-              Reset to Baseline
-            </button>
-          </div>
-
-          {/* Option 2: Clean Slate (Empty Database) */}
-          <div className="p-4 bg-white rounded-2xl border border-rose-200 flex flex-col justify-between gap-3 shadow-xs">
-            <div>
-              <div className="font-bold text-rose-700 text-xs flex items-center gap-1.5">
-                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                <span>Wipe Database (Empty Clean Slate)</span>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                Deletes all surveys, responses, news, and training sentences. Leaves 0 surveys and 0 responses, retaining only the Superadmin account for real-world launch.
-              </p>
-            </div>
-            <button
-              onClick={() => {
-                setClearConfirmText("");
-                setShowClearModal(true);
-              }}
-              className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-colors"
-            >
-              Wipe to 0 Records (Clean Slate)
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* ============================================================ */}
@@ -944,201 +856,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
         </div>
       )}
 
-      {/* ============================================================ */}
-      {/* MODAL: FACTORY RESET CONFIRMATION */}
-      {/* ============================================================ */}
-      {showResetModal && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setShowResetModal(false)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="font-serif text-lg font-bold text-slate-900">
-                Confirm Reset to Clean Baseline
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                This action will reset surveys, responses, and news to 0, while keeping the root System Administrator account secured and the Tagalog ML dataset active.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-700">
-                To confirm, type <span className="font-mono text-rose-600 font-black">RESET</span> below:
-              </label>
-              <input
-                type="text"
-                value={resetConfirmText}
-                onChange={(e) => setResetConfirmText(e.target.value)}
-                placeholder="Type RESET"
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:outline-hidden focus:border-rose-400"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setShowResetModal(false)}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={resetConfirmText.trim().toUpperCase() !== "RESET"}
-                onClick={handleFactoryReset}
-                className={`px-5 py-2.5 font-bold text-xs rounded-xl shadow-xs transition-colors ${
-                  resetConfirmText.trim().toUpperCase() === "RESET"
-                    ? "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
-                    : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                }`}
-              >
-                Reset to Baseline
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/* MODAL: COMPLETE DATABASE WIPE (CLEAN SLATE) */}
-      {/* ============================================================ */}
-      {showClearModal && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setShowClearModal(false)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-rose-200 space-y-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-200">
-              <Trash2 className="w-6 h-6" />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="font-serif text-lg font-bold text-slate-900">
-                Wipe to Empty Production Database
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                This will delete <strong className="text-rose-700">ALL</strong> surveys, evaluations, student responses, and campus news from <strong className="text-slate-900">both local storage and Cloud Firestore</strong>. All collections will be wiped to 0 records, leaving only your Superadmin credentials active.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-700">
-                To confirm permanent wipe, type <span className="font-mono text-rose-600 font-black">CLEAR</span> below:
-              </label>
-              <input
-                type="text"
-                disabled={isWipingDatabase}
-                value={clearConfirmText}
-                onChange={(e) => setClearConfirmText(e.target.value)}
-                placeholder="Type CLEAR"
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-rose-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:outline-hidden focus:border-rose-400"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                disabled={isWipingDatabase}
-                onClick={() => setShowClearModal(false)}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={isWipingDatabase || clearConfirmText.trim().toUpperCase() !== "CLEAR"}
-                onClick={handleClearData}
-                className={`px-5 py-2.5 font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-2 ${
-                  clearConfirmText.trim().toUpperCase() === "CLEAR" && !isWipingDatabase
-                    ? "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
-                    : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                }`}
-              >
-                {isWipingDatabase && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                <span>{isWipingDatabase ? "Wiping Local & Firestore..." : "Wipe All Data to 0"}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/* MODAL: FIRESTORE PERMISSIONS DIAGNOSTICS & RESOLUTION */}
-      {/* ============================================================ */}
-      {showSyncErrorModal && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setShowSyncErrorModal(false)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-amber-200 space-y-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shrink-0">
-                  <Flame className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-serif text-lg font-bold text-slate-900">
-                    Firestore Permission Resolution
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Connected Project: <code className="font-bold text-slate-800">{firebaseConfig.projectId || "Not detected"}</code>
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowSyncErrorModal(false)}
-                className="p-1 text-slate-400 hover:bg-slate-100 rounded-full cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 space-y-1">
-              <div className="font-bold flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                <span>Error details:</span>
-              </div>
-              <p className="text-[11px] font-mono leading-relaxed">{syncErrorMessage}</p>
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-600">
-              <p className="leading-relaxed">
-                <strong>Why this is happening:</strong> Even after editing rules in Firebase, the changes will be rejected if:
-              </p>
-              <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <li>
-                  <strong>Rule not Published:</strong> In the Firebase Console, you must click the blue <strong>"Publish"</strong> button in the top right to apply rule changes.
-                </li>
-                <li>
-                  <strong>Wrong Database Tab:</strong> Ensure you are in <strong>"Firestore Database" &gt; Rules</strong>, not "Realtime Database".
-                </li>
-                <li>
-                  <strong>Auth Requirement in Rules:</strong> If rules check <code>request.auth</code>, an active authenticated session with an authorized role is required.
-                </li>
-              </ul>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                onClick={() => setShowSyncErrorModal(false)}
-                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl cursor-pointer shadow-xs"
-              >
-                Got It
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

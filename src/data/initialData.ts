@@ -59,10 +59,14 @@ export const MASTER_ADMIN_EMAIL = (
   "admin@edufeedback.edu"
 ).trim();
 
-export const MASTER_ADMIN_PASSWORD = (
-  import.meta.env?.VITE_ADMIN_PASSWORD ||
-  ""
-).trim();
+export const DEFAULT_SURVEY_CATEGORIES = [
+  "Course",
+  "Faculty",
+  "Facilities",
+  "Service",
+  "Student Life",
+  "General",
+];
 
 export const MASTER_ADMIN_NAME = (
   import.meta.env?.VITE_ADMIN_NAME ||
@@ -82,37 +86,6 @@ export const MASTER_ADMIN_USER: UserProfile = {
 
 // Clean Default Users: ONLY the Master Root Administrator is pre-seeded
 export const DEFAULT_USERS: UserProfile[] = [MASTER_ADMIN_USER];
-
-export interface DemoAccountCredential {
-  email: string;
-  name: string;
-  password: string;
-  pos: "Superadmin" | "Faculty" | "Student Officer" | "Student";
-  role: "superadmin" | "user";
-  department: string;
-  program?: string;
-  description: string;
-  badgeLabel: string;
-  badgeColor: string;
-  accentColor: string;
-  permissions: string[];
-}
-
-export const DEMO_ACCOUNTS_CREDENTIALS: DemoAccountCredential[] = [
-  {
-    email: MASTER_ADMIN_EMAIL,
-    name: MASTER_ADMIN_NAME,
-    password: MASTER_ADMIN_PASSWORD,
-    pos: "Superadmin",
-    role: "superadmin",
-    department: "Institutional Quality Assurance Office",
-    description: "Full administrative control: Moderate institutional surveys, manage user directory, train Tagalog sentiment NLP models, and oversee backups.",
-    badgeLabel: "System Administrator",
-    badgeColor: "bg-rose-50 text-rose-700 border-rose-200 ring-rose-500/20",
-    accentColor: "rose",
-    permissions: ["Full Administrative Control", "Audit Activity Logs", "Tagalog NLP Dataset Trainer", "Database Backup & Seeding", "User & Role Directory"],
-  },
-];
 
 export const SAMPLE_USERS: UserProfile[] = DEFAULT_USERS;
 

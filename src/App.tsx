@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Survey, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem } from "./types";
-import { LocalStorageManager } from "./lib/storage";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
-import { authFetch, getFirebaseAuth } from "./lib/firebase";
-import { MASTER_ADMIN_EMAIL } from "./data/initialData";
+import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService } from "./lib/firebase";
+import { MASTER_ADMIN_EMAIL, DEFAULT_SURVEY_CATEGORIES } from "./data/initialData";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
 import { HistoricalAnalyticsView } from "./components/HistoricalAnalyticsView";
@@ -58,164 +57,192 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const handleMarkAllNotificationsRead = () => {
-    const updated = LocalStorageManager.markAllNotificationsRead(currentUser?.email || undefined);
-    setNotifications(updated);
-    showToast("All notifications marked as read.", "info");
-  };
-
-  const handleMarkNotificationRead = (id: string) => {
-    const updated = LocalStorageManager.markNotificationRead(id, currentUser?.email || undefined);
-    setNotifications(updated);
-  };
-
-  const handleClearAllNotifications = () => {
-    LocalStorageManager.clearNotifications(currentUser?.email || undefined);
-    setNotifications([]);
-    showToast("Notifications cleared.", "info");
-  };
-
-  // Initialize Storage Data & Cloud Readiness on Mount
-  useEffect(() => {
-    LocalStorageManager.init();
-    const initialUser = LocalStorageManager.getCurrentUser();
-    const isSuperadmin = initialUser?.role === "superadmin" || initialUser?.pos === "Superadmin";
-    setCurrentUser(initialUser);
-    const initialSurveys = LocalStorageManager.getSurveys();
-    setSurveys(initialSurveys);
-
-    // Scoped initial responses
-    if (initialUser) {
-      if (isSuperadmin) {
-        setResponses(LocalStorageManager.getResponses());
-      } else {
-        const userEmail = initialUser.email.trim().toLowerCase();
-        const myIds = initialSurveys
-          .filter((s) => (s.owner || "").trim().toLowerCase() === userEmail)
-          .map((s) => s.id);
-        const seen = new Set<string>();
-        setResponses(
-          LocalStorageManager.getResponses().filter((r) => {
-            const isOwned = myIds.includes(r.surveyId);
-            const isOwnNamed = !r.isAnonymous && r.userEmail && r.userEmail.trim().toLowerCase() === userEmail;
-            if (isOwned || isOwnNamed) {
-              const key = String(r.id);
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
-            }
-            return false;
-          })
-        );
-      }
-    } else {
-      setResponses([]);
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await DatabaseService.markAllNotificationsRead(notifications);
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      showToast("All notifications marked as read.", "info");
+    } catch (err: any) {
+      console.warn("Failed to mark all notifications read:", err);
     }
+  };
 
-    setMlDataset(LocalStorageManager.getMlDataset());
-    setNewsList(LocalStorageManager.getNews());
-    setLogs(isSuperadmin ? LocalStorageManager.getLogs() : []);
-    // For students and non-admins, do not load the users list at all
-    setUsers(isSuperadmin ? LocalStorageManager.getUsers() : []);
-    setNotifications(LocalStorageManager.getNotifications(initialUser?.email || ""));
-
-    // If Firebase is configured with active keys, sync cloud data
-    async function syncCloudIfConfigured() {
-      if (USE_FIREBASE) {
-        try {
-          const user = LocalStorageManager.getCurrentUser();
-          const authUser = getFirebaseAuth()?.currentUser;
-          // In accordance with strict security rules, only authenticated active users query cloud collections
-          if (!user || !authUser) return;
-
-          const isAdmin = user?.role === "superadmin" || user?.pos === "Superadmin";
-          const isAuthor = isAdmin || user?.role === "faculty" || user?.role === "officer";
-
-          const cloudSurveys = await DatabaseService.getSurveys().catch(() => []);
-          if (cloudSurveys.length > 0) setSurveys(cloudSurveys);
-          else if (LocalStorageManager.isWiped()) setSurveys([]);
-
-          const targetSurveys = cloudSurveys.length > 0 ? cloudSurveys : initialSurveys;
-          const [cloudResponses, cloudUsers, cloudNews, cloudMl, cloudLogs] = await Promise.all([
-            DatabaseService.getResponses(user, targetSurveys).catch(() => []),
-            isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
-            DatabaseService.getNews().catch(() => []),
-            isAuthor ? DatabaseService.getMLDataset(user).catch(() => []) : Promise.resolve([]),
-            isAdmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
-          ]);
-
-          setResponses(cloudResponses);
-          setUsers(cloudUsers);
-
-          if (cloudNews.length > 0) setNewsList(cloudNews);
-          else if (LocalStorageManager.isWiped()) setNewsList([]);
-
-          if (cloudMl.length > 0) setMlDataset(cloudMl);
-          else if (LocalStorageManager.isWiped()) setMlDataset([]);
-
-          if (cloudLogs.length > 0) setLogs(cloudLogs);
-          else if (LocalStorageManager.isWiped()) setLogs([]);
-        } catch {
-          // Wrapped in try/catch so a permission error shows an empty list instead of crashing
-        }
-      }
+  const handleMarkNotificationRead = async (id: string) => {
+    try {
+      await DatabaseService.markNotificationRead(id);
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    } catch (err: any) {
+      console.warn("Failed to mark notification read:", err);
     }
-    syncCloudIfConfigured();
+  };
+
+  const handleClearAllNotifications = async () => {
+    try {
+      await Promise.all(notifications.map((n) => DatabaseService.deleteNotification(n.id)));
+      setNotifications([]);
+      showToast("Notifications cleared.", "info");
+    } catch (err: any) {
+      console.warn("Failed to clear notifications:", err);
+    }
+  };
+
+  const loadDataForUser = useCallback(async (user: UserProfile | null) => {
+    try {
+      const cloudSurveys = await DatabaseService.getSurveys();
+      setSurveys(cloudSurveys);
+
+      const isAdmin = user?.role === "superadmin" || user?.pos === "Superadmin";
+      const isSuperadmin = user?.role === "superadmin";
+      const isAuthor = isAdmin || user?.role === "faculty" || user?.role === "officer";
+
+      const [cloudResponses, cloudUsers, cloudNews, cloudMl, cloudLogs] = await Promise.all([
+        DatabaseService.getResponses(user, cloudSurveys).catch(() => []),
+        isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
+        DatabaseService.getNews().catch(() => []),
+        isAuthor ? DatabaseService.getMLDataset(user).catch(() => []) : Promise.resolve([]),
+        isSuperadmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
+      ]);
+
+      setResponses(cloudResponses);
+      setUsers(cloudUsers);
+      setNewsList(cloudNews);
+      setMlDataset(cloudMl);
+      setLogs(isSuperadmin ? cloudLogs : []);
+    } catch (err: any) {
+      showToast(err?.message || "Failed to load data from Firestore.", "info");
+    }
   }, []);
 
-  // Sync notifications whenever currentUser changes
+  // Firebase Auth State Listener & Profile Synchronization
   useEffect(() => {
-    if (currentUser?.email) {
-      setNotifications(LocalStorageManager.getNotifications(currentUser.email));
-    } else {
-      setNotifications(LocalStorageManager.getNotifications(""));
-    }
-  }, [currentUser]);
+    if (!isFirebaseConfigured()) return;
+
+    const unsubscribe = FirebaseAuthService.onAuthChanged(async (fbUser) => {
+      if (fbUser && fbUser.email) {
+        const cleanEmail = fbUser.email.trim().toLowerCase();
+        try {
+          const profile = await FirestoreUserService.getByEmail(cleanEmail);
+          if (!profile) {
+            await FirebaseAuthService.signOut();
+            setCurrentUser(null);
+            setNotifications([]);
+            showToast("User profile record not found in Firestore. Signed out.", "info");
+            return;
+          }
+          if (profile.status !== "active") {
+            await FirebaseAuthService.signOut();
+            setCurrentUser(null);
+            setNotifications([]);
+            showToast(
+              profile.status === "suspended"
+                ? "This university account has been suspended by system administration."
+                : "Your account is currently awaiting administrative approval.",
+              "info"
+            );
+            return;
+          }
+          setCurrentUser(profile);
+          const userNotifs = await DatabaseService.getNotifications(cleanEmail);
+          setNotifications(userNotifs);
+          loadDataForUser(profile);
+        } catch (err: any) {
+          console.warn("Auth state sync error:", err);
+          await FirebaseAuthService.signOut();
+          setCurrentUser(null);
+          setNotifications([]);
+        }
+      } else {
+        setCurrentUser(null);
+        setNotifications([]);
+        setUsers([]);
+        setResponses([]);
+        setLogs([]);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [loadDataForUser]);
 
   const handleLogin = async (user: UserProfile) => {
     setCurrentUser(user);
-    LocalStorageManager.setCurrentUser(user);
     const isAdmin = user.role === "superadmin" || user.pos === "Superadmin";
-    // For students and non-admins, do not load the users list at all
-    setUsers(isAdmin ? LocalStorageManager.getUsers() : []);
-    LocalStorageManager.addLog({
-      user: user.name,
-      pos: user.pos,
-      action: "User Authentication",
-      details: `User signed in: ${user.name} (${user.email})`,
-    });
-    setLogs(isAdmin ? LocalStorageManager.getLogs() : []);
+    const isSuperadmin = user.role === "superadmin";
+    const isAuthor = isAdmin || user.role === "faculty" || user.role === "officer";
+
+    try {
+      await DatabaseService.addLog({
+        user: user.name,
+        pos: user.pos,
+        action: "User Authentication",
+        details: `User signed in: ${user.name} (${user.email})`,
+      });
+    } catch (err: any) {
+      console.warn("Failed to write sign-in log:", err);
+    }
+
     showToast(`Welcome back, ${user.name}!`, "success");
 
     try {
-      const activeSurveys = surveys.length > 0 ? surveys : await DatabaseService.getSurveys().catch(() => []);
-      const [scopedResponses, scopedUsers] = await Promise.all([
+      const userNotifs = await DatabaseService.getNotifications(user.email);
+      setNotifications(userNotifs);
+
+      const activeSurveys = await DatabaseService.getSurveys();
+      setSurveys(activeSurveys);
+      const [scopedResponses, scopedUsers, freshNews, freshMl, freshLogs] = await Promise.all([
         DatabaseService.getResponses(user, activeSurveys).catch(() => []),
         isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
+        DatabaseService.getNews().catch(() => []),
+        isAuthor ? DatabaseService.getMLDataset(user).catch(() => []) : Promise.resolve([]),
+        isSuperadmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
       ]);
       setResponses(scopedResponses);
       setUsers(scopedUsers);
-    } catch {
-      // Permission error shows an empty list instead of crashing
+      setNewsList(freshNews);
+      setMlDataset(freshMl);
+      setLogs(isSuperadmin ? freshLogs : []);
+    } catch (err: any) {
+      showToast(err?.message || "Failed to load Firestore data for user.", "info");
     }
   };
 
   const handleSignOut = async () => {
     if (currentUser) {
-      LocalStorageManager.addLog({
-        user: currentUser.name,
-        pos: currentUser.pos,
-        action: "User Sign Out",
-        details: `User signed out: ${currentUser.name}`,
-      });
-      setLogs(LocalStorageManager.getLogs());
+      try {
+        await DatabaseService.addLog({
+          user: currentUser.name,
+          pos: currentUser.pos,
+          action: "User Sign Out",
+          details: `User signed out: ${currentUser.name}`,
+        });
+      } catch {}
     }
     await DatabaseService.signOut();
     setCurrentUser(null);
-    LocalStorageManager.setCurrentUser(null);
+    setNotifications([]);
     setUsers([]);
     setResponses([]);
+    setLogs([]);
     showToast("Signed out successfully.", "info");
+  };
+
+  const logActivityAndRefresh = async (logData: Omit<ActivityLog, "id" | "time"> | ActivityLog) => {
+    try {
+      await DatabaseService.addLog(logData);
+    } catch (err) {
+      console.warn("Activity log write failed:", err);
+    }
+    if (currentUser?.role === "superadmin") {
+      try {
+        const refreshedLogs = await DatabaseService.getLogs(currentUser);
+        setLogs(refreshedLogs);
+      } catch (err) {
+        console.warn("Failed to load logs:", err);
+      }
+    } else {
+      setLogs([]);
+    }
   };
 
   // Submit Survey Response Handler
@@ -277,99 +304,94 @@ export default function App() {
       answers,
     };
 
-    // --------------------------------------------------------------------------
-    // [ACTIVE: LOCAL STORAGE DEMO MODE]
-    // --------------------------------------------------------------------------
-    LocalStorageManager.saveResponse(newResponse);
+    try {
+      await DatabaseService.saveResponse(newResponse);
 
-    // --------------------------------------------------------------------------
-    // [FIREBASE CLOUD MODE - UNCOMMENT WHEN ACTIVE]: Save directly to Firestore
-    // --------------------------------------------------------------------------
-    // DatabaseService.saveResponse(newResponse);
+      // Update in-memory survey responses count
+      setSurveys((prev) =>
+        prev.map((s) => (s.id === activeSurveyForTaking.id ? { ...s, responses: (s.responses || 0) + 1 } : s))
+      );
+      setResponses((prev) => [newResponse, ...prev]);
 
-    // Update survey responses count
-    const updatedSurveys = surveys.map((s) => {
-      if (s.id === activeSurveyForTaking.id) {
-        return { ...s, responses: (s.responses || 0) + 1 };
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Student",
+        pos: currentUser?.pos || "Student",
+        action: "Survey Response Submitted",
+        details: `Submitted response for survey: "${activeSurveyForTaking.title}"`,
+      });
+      setActiveSurveyForTaking(null);
+
+      // Dynamic Notification: Notify survey owner
+      const targetOwner = activeSurveyForTaking.creatorEmail || activeSurveyForTaking.owner;
+      if (targetOwner && targetOwner.toLowerCase() !== currentUser?.email.toLowerCase()) {
+        try {
+          await DatabaseService.addNotification({
+            to: targetOwner.toLowerCase(),
+            title: "📝 New Survey Response",
+            message: `A new response was submitted for "${activeSurveyForTaking.title}".`,
+            icon: "📝",
+            type: "response",
+            data: { surveyId: activeSurveyForTaking.id },
+          });
+        } catch {}
       }
-      return s;
-    });
-    LocalStorageManager.saveSurveys(updatedSurveys);
+      // Dynamic Notification: Notify system admin desk if not admin
+      if (currentUser?.email.toLowerCase() !== MASTER_ADMIN_EMAIL.toLowerCase()) {
+        try {
+          await DatabaseService.addNotification({
+            to: MASTER_ADMIN_EMAIL.toLowerCase(),
+            title: "📊 Response Recorded",
+            message: `New response recorded for "${activeSurveyForTaking.title}" (${isAnonymous ? "Anonymous Student" : currentUser?.name || "Student"}).`,
+            icon: "📊",
+            type: "response",
+            data: { surveyId: activeSurveyForTaking.id },
+          });
+        } catch {}
+      }
+      if (currentUser?.email) {
+        const refreshed = await DatabaseService.getNotifications(currentUser.email);
+        setNotifications(refreshed);
+      }
 
-    LocalStorageManager.addLog({
-      user: currentUser?.name || "Student",
-      pos: currentUser?.pos || "Student",
-      action: "Survey Response Submitted",
-      details: `Submitted response for survey: "${activeSurveyForTaking.title}"`,
-    });
-
-    setSurveys(updatedSurveys);
-    setResponses(LocalStorageManager.getResponses());
-    setLogs(LocalStorageManager.getLogs());
-    setActiveSurveyForTaking(null);
-
-    // Dynamic Notification: Notify survey owner
-    const targetOwner = activeSurveyForTaking.creatorEmail || activeSurveyForTaking.owner;
-    if (targetOwner && targetOwner !== currentUser?.email) {
-      LocalStorageManager.addNotification(
-        targetOwner,
-        "📝 New Survey Response",
-        `A new response was submitted for "${activeSurveyForTaking.title}".`,
-        "📝",
-        "response",
-        { surveyId: activeSurveyForTaking.id }
-      );
+      showToast("Survey response submitted successfully!", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to submit survey response.", "info");
     }
-    // Dynamic Notification: Notify system admin desk if not admin
-    if (currentUser?.email !== MASTER_ADMIN_EMAIL) {
-      LocalStorageManager.addNotification(
-        MASTER_ADMIN_EMAIL,
-        "📊 Response Recorded",
-        `New response recorded for "${activeSurveyForTaking.title}" (${isAnonymous ? "Anonymous Student" : currentUser?.name || "Student"}).`,
-        "📊",
-        "response",
-        { surveyId: activeSurveyForTaking.id }
-      );
-    }
-    setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
-
-    showToast("Survey response submitted successfully!", "success");
   };
 
   // Create / Edit Survey Handler
-  const handleSaveSurvey = (surveyData: Partial<Survey>, status: "draft" | "published" | "scheduled") => {
+  const handleSaveSurvey = async (surveyData: Partial<Survey>, status: "draft" | "published" | "scheduled") => {
     // If editing an existing survey
     if (surveyData.id) {
-      const updatedSurveys = surveys.map((s) => {
-        if (s.id === surveyData.id) {
-          return {
-            ...s,
-            ...surveyData,
-            status: status === "draft" ? "draft" : status === "scheduled" ? "scheduled" : "published",
-            openDate: surveyData.openDate,
-            closeDate: surveyData.closeDate,
-            closes: surveyData.closeDate ? new Date(surveyData.closeDate).toLocaleDateString() : (s.closes || "Open"),
-            questions: surveyData.questions || s.questions,
-            questionCount: surveyData.questions?.length || s.questionCount,
-          } as Survey;
-        }
-        return s;
-      });
+      const existing = surveys.find((s) => s.id === surveyData.id);
+      const updatedSurvey = {
+        ...existing,
+        ...surveyData,
+        status: status === "draft" ? "draft" : status === "scheduled" ? "scheduled" : "published",
+        openDate: surveyData.openDate,
+        closeDate: surveyData.closeDate,
+        closes: surveyData.closeDate ? new Date(surveyData.closeDate).toLocaleDateString() : (existing?.closes || "Open"),
+        questions: surveyData.questions || existing?.questions || [],
+        questionCount: surveyData.questions?.length || existing?.questionCount || 0,
+      } as Survey;
 
-      LocalStorageManager.saveSurveys(updatedSurveys);
-      setSurveys(updatedSurveys);
+      try {
+        await DatabaseService.saveSurvey(updatedSurvey);
+        setSurveys((prev) => prev.map((s) => (s.id === surveyData.id ? updatedSurvey : s)));
 
-      LocalStorageManager.addLog({
-        user: currentUser?.name || "Member",
-        pos: currentUser?.pos || "Faculty",
-        action: "Survey Updated",
-        details: `Edited survey "${surveyData.title || surveyData.id}"`,
-      });
-      setLogs(LocalStorageManager.getLogs());
+        await logActivityAndRefresh({
+          user: currentUser?.name || "Member",
+          pos: currentUser?.pos || "Faculty",
+          action: "Survey Updated",
+          details: `Edited survey "${surveyData.title || surveyData.id}"`,
+        });
 
-      setEditingSurvey(null);
-      showToast(`Survey "${surveyData.title}" updated successfully!`, "success");
-      setCurrentView("surveys");
+        setEditingSurvey(null);
+        showToast(`Survey "${surveyData.title}" updated successfully!`, "success");
+        setCurrentView("surveys");
+      } catch (err: any) {
+        showToast(err.message || "Failed to update survey.", "info");
+      }
       return;
     }
 
@@ -396,44 +418,42 @@ export default function App() {
       tags: surveyData.tags || [surveyData.cat || "General"],
     };
 
-    const updated = [newSurvey, ...surveys];
-    // --------------------------------------------------------------------------
-    // [ACTIVE: LOCAL STORAGE DEMO MODE]
-    // --------------------------------------------------------------------------
-    LocalStorageManager.saveSurveys(updated);
+    try {
+      await DatabaseService.saveSurvey(newSurvey);
+      setSurveys((prev) => [newSurvey, ...prev]);
 
-    // --------------------------------------------------------------------------
-    // [FIREBASE CLOUD MODE - UNCOMMENT WHEN ACTIVE]: Save directly to Firestore
-    // --------------------------------------------------------------------------
-    // DatabaseService.saveSurvey(newSurvey);
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: currentUser?.pos || "Faculty",
+        action: "Survey Created",
+        details: `Created new survey "${newSurvey.title}" in section "${newSurvey.themeSection}"`,
+      });
 
-    setSurveys(updated);
+      setEditingSurvey(null);
 
-    LocalStorageManager.addLog({
-      user: currentUser?.name || "Admin",
-      pos: currentUser?.pos || "Faculty",
-      action: "Survey Created",
-      details: `Created new survey "${newSurvey.title}" in section "${newSurvey.themeSection}"`,
-    });
-    setLogs(LocalStorageManager.getLogs());
+      // Dynamic Notification: Notify campus admin if survey is published
+      if (status === "published") {
+        try {
+          await DatabaseService.addNotification({
+            to: MASTER_ADMIN_EMAIL.toLowerCase(),
+            title: "📋 New Survey Available",
+            message: `"${newSurvey.title}" is now open for campus feedback.`,
+            icon: "📋",
+            type: "survey",
+            data: { surveyId: newSurvey.id },
+          });
+        } catch {}
+      }
+      if (currentUser?.email) {
+        const refreshed = await DatabaseService.getNotifications(currentUser.email);
+        setNotifications(refreshed);
+      }
 
-    setEditingSurvey(null);
-
-    // Dynamic Notification: Notify campus if survey is published
-    if (status === "published") {
-      LocalStorageManager.addNotification(
-        "all",
-        "📋 New Survey Available",
-        `"${newSurvey.title}" is now open for campus feedback.`,
-        "📋",
-        "survey",
-        { surveyId: newSurvey.id }
-      );
+      showToast(`Survey "${newSurvey.title}" saved successfully!`, "success");
+      setCurrentView("surveys");
+    } catch (err: any) {
+      showToast(err.message || "Failed to save survey.", "info");
     }
-    setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
-
-    showToast(`Survey "${newSurvey.title}" saved successfully!`, "success");
-    setCurrentView("surveys");
   };
 
   const handleEditSurvey = (survey: Survey) => {
@@ -442,36 +462,37 @@ export default function App() {
   };
 
   // ML Training Sample Handlers
-  const handleAddMlSample = (sample: Omit<TagalogMLSample, "id">) => {
+  const handleAddMlSample = async (sample: Omit<TagalogMLSample, "id">) => {
     const newSample: TagalogMLSample = {
       id: `sample_${Date.now()}`,
       ...sample,
     };
-    const updated = [newSample, ...mlDataset];
-    LocalStorageManager.saveMlDataset(updated);
-    setMlDataset(updated);
+    try {
+      await DatabaseService.addMLSample(newSample);
+      setMlDataset((prev) => [newSample, ...prev]);
 
-    LocalStorageManager.addLog({
-      user: currentUser?.name || "Admin",
-      pos: currentUser?.pos || "Admin",
-      action: "ML Dataset Sample Added",
-      details: `Added new Tagalog feedback training sample: "${sample.text.slice(0, 30)}..."`,
-    });
-    setLogs(LocalStorageManager.getLogs());
-    showToast("New Tagalog sample added to machine learning corpus!", "success");
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: currentUser?.pos || "Admin",
+        action: "ML Dataset Sample Added",
+        details: `Added new Tagalog feedback training sample: "${sample.text.slice(0, 30)}..."`,
+      });
+      showToast("New Tagalog sample added to machine learning corpus!", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to add training sample.", "info");
+    }
   };
 
   const handleDeleteMlSample = async (id: string) => {
     try {
       await DatabaseService.deleteMLSample(id);
       setMlDataset((prev) => prev.filter((s) => s.id !== id));
-      LocalStorageManager.addLog({
+      await logActivityAndRefresh({
         user: currentUser?.name || "Admin",
         pos: currentUser?.pos || "Superadmin",
         action: "ML Dataset Sample Deleted",
         details: `Deleted training phrase with ID ${id} from NLP corpus`,
       });
-      setLogs(LocalStorageManager.getLogs());
       showToast("Training sample removed from corpus.", "info");
     } catch (err: any) {
       showToast(err?.message || "Failed to remove training sample.", "info");
@@ -479,119 +500,156 @@ export default function App() {
   };
 
   // News Announcements Handlers
-  const handleAddNews = (news: Omit<NewsAnnouncement, "id" | "likesCount">) => {
+  const handleAddNews = async (news: Omit<NewsAnnouncement, "id" | "likesCount">) => {
     const newPost: NewsAnnouncement = {
       id: `news_${Date.now()}`,
       likesCount: 0,
       ...news,
     };
-    const updated = [newPost, ...newsList];
-    LocalStorageManager.saveNews(updated);
-    setNewsList(updated);
+    try {
+      await DatabaseService.saveNews(newPost);
+      setNewsList((prev) => [newPost, ...prev]);
 
-    LocalStorageManager.addLog({
-      user: currentUser?.name || "Admin",
-      pos: currentUser?.pos || "Admin",
-      action: "Campus News Published",
-      details: `Published institutional announcement: "${newPost.title}"`,
-    });
-    setLogs(LocalStorageManager.getLogs());
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: currentUser?.pos || "Admin",
+        action: "Campus News Published",
+        details: `Published institutional announcement: "${newPost.title}"`,
+      });
 
-    // Dynamic Notification: Broadcast announcement
-    LocalStorageManager.addNotification(
-      "all",
-      "📢 Campus Announcement",
-      newPost.title,
-      "📢",
-      "news",
-      { newsId: newPost.id }
-    );
-    setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+      // Dynamic Notification: Broadcast announcement to administrator
+      try {
+        await DatabaseService.addNotification({
+          to: MASTER_ADMIN_EMAIL.toLowerCase(),
+          title: "📢 Campus Announcement",
+          message: newPost.title,
+          icon: "📢",
+          type: "news",
+          data: { newsId: newPost.id },
+        });
+      } catch {}
+      if (currentUser?.email) {
+        const refreshed = await DatabaseService.getNotifications(currentUser.email);
+        setNotifications(refreshed);
+      }
 
-    showToast("Campus announcement published!", "success");
+      showToast("Campus announcement published!", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to publish announcement.", "info");
+    }
   };
 
-  const handleLikeNews = (id: string) => {
-    const updated = newsList.map((n) => (n.id === id ? { ...n, likesCount: n.likesCount + 1 } : n));
-    LocalStorageManager.saveNews(updated);
-    setNewsList(updated);
+  const handleLikeNews = async (id: string) => {
+    try {
+      await DatabaseService.likeNews(id);
+      setNewsList((prev) => prev.map((n) => (n.id === id ? { ...n, likesCount: n.likesCount + 1 } : n)));
+    } catch (err: any) {
+      showToast(err.message || "Failed to like announcement.", "info");
+    }
   };
 
   // Moderation Handlers
-  const handleClearFlag = (surveyId: string | number) => {
-    const updated = surveys.map((s) => (s.id === surveyId ? { ...s, flagged: false, flagReason: undefined } : s));
-    LocalStorageManager.saveSurveys(updated);
-    setSurveys(updated);
-
+  const handleClearFlag = async (surveyId: string | number) => {
     const srv = surveys.find((s) => s.id === surveyId);
-    if (srv?.owner) {
-      LocalStorageManager.addNotification(
-        srv.owner,
-        "✅ Survey Flag Cleared",
-        `Your survey "${srv.title}" has been reviewed and approved by administration.`,
-        "✅",
-        "flag_cleared",
-        { surveyId }
-      );
-      setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+    if (!srv) return;
+    const updated = { ...srv, flagged: false, flagReason: undefined };
+    try {
+      await DatabaseService.saveSurvey(updated);
+      setSurveys((prev) => prev.map((s) => (s.id === surveyId ? updated : s)));
+
+      if (srv.owner) {
+        try {
+          await DatabaseService.addNotification({
+            to: srv.owner.toLowerCase(),
+            title: "✅ Survey Flag Cleared",
+            message: `Your survey "${srv.title}" has been reviewed and approved by administration.`,
+            icon: "✅",
+            type: "flag_cleared",
+            data: { surveyId },
+          });
+        } catch {}
+        if (currentUser?.email) {
+          const refreshed = await DatabaseService.getNotifications(currentUser.email);
+          setNotifications(refreshed);
+        }
+      }
+      showToast("Survey flag cleared and approved!", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to clear survey flag.", "info");
     }
-    showToast("Survey flag cleared and approved!", "success");
   };
 
-  const handleFlagSurvey = (surveyId: string | number, reason: string) => {
-    const updated = surveys.map((s) => (s.id === surveyId ? { ...s, flagged: true, flagReason: reason } : s));
-    LocalStorageManager.saveSurveys(updated);
-    setSurveys(updated);
-
+  const handleFlagSurvey = async (surveyId: string | number, reason: string) => {
     const srv = surveys.find((s) => s.id === surveyId);
-    if (srv?.owner) {
-      LocalStorageManager.addNotification(
-        srv.owner,
-        "⚠️ Survey Flagged for Review",
-        `Your survey "${srv.title}" was flagged: ${reason}`,
-        "⚠️",
-        "flag",
-        { surveyId }
-      );
-      setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
+    if (!srv) return;
+    const updated = { ...srv, flagged: true, flagReason: reason };
+    try {
+      await DatabaseService.saveSurvey(updated);
+      setSurveys((prev) => prev.map((s) => (s.id === surveyId ? updated : s)));
+
+      if (srv.owner) {
+        try {
+          await DatabaseService.addNotification({
+            to: srv.owner.toLowerCase(),
+            title: "⚠️ Survey Flagged for Review",
+            message: `Your survey "${srv.title}" was flagged: ${reason}`,
+            icon: "⚠️",
+            type: "flag",
+            data: { surveyId },
+          });
+        } catch {}
+        if (currentUser?.email) {
+          const refreshed = await DatabaseService.getNotifications(currentUser.email);
+          setNotifications(refreshed);
+        }
+      }
+      showToast("Survey flagged for administrative review.", "info");
+    } catch (err: any) {
+      showToast(err.message || "Failed to flag survey.", "info");
     }
-    showToast("Survey flagged for administrative review.", "info");
   };
 
-  const handleDeleteSurvey = (surveyId: string | number, surveyTitle?: string) => {
-    const updated = surveys.filter((s) => s.id !== surveyId);
-    LocalStorageManager.saveSurveys(updated);
-    setSurveys(updated);
+  const handleDeleteSurvey = async (surveyId: string | number, surveyTitle?: string) => {
+    try {
+      await DatabaseService.deleteSurvey(surveyId);
+      setSurveys((prev) => prev.filter((s) => s.id !== surveyId));
 
-    LocalStorageManager.addLog({
-      user: currentUser?.name || "User",
-      pos: currentUser?.pos || "Faculty",
-      action: "Survey Deleted",
-      details: `Removed survey "${surveyTitle || surveyId}"`,
-    });
-    setLogs(LocalStorageManager.getLogs());
+      await logActivityAndRefresh({
+        user: currentUser?.name || "User",
+        pos: currentUser?.pos || "Faculty",
+        action: "Survey Deleted",
+        details: `Removed survey "${surveyTitle || surveyId}"`,
+      });
 
-    showToast("Survey permanently removed.", "info");
+      showToast("Survey permanently removed.", "info");
+    } catch (err: any) {
+      showToast(err.message || "Failed to delete survey.", "info");
+    }
   };
 
-  const handleUpdateSurveyStatus = (
+  const handleUpdateSurveyStatus = async (
     surveyId: string | number,
     newStatus: "published" | "draft" | "scheduled" | "closed"
   ) => {
-    const updated = surveys.map((s) => (s.id === surveyId ? { ...s, status: newStatus } : s));
-    LocalStorageManager.saveSurveys(updated);
-    setSurveys(updated);
-    LocalStorageManager.addLog({
-      user: currentUser?.name || "Admin",
-      pos: currentUser?.pos || "Admin",
-      action: "Survey Status Changed",
-      details: `Updated survey status to "${newStatus}" for ID: ${surveyId}`,
-    });
-    setLogs(LocalStorageManager.getLogs());
-    showToast(`Survey status updated to ${newStatus}.`, "success");
+    const srv = surveys.find((s) => s.id === surveyId);
+    if (!srv) return;
+    const updated = { ...srv, status: newStatus };
+    try {
+      await DatabaseService.saveSurvey(updated);
+      setSurveys((prev) => prev.map((s) => (s.id === surveyId ? updated : s)));
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: currentUser?.pos || "Admin",
+        action: "Survey Status Changed",
+        details: `Updated survey status to "${newStatus}" for ID: ${surveyId}`,
+      });
+      showToast(`Survey status updated to ${newStatus}.`, "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to update survey status.", "info");
+    }
   };
 
-  const handleDuplicateSurvey = (survey: Survey) => {
+  const handleDuplicateSurvey = async (survey: Survey) => {
     const newId = `srv_${Date.now()}`;
     const duplicated: Survey = {
       ...survey,
@@ -606,103 +664,111 @@ export default function App() {
       owner: currentUser?.email || survey.owner,
       ownerName: currentUser?.name || survey.ownerName,
     };
-    const updated = [duplicated, ...surveys];
-    LocalStorageManager.saveSurveys(updated);
-    setSurveys(updated);
-    LocalStorageManager.addLog({
-      user: currentUser?.name || "Admin",
-      pos: currentUser?.pos || "Admin",
-      action: "Survey Duplicated",
-      details: `Cloned survey "${survey.title}" into draft instrument`,
-    });
-    setLogs(LocalStorageManager.getLogs());
-    showToast("Survey duplicated as draft!", "success");
-  };
-
-  const handleToggleUserStatus = (email: string, newStatus: "active" | "suspended" | "pending_approval") => {
-    const cleanEmail = email.trim();
-    const updated = users.map((u) => {
-      if (u.email.trim().toLowerCase() === cleanEmail.toLowerCase()) {
-        return { ...u, status: newStatus };
-      }
-      return u;
-    });
-    LocalStorageManager.saveUsers(updated);
-    setUsers(updated);
-
-    const targetUser = updated.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
-    if (targetUser) {
-      DatabaseService.saveUser(targetUser);
-    }
-
-    if (newStatus === "active") {
-      LocalStorageManager.addNotification(
-        cleanEmail,
-        "🛡️ Account Verified & Approved",
-        "Your institutional credentials have been verified and approved by the System Administrator. You can now access full authoring permissions.",
-        "🛡️",
-        "approval"
-      );
-      setNotifications(LocalStorageManager.getNotifications(currentUser?.email || ""));
-    }
-
-    LocalStorageManager.addLog({
-      user: currentUser?.name || "System Administrator",
-      pos: "Superadmin",
-      action: newStatus === "active" ? "User Approved" : "User Status Changed",
-      details: `${newStatus === "active" ? "Approved and authorized" : `Changed status to ${newStatus} for`} account: ${cleanEmail}`,
-    });
-    setLogs(LocalStorageManager.getLogs());
-
-    showToast(
-      newStatus === "active"
-        ? `Account ${cleanEmail} approved and activated successfully!`
-        : `User status updated to ${newStatus.replace("_", " ")}.`,
-      "success"
-    );
-  };
-
-  const handlePromoteUser = (email: string, newPos: UserProfile["pos"]) => {
-    const cleanEmail = email.trim();
-    const updated = users.map((u) => {
-      if (u.email.trim().toLowerCase() === cleanEmail.toLowerCase()) {
-        return { ...u, pos: newPos, role: newPos === "Superadmin" ? "superadmin" : "user" };
-      }
-      return u;
-    });
-    setUsers(updated);
-
-    const targetUser = updated.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
-    if (targetUser) {
-      DatabaseService.saveUser(targetUser);
-    } else {
-      LocalStorageManager.saveUsers(updated);
-    }
-    showToast(`User promoted to ${newPos}.`, "success");
-  };
-
-  const handleAddUser = (newUser: UserProfile) => {
     try {
-      const updated = LocalStorageManager.addUser(newUser);
-      DatabaseService.saveUser(newUser);
-      setUsers(updated);
-      setLogs(LocalStorageManager.getLogs());
+      await DatabaseService.saveSurvey(duplicated);
+      setSurveys((prev) => [duplicated, ...prev]);
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: currentUser?.pos || "Admin",
+        action: "Survey Duplicated",
+        details: `Cloned survey "${survey.title}" into draft instrument`,
+      });
+      showToast("Survey duplicated as draft!", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to duplicate survey.", "info");
+    }
+  };
+
+  const handleToggleUserStatus = async (email: string, newStatus: "active" | "suspended" | "pending_approval") => {
+    const cleanEmail = email.trim();
+    const targetUser = users.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
+    if (!targetUser) return;
+    const updatedUser: UserProfile = { ...targetUser, status: newStatus };
+
+    try {
+      await DatabaseService.saveUser(updatedUser);
+      setUsers((prev) => prev.map((u) => (u.email.trim().toLowerCase() === cleanEmail.toLowerCase() ? updatedUser : u)));
+
+      if (newStatus === "active") {
+        try {
+          await DatabaseService.addNotification({
+            to: cleanEmail.toLowerCase(),
+            title: "🛡️ Account Verified & Approved",
+            message: "Your institutional credentials have been verified and approved by the System Administrator. You can now access full authoring permissions.",
+            icon: "🛡️",
+            type: "approval",
+          });
+        } catch {}
+        if (currentUser?.email) {
+          const refreshed = await DatabaseService.getNotifications(currentUser.email);
+          setNotifications(refreshed);
+        }
+      }
+
+      await logActivityAndRefresh({
+        user: currentUser?.name || "System Administrator",
+        pos: "Superadmin",
+        action: newStatus === "active" ? "User Approved" : "User Status Changed",
+        details: `${newStatus === "active" ? "Approved and authorized" : `Changed status to ${newStatus} for`} account: ${cleanEmail}`,
+      });
+
+      showToast(
+        newStatus === "active"
+          ? `Account ${cleanEmail} approved and activated successfully!`
+          : `User status updated to ${newStatus.replace("_", " ")}.`,
+        "success"
+      );
+    } catch (err: any) {
+      showToast(err.message || "Failed to update user status.", "info");
+    }
+  };
+
+  const handlePromoteUser = async (email: string, newPos: UserProfile["pos"]) => {
+    const cleanEmail = email.trim();
+    const targetUser = users.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
+    if (!targetUser) return;
+    const updatedUser: UserProfile = { ...targetUser, pos: newPos, role: newPos === "Superadmin" ? "superadmin" : "user" };
+
+    try {
+      await DatabaseService.saveUser(updatedUser);
+      setUsers((prev) => prev.map((u) => (u.email.trim().toLowerCase() === cleanEmail.toLowerCase() ? updatedUser : u)));
+      showToast(`User promoted to ${newPos}.`, "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to promote user.", "info");
+    }
+  };
+
+  const handleAddUser = async (newUser: UserProfile) => {
+    try {
+      await DatabaseService.saveUser(newUser);
+      setUsers((prev) => [newUser, ...prev]);
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: "Superadmin",
+        action: "User Created",
+        details: `Created new user ${newUser.name} (${newUser.email})`,
+      });
       showToast(`User ${newUser.name} created successfully!`, "success");
     } catch (err: any) {
       showToast(err.message || "Failed to create user.", "info");
     }
   };
 
-  const handleUpdateUser = (email: string, changes: Partial<UserProfile>) => {
+  const handleUpdateUser = async (email: string, changes: Partial<UserProfile>) => {
     try {
       const cleanEmail = email.trim();
-      const updated = LocalStorageManager.updateUser(cleanEmail, changes);
-      const targetUser = updated.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
+      const targetUser = users.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
       if (targetUser) {
-        DatabaseService.saveUser(targetUser);
+        const modified = { ...targetUser, ...changes };
+        await DatabaseService.saveUser(modified);
+        setUsers((prev) => prev.map((u) => (u.email.trim().toLowerCase() === cleanEmail.toLowerCase() ? modified : u)));
       }
-      setUsers(updated);
-      setLogs(LocalStorageManager.getLogs());
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: "Superadmin",
+        action: "User Updated",
+        details: `Updated details for ${cleanEmail}`,
+      });
       if (currentUser && currentUser.email.trim().toLowerCase() === cleanEmail.toLowerCase()) {
         setCurrentUser({ ...currentUser, ...changes });
       }
@@ -712,28 +778,45 @@ export default function App() {
     }
   };
 
-  const handleDeleteUser = (email: string) => {
+  const handleDeleteUser = async (email: string) => {
     try {
       const cleanEmail = email.trim();
-      const updated = LocalStorageManager.deleteUser(cleanEmail);
-      DatabaseService.deleteUser(cleanEmail);
-      setUsers(updated);
-      setLogs(LocalStorageManager.getLogs());
+      await DatabaseService.deleteUser(cleanEmail);
+      setUsers((prev) => prev.filter((u) => u.email.trim().toLowerCase() !== cleanEmail.toLowerCase()));
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: "Superadmin",
+        action: "User Deleted",
+        details: `Deleted user account ${cleanEmail}`,
+      });
       showToast("User account permanently removed.", "info");
     } catch (err: any) {
       showToast(err.message || "Failed to remove user.", "info");
     }
   };
 
-  const handleRestoreBackup = (backupData: any, mode: "overwrite" | "merge") => {
+  const handleRestoreBackup = async (backupData: any, mode: "overwrite" | "merge") => {
     try {
-      const result = LocalStorageManager.importFullDatabase(backupData, mode, currentUser?.email || "admin");
-      setSurveys(result.surveys);
-      setResponses(result.responses);
-      setUsers(result.users);
-      setMlDataset(result.mlDataset);
-      setLogs(result.logs);
-      setNewsList(result.news);
+      if (backupData?.data) {
+        if (backupData.data.surveys) {
+          for (const s of backupData.data.surveys) {
+            await DatabaseService.saveSurvey(s);
+          }
+          setSurveys(backupData.data.surveys);
+        }
+        if (backupData.data.users) {
+          for (const u of backupData.data.users) {
+            await DatabaseService.saveUser(u);
+          }
+          setUsers(backupData.data.users);
+        }
+        if (backupData.data.newsList) {
+          for (const n of backupData.data.newsList) {
+            await DatabaseService.saveNews(n);
+          }
+          setNewsList(backupData.data.newsList);
+        }
+      }
       showToast(
         mode === "overwrite"
           ? "Database successfully restored from snapshot!"
@@ -745,58 +828,17 @@ export default function App() {
     }
   };
 
-  const handleResetDatabase = () => {
-    try {
-      const resetData = LocalStorageManager.resetToInitialDemoData(currentUser?.email || "admin");
-      setSurveys(resetData.surveys);
-      setResponses(resetData.responses);
-      setUsers(resetData.users);
-      setMlDataset(resetData.mlDataset);
-      setLogs(resetData.logs);
-      setNewsList(resetData.news);
-      setCurrentUser(LocalStorageManager.getCurrentUser());
-      showToast("System database reset to clean baseline (Root Administrator preserved).", "info");
-    } catch (err: any) {
-      showToast(err.message || "Failed to reset database.", "info");
-    }
-  };
-
-  const handleClearDatabase = async () => {
-    try {
-      const emptyData = LocalStorageManager.clearAllData(currentUser?.email || "admin");
-      setSurveys(emptyData.surveys);
-      setResponses(emptyData.responses);
-      setUsers(emptyData.users);
-      setMlDataset(emptyData.mlDataset);
-      setLogs(emptyData.logs);
-      setNewsList(emptyData.news);
-      setCurrentUser(LocalStorageManager.getCurrentUser());
-
-      if (USE_FIREBASE) {
-        showToast("Wiping Cloud Firestore collections...", "info");
-        const cloudResult = await DatabaseService.wipeFirebaseCloud();
-        if (cloudResult.success) {
-          showToast(cloudResult.message, "success");
-        } else {
-          showToast(`Local storage wiped, but Cloud Firestore error: ${cloudResult.message}`, "info");
-        }
-      } else {
-        showToast("Database wiped to a 100% clean production slate (0 surveys, 0 responses).", "success");
-      }
-    } catch (err: any) {
-      showToast(err.message || "Failed to clear database.", "info");
-    }
-  };
-
-  const handleUpdateProfile = (updated: Partial<UserProfile>) => {
+  const handleUpdateProfile = async (updated: Partial<UserProfile>) => {
     if (!currentUser) return;
     const modifiedUser = { ...currentUser, ...updated };
-    setCurrentUser(modifiedUser);
-    LocalStorageManager.setCurrentUser(modifiedUser);
-    const updatedUsers = users.map((u) => (u.email === currentUser.email ? modifiedUser : u));
-    LocalStorageManager.saveUsers(updatedUsers);
-    setUsers(updatedUsers);
-    showToast("Profile details updated!", "success");
+    try {
+      await DatabaseService.saveUser(modifiedUser);
+      setCurrentUser(modifiedUser);
+      setUsers((prev) => prev.map((u) => (u.email === currentUser.email ? modifiedUser : u)));
+      showToast("Profile details updated!", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to update profile.", "info");
+    }
   };
 
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
@@ -836,6 +878,23 @@ export default function App() {
       : []),
     ...(isSuperadmin ? [{ id: "admin", label: "Admin Oversight", icon: ShieldAlert, badge: flaggedCount }] : []),
   ];
+
+  // If Firebase is not configured, show a full-page message instead of running
+  if (!isFirebaseConfigured()) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white text-center">
+        <div className="max-w-md w-full bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl flex flex-col items-center">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-100 mb-2">Firebase is not configured</h1>
+          <p className="text-slate-400 text-sm">
+            The application requires a configured Firebase connection to operate.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // If no user is logged in, show the standalone sign in / registration page as the first screen!
   if (!currentUser) {
@@ -1099,7 +1158,7 @@ export default function App() {
             canCreateSurvey ? (
               <SurveyBuilder
                 currentUser={currentUser}
-                categories={["Course", "Faculty", "Facilities", "Service", "Student Life", "General"]}
+                categories={DEFAULT_SURVEY_CATEGORIES}
                 onSaveSurvey={handleSaveSurvey}
                 initialSurvey={editingSurvey || undefined}
                 onCancel={() => {
@@ -1152,8 +1211,6 @@ export default function App() {
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
               onRestoreBackup={handleRestoreBackup}
-              onResetDatabase={handleResetDatabase}
-              onClearDatabase={handleClearDatabase}
               showToast={showToast}
               onNavigateToAnalytics={(surveyId) => {
                 setAnalyticsTargetSurveyId(surveyId || "all");

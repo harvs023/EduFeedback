@@ -129,14 +129,16 @@ export interface SurveyResponse {
 
 export interface NotificationItem {
   id: string;
-  userEmail: string;
+  to: string;
+  userEmail?: string;
   title: string;
   message: string;
-  icon: string;
-  time: string;
+  icon?: string;
+  time?: string;
   displayTime?: string;
   read: boolean;
-  type:
+  timestamp: number;
+  type?:
     | "welcome"
     | "flag"
     | "flag_cleared"

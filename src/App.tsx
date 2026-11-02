@@ -396,14 +396,70 @@ export default function App() {
   };
 
   // Create / Edit Survey Handler
-  const handleSaveSurvey = async (surveyData: Partial<Survey>, status: "draft" | "published" | "scheduled") => {
-    // If editing an existing survey
+  const handleSaveSurvey = async (
+    surveyData: Partial<Survey>,
+    status: "draft" | "pending" | "published" | "scheduled"
+  ) => {
+    const isAdminUser = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
+
+    if (!isAdminUser && currentUser?.canCreateSurveys === false) {
+      showToast("Survey creation is switched off for your account. Please contact the administrator.", "info");
+      return;
+    }
+
+    // Only the administrator can publish directly; everyone else goes through approval.
+    const finalStatus: SurveyStatus =
+      !isAdminUser && (status === "published" || status === "scheduled") ? "pending" : status;
+    const now = Date.now();
+
+    // Approval bookkeeping
+    const approvalFields: Partial<Survey> =
+      finalStatus === "pending"
+        ? { submittedAt: now, rejectionReason: "", reviewedBy: "", reviewedAt: 0 }
+        : finalStatus === "published" || finalStatus === "scheduled"
+        ? {
+            submittedAt: now,
+            reviewedBy: (currentUser?.email || "").trim().toLowerCase(),
+            reviewedAt: now,
+            rejectionReason: "",
+          }
+        : {};
+
+    const toastText = (title: string) =>
+      finalStatus === "pending"
+        ? `Survey "${title}" submitted for approval. You will be notified once it is reviewed.`
+        : finalStatus === "draft"
+        ? `Draft "${title}" saved.`
+        : finalStatus === "scheduled"
+        ? `Survey "${title}" scheduled.`
+        : `Survey "${title}" published.`;
+
+    const notifyAdminIfPending = async (survey: Survey) => {
+      if (finalStatus !== "pending") return;
+      try {
+        await DatabaseService.addNotification({
+          to: MASTER_ADMIN_EMAIL.toLowerCase(),
+          title: "📝 Survey awaiting approval",
+          message: `"${survey.title}" by ${survey.ownerName} is waiting for your review.`,
+          icon: "📝",
+          type: "survey",
+          data: { surveyId: survey.id },
+        });
+      } catch {}
+    };
+
+    // Editing an existing survey
     if (surveyData.id) {
       const existing = surveys.find((s) => s.id === surveyData.id);
+      if (existing && existing.status !== "draft" && existing.status !== "rejected") {
+        showToast("This survey is locked and can no longer be edited.", "info");
+        return;
+      }
       const updatedSurvey = {
         ...existing,
         ...surveyData,
-        status: status === "draft" ? "draft" : status === "scheduled" ? "scheduled" : "published",
+        ...approvalFields,
+        status: finalStatus,
         openDate: surveyData.openDate,
         closeDate: surveyData.closeDate,
         closes: surveyData.closeDate ? new Date(surveyData.closeDate).toLocaleDateString() : (existing?.closes || "Open"),
@@ -418,13 +474,14 @@ export default function App() {
         await logActivityAndRefresh({
           user: currentUser?.name || "Member",
           pos: currentUser?.pos || "Faculty",
-          action: "Survey Updated",
-          details: `Edited survey "${surveyData.title || surveyData.id}"`,
+          action: finalStatus === "pending" ? "Survey Submitted for Approval" : "Survey Updated",
+          details: `${finalStatus === "pending" ? "Submitted" : "Edited"} survey "${surveyData.title || surveyData.id}"`,
         });
 
+        await notifyAdminIfPending(updatedSurvey);
         setEditingSurvey(null);
-        showToast(`Survey "${surveyData.title}" updated successfully!`, "success");
-        setCurrentView("take-survey");
+        showToast(toastText(updatedSurvey.title), "success");
+        setCurrentView("my-surveys");
       } catch (err: any) {
         showToast(err.message || "Failed to update survey.", "info");
       }
@@ -433,7 +490,9 @@ export default function App() {
 
     // Creating a brand new survey
     const newSurvey: Survey = {
-      id: `srv_${Date.now()}`,
+      ...surveyData,
+      ...approvalFields,
+      id: `srv_${now}`,
       title: surveyData.title || "Untitled Survey",
       cat: surveyData.cat || "General",
       desc: surveyData.desc || "",
@@ -441,8 +500,9 @@ export default function App() {
       isTrending: surveyData.isTrending || false,
       academicYear: surveyData.academicYear || "2025-2026",
       created: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      createdAtTimestamp: now,
       responses: 0,
-      status: status === "draft" ? "draft" : status === "scheduled" ? "scheduled" : "published",
+      status: finalStatus,
       openDate: surveyData.openDate,
       closeDate: surveyData.closeDate,
       closes: surveyData.closeDate ? new Date(surveyData.closeDate).toLocaleDateString() : "Open",
@@ -461,38 +521,30 @@ export default function App() {
       await logActivityAndRefresh({
         user: currentUser?.name || "Admin",
         pos: currentUser?.pos || "Faculty",
-        action: "Survey Created",
-        details: `Created new survey "${newSurvey.title}" in section "${newSurvey.themeSection}"`,
+        action: finalStatus === "pending" ? "Survey Submitted for Approval" : "Survey Created",
+        details: `${finalStatus === "pending" ? "Submitted" : "Created"} new survey "${newSurvey.title}" in section "${newSurvey.themeSection}"`,
       });
 
+      await notifyAdminIfPending(newSurvey);
       setEditingSurvey(null);
 
-      // Dynamic Notification: Notify campus admin if survey is published
-      if (status === "published") {
-        try {
-          await DatabaseService.addNotification({
-            to: MASTER_ADMIN_EMAIL.toLowerCase(),
-            title: "📋 New Survey Available",
-            message: `"${newSurvey.title}" is now open for campus feedback.`,
-            icon: "📋",
-            type: "survey",
-            data: { surveyId: newSurvey.id },
-          });
-        } catch {}
-      }
       if (currentUser?.email) {
         const refreshed = await DatabaseService.getNotifications(currentUser.email);
         setNotifications(refreshed);
       }
 
-      showToast(`Survey "${newSurvey.title}" saved successfully!`, "success");
-      setCurrentView("take-survey");
+      showToast(toastText(newSurvey.title), "success");
+      setCurrentView("my-surveys");
     } catch (err: any) {
       showToast(err.message || "Failed to save survey.", "info");
     }
   };
 
   const handleEditSurvey = (survey: Survey) => {
+    if (survey.status !== "draft" && survey.status !== "rejected") {
+      showToast("Only drafts and rejected surveys can be edited. Published and pending surveys are locked.", "info");
+      return;
+    }
     setEditingSurvey(survey);
     setCurrentView("create");
   };
@@ -1264,7 +1316,7 @@ export default function App() {
                 initialSurvey={editingSurvey || undefined}
                 onCancel={() => {
                   setEditingSurvey(null);
-                  setCurrentView("take-survey");
+                  setCurrentView("my-surveys");
                 }}
               />
             ) : (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Survey, Question, UserProfile, TargetAudience, Topic, SurveyTopicBlock } from "../types";
 import { DEPARTMENTS_DATA } from "../data/initialData";
+import { SurveyCriteriaModal } from "./SurveyCriteriaModal";
 import {
   PlusCircle,
   Pencil,
@@ -25,7 +26,7 @@ interface SurveyBuilderProps {
   categories: string[];
   topics?: Topic[];
   initialSurvey?: Survey | null;
-  onSaveSurvey: (surveyData: Partial<Survey>, status: "draft" | "published" | "scheduled") => void;
+  onSaveSurvey: (surveyData: Partial<Survey>, status: "draft" | "pending" | "published" | "scheduled") => void;
   onCancel?: () => void;
 }
 
@@ -42,6 +43,9 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   const [title, setTitle] = useState<string>(initialSurvey?.title || "");
   const [cat, setCat] = useState<string>(initialSurvey?.cat || categories[0] || "Course");
   const [desc, setDesc] = useState<string>(initialSurvey?.desc || "");
+  const [purpose, setPurpose] = useState<string>(initialSurvey?.purpose || "");
+  const [criteriaAcceptedAt, setCriteriaAcceptedAt] = useState<number | null>(initialSurvey?.criteriaAcceptedAt ?? null);
+  const [submitErrors, setSubmitErrors] = useState<string[]>([]);
   const [themeSection, setThemeSection] = useState<Survey["themeSection"]>(initialSurvey?.themeSection || "academics");
   const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || "2025-2026");
   const [topicBlocks, setTopicBlocks] = useState<SurveyTopicBlock[]>(initialSurvey?.topicBlocks || []);
@@ -61,6 +65,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
 
   // Mandatory / Required Survey (Admin Only Feature)
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
+  const isRestricted = !isSuperadmin && currentUser?.canCreateSurveys === false;
   const [isRequired, setIsRequired] = useState<boolean>(initialSurvey?.isRequired || false);
   const [requiredAudience, setRequiredAudience] = useState<"all" | "students" | "faculty" | "officers">(
     initialSurvey?.requiredAudience || "students"
@@ -95,6 +100,8 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       setTitle(initialSurvey.title || "");
       setCat(initialSurvey.cat || categories[0] || "Course");
       setDesc(initialSurvey.desc || "");
+      setPurpose(initialSurvey.purpose || "");
+      setCriteriaAcceptedAt(initialSurvey.criteriaAcceptedAt ?? null);
       setThemeSection(initialSurvey.themeSection || "academics");
       setAcademicYear(initialSurvey.academicYear || "2025-2026");
       setScheduleType(initialSurvey.status === "scheduled" || initialSurvey.openDate ? "scheduled" : "immediate");
@@ -221,13 +228,62 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     });
   };
 
-  const handleSubmit = (actionStatus: "draft" | "published" | "scheduled") => {
-    if (!title.trim()) {
-      alert("Please enter a survey title.");
-      return;
+  const MIN_QUESTIONS = 3;
+
+  const handleSubmit = (actionStatus: "draft" | "pending" | "published" | "scheduled") => {
+    // Only the administrator can publish directly; everyone else goes through approval.
+    const finalStatus: "draft" | "pending" | "published" | "scheduled" =
+      !isSuperadmin && (actionStatus === "published" || actionStatus === "scheduled")
+        ? "pending"
+        : actionStatus;
+
+    const errors: string[] = [];
+    if (!title.trim()) errors.push("Enter a survey title.");
+
+    if (finalStatus !== "draft") {
+      if (title.trim() && title.trim().length < 5) errors.push("The title must be at least 5 characters.");
+      if (purpose.trim().length < 20) errors.push("Describe the purpose of the survey (at least 20 characters).");
+      if (targetType === "custom" && selectedRoles.length === 0) {
+        errors.push("Select at least one target role for the custom audience.");
+      }
+
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      if (scheduleType === "scheduled" && !openDate) errors.push("Set the opening date.");
+      if (!closeDate) {
+        errors.push("Set a closing date.");
+      } else {
+        const close = new Date(closeDate);
+        if (isNaN(close.getTime()) || close.getTime() < startOfToday.getTime()) {
+          errors.push("The closing date cannot be in the past.");
+        }
+        if (scheduleType === "scheduled" && openDate) {
+          const open = new Date(openDate);
+          if (!isNaN(open.getTime()) && close.getTime() < open.getTime()) {
+            errors.push("The closing date must be after the opening date.");
+          }
+        }
+      }
+
+      if (questions.length < MIN_QUESTIONS) errors.push(`Add at least ${MIN_QUESTIONS} questions.`);
+      questions.forEach((q, i) => {
+        if (q.text.trim().length < 5) {
+          errors.push(`Question ${i + 1}: enter the question text (at least 5 characters).`);
+        }
+        if (
+          (q.type === "multiple" || q.type === "checkbox") &&
+          (q.options || []).filter((o) => o.trim().length > 0).length < 2
+        ) {
+          errors.push(`Question ${i + 1}: provide at least 2 answer options.`);
+        }
+      });
     }
-    if (questions.length === 0) {
-      alert("Please add at least one survey question.");
+
+    setSubmitErrors(errors);
+    if (errors.length > 0) {
+      setTimeout(() => {
+        document.getElementById("builder-errors")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 0);
       return;
     }
 
@@ -236,6 +292,8 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       title: title.trim(),
       cat,
       desc: desc.trim() || "No description provided.",
+      purpose: purpose.trim(),
+      criteriaAcceptedAt: criteriaAcceptedAt ?? undefined,
       themeSection,
       isTrending: initialSurvey?.isTrending ?? false,
       academicYear,
@@ -264,11 +322,42 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       topicBlocks: topicBlocks.length > 0 ? topicBlocks : undefined,
     };
 
-    onSaveSurvey(surveyPayload, actionStatus);
+    onSaveSurvey(surveyPayload, finalStatus);
   };
+
+  if (isRestricted) {
+    return (
+      <div className="max-w-lg mx-auto mt-12 bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-xs space-y-4">
+        <h3 className="font-serif text-lg font-bold text-slate-900">Survey creation is switched off for your account</h3>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          {currentUser?.restrictionReason
+            ? `Reason: ${currentUser.restrictionReason}`
+            : "The administrator has switched off survey creation for your account."}
+        </p>
+        <p className="text-xs text-slate-500">Please contact the administrator if you think this is a mistake.</p>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+          >
+            Go back
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-12">
+      {!isSuperadmin && !criteriaAcceptedAt && (
+        <SurveyCriteriaModal
+          onAccept={(ts) => setCriteriaAcceptedAt(ts)}
+          onCancel={() => {
+            if (onCancel) onCancel();
+          }}
+        />
+      )}
       {/* Header */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-2">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -288,14 +377,22 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
           )}
         </div>
         <h1 className="font-serif text-2xl sm:text-3xl font-extrabold text-slate-900">
-          {isEditing ? `Edit: ${initialSurvey?.title}` : "Create New Themed Survey"}
+          {isEditing ? `Edit: ${initialSurvey?.title}` : "Create New Survey"}
         </h1>
         <p className="text-xs sm:text-sm text-slate-500">
           {isEditing
             ? "Update your survey configuration, adjust questions and rating scales, or modify the target audience."
-            : "Design structured feedback surveys, customize rating scales, select target audiences, and assign theme sections."}
+            : "Design your survey, then submit it for approval. Once it is approved and published it cannot be edited, only archived."}
         </p>
       </div>
+
+      {initialSurvey?.status === "rejected" && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-1">
+          <p className="font-bold">This survey was rejected by the administrator.</p>
+          <p>{initialSurvey.rejectionReason ? `Reason: ${initialSurvey.rejectionReason}` : "No reason was given."}</p>
+          <p className="text-rose-700">Edit it and submit it again for approval.</p>
+        </div>
+      )}
 
       {/* Main Form Fields */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
@@ -381,6 +478,20 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
               className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500 focus:bg-white"
             />
           </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Purpose of this survey <span className="normal-case font-medium text-slate-400">(required, reviewed by the admin)</span>
+            </label>
+            <textarea
+              rows={2}
+              maxLength={300}
+              value={purpose}
+              onChange={(e) => setPurpose(e.target.value)}
+              placeholder="What will this survey help you improve or decide? (e.g. Find out if the new lab computers meet students' needs)"
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-200 focus:border-blue-400 resize-none"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">{purpose.trim().length}/300 characters (at least 20)</p>
+          </div>
         </div>
 
         {/* SECTION 2: Scheduling & Target Audience */}
@@ -414,7 +525,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
               onChange={(e) => setScheduleType(e.target.value as any)}
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-800"
             >
-              <option value="immediate">🚀 Publish Immediately</option>
+              <option value="immediate">🚀 Start immediately (once approved)</option>
               <option value="scheduled">📅 Schedule for Future Date</option>
             </select>
           </div>
@@ -557,7 +668,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
                         { type: "rating", label: "Rating", icon: "⭐" },
                         { type: "multiple", label: "Multiple", icon: "🔘" },
                         { type: "checkbox", label: "Checkbox", icon: "☑️" },
-                        { type: "paragraph", label: "NLP Feedback", icon: "📝" },
+                        { type: "paragraph", label: "Paragraph", icon: "📝" },
                       ].map((t) => (
                         <button
                           key={t.type}
@@ -640,7 +751,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
 
                 {q.type === "paragraph" && (
                   <p className="text-[11px] text-slate-400 italic">
-                    Respondents will be provided with an open multiline textarea with Tagalog & Taglish NLP detection.
+                    Respondents get an open text box. Their comments are analyzed for sentiment (Tagalog, English and Taglish).
                   </p>
                 )}
               </div>
@@ -698,11 +809,28 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
                 className="px-3 py-2.5 bg-white hover:bg-slate-100 hover:border-slate-300 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
               >
                 <AlignLeft className="w-4 h-4 text-slate-600 shrink-0" />
-                <span>+ Tagalog / Text</span>
+                <span>+ Paragraph</span>
               </button>
             </div>
           </div>
         </div>
+
+        {submitErrors.length > 0 && (
+          <div id="builder-errors" className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-1.5">
+            <p className="font-bold">Please fix the following before continuing:</p>
+            <ul className="list-disc pl-5 space-y-0.5">
+              {submitErrors.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {!isSuperadmin && (
+          <p className="text-[11px] text-slate-500">
+            Your survey will be reviewed by the administrator before students can see it. You can save it as a draft and
+            come back later.
+          </p>
+        )}
 
         {/* Action Controls */}
         <div className="pt-6 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
@@ -728,11 +856,15 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => handleSubmit(scheduleType === "scheduled" ? "scheduled" : "published")}
+              onClick={() => handleSubmit(isSuperadmin ? (scheduleType === "scheduled" ? "scheduled" : "published") : "pending")}
               className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 cursor-pointer flex items-center gap-2"
             >
               <span>
-                {isEditing
+                {!isSuperadmin
+                  ? initialSurvey?.status === "rejected"
+                    ? "📨 Resubmit for Approval"
+                    : "📨 Submit for Approval"
+                  : isEditing
                   ? "Save Changes"
                   : scheduleType === "scheduled"
                   ? "📅 Schedule Survey"

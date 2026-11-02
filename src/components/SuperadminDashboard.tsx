@@ -7,9 +7,11 @@ import {
   NewsAnnouncement,
   TagalogMLSample,
   SystemBackupData,
+  Topic,
 } from "../types";
 import { UserManagementView } from "./UserManagementView";
 import { DatabaseBackupView } from "./DatabaseBackupView";
+import { TopicsManager } from "./TopicsManager";
 import {
   ShieldAlert,
   Users,
@@ -53,6 +55,7 @@ interface SuperadminDashboardProps {
   responses?: SurveyResponse[];
   newsList?: NewsAnnouncement[];
   mlDataset?: TagalogMLSample[];
+  topics?: Topic[];
   currentUser?: UserProfile | null;
   onClearFlag: (surveyId: string | number) => void;
   onFlagSurvey: (surveyId: string | number, reason: string) => void;
@@ -67,7 +70,9 @@ interface SuperadminDashboardProps {
   onClearDatabase?: () => void;
   onNavigateToAnalytics?: (surveyId?: string | number | "all") => void;
   onNavigateToML?: () => void;
-  initialTab?: "surveys" | "flagged" | "users" | "logs" | "backup";
+  onSaveTopic?: (topic: Topic) => Promise<void> | void;
+  onDeleteTopic?: (topicId: string) => Promise<void> | void;
+  initialTab?: "surveys" | "flagged" | "users" | "logs" | "backup" | "topics";
   showToast?: (text: string, type?: "success" | "info") => void;
 }
 
@@ -127,6 +132,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   responses = [],
   newsList = [],
   mlDataset = [],
+  topics = [],
   currentUser = null,
   onClearFlag,
   onFlagSurvey,
@@ -141,11 +147,13 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onClearDatabase,
   onNavigateToAnalytics,
   onNavigateToML,
+  onSaveTopic,
+  onDeleteTopic,
   initialTab = "surveys",
   showToast,
 }) => {
   // Tabs: surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status">(
+  const [activeTab, setActiveTab] = useState<"surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics">(
     initialTab || "surveys"
   );
 
@@ -153,7 +161,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   const tabsContainerRef = useRef<HTMLDivElement>(null);
 
   const handleTabClick = (
-    tabId: "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status",
+    tabId: "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics",
     e?: React.MouseEvent<HTMLButtonElement>
   ) => {
     setActiveTab(tabId);
@@ -522,6 +530,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                 { id: "users", label: "User & Role Directory", count: users.length, icon: Users },
                 { id: "logs", label: "Activity Audit Trail", count: logs.length, icon: Activity },
                 { id: "backup", label: "System Backup & Snapshots", icon: Database },
+                { id: "topics", label: "Survey Topics", count: topics.length, icon: Tag },
               ].map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -1294,6 +1303,16 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* TAB 6: SURVEY TOPICS */}
+      {activeTab === "topics" && (
+        <TopicsManager
+          topics={topics}
+          surveys={surveys}
+          onSaveTopic={onSaveTopic}
+          onDeleteTopic={onDeleteTopic}
+        />
       )}
 
       {/* TAB 5: BACKUP & DATA SNAPSHOTS */}

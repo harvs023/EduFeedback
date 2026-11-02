@@ -449,7 +449,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all shadow-xs cursor-pointer"
               >
                 <BarChart3 className="w-4 h-4" />
-                <span>Macro Analytics View</span>
+                <span>Analytics</span>
               </button>
             )}
             {onNavigateToML && (

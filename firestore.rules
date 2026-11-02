@@ -41,6 +41,11 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
 
+    match /topics/{topicId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
     // ---------------------------------------------------------------- users
     match /users/{userId} {
 

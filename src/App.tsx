@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Survey, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem } from "./types";
+import { Survey, SurveyStatus, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem, Topic } from "./types";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
-import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService } from "./lib/firebase";
+import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
 import { MASTER_ADMIN_EMAIL, DEFAULT_SURVEY_CATEGORIES } from "./data/initialData";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
 import { HistoricalAnalyticsView } from "./components/HistoricalAnalyticsView";
 import { TagalogMLTrainingStudio } from "./components/TagalogMLTrainingStudio";
 import { NewsAnnouncementsFeed } from "./components/NewsAnnouncementsFeed";
+import { Dashboard } from "./components/Dashboard";
 import { SurveyBuilder } from "./components/SurveyBuilder";
 import { MySurveysScreen } from "./components/MySurveysScreen";
 import { SuperadminDashboard } from "./components/SuperadminDashboard";
@@ -16,6 +17,7 @@ import { UserProfileModal } from "./components/UserProfileModal";
 import { AuthModal } from "./components/AuthModal";
 import { StandaloneAuthPage } from "./components/StandaloneAuthPage";
 import {
+  LayoutDashboard,
   ClipboardList,
   BarChart3,
   BrainCircuit,
@@ -29,7 +31,7 @@ import {
 
 export default function App() {
   // Navigation State
-  const [currentView, setCurrentView] = useState<string>("surveys");
+  const [currentView, setCurrentView] = useState<string>("dashboard");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [analyticsTargetSurveyId, setAnalyticsTargetSurveyId] = useState<string | number | "all">("all");
@@ -44,6 +46,7 @@ export default function App() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
 
   // Modals State
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
@@ -88,7 +91,7 @@ export default function App() {
 
   const loadDataForUser = useCallback(async (user: UserProfile | null) => {
     try {
-      const cloudSurveys = await DatabaseService.getSurveys();
+      const cloudSurveys = await DatabaseService.getSurveys(user);
       setSurveys(cloudSurveys);
 
       const isAdmin = user?.role === "superadmin" || user?.pos === "Superadmin";
@@ -108,6 +111,21 @@ export default function App() {
       setNewsList(cloudNews);
       setMlDataset(cloudMl);
       setLogs(isSuperadmin ? cloudLogs : []);
+
+      let freshTopics: Topic[] = [];
+      try {
+        freshTopics = await DatabaseService.getTopics();
+        if (freshTopics.length === 0 && (isAdmin || isSuperadmin)) {
+          for (const t of INITIAL_TOPICS) {
+            await DatabaseService.saveTopic(t);
+          }
+          freshTopics = await DatabaseService.getTopics();
+        }
+      } catch (topicErr) {
+        console.warn("Failed to load topics:", topicErr);
+        freshTopics = [];
+      }
+      setTopics(freshTopics);
     } catch (err: any) {
       showToast(err?.message || "Failed to load data from Firestore.", "info");
     }
@@ -157,6 +175,7 @@ export default function App() {
         setUsers([]);
         setResponses([]);
         setLogs([]);
+        setTopics([]);
       }
     });
 
@@ -167,6 +186,7 @@ export default function App() {
 
   const handleLogin = async (user: UserProfile) => {
     setCurrentUser(user);
+    setCurrentView("dashboard");
     const isAdmin = user.role === "superadmin" || user.pos === "Superadmin";
     const isSuperadmin = user.role === "superadmin";
     const isAuthor = isAdmin || user.role === "faculty" || user.role === "officer";
@@ -188,7 +208,7 @@ export default function App() {
       const userNotifs = await DatabaseService.getNotifications(user.email);
       setNotifications(userNotifs);
 
-      const activeSurveys = await DatabaseService.getSurveys();
+      const activeSurveys = await DatabaseService.getSurveys(user);
       setSurveys(activeSurveys);
       const [scopedResponses, scopedUsers, freshNews, freshMl, freshLogs] = await Promise.all([
         DatabaseService.getResponses(user, activeSurveys).catch(() => []),
@@ -202,6 +222,21 @@ export default function App() {
       setNewsList(freshNews);
       setMlDataset(freshMl);
       setLogs(isSuperadmin ? freshLogs : []);
+
+      let freshTopics: Topic[] = [];
+      try {
+        freshTopics = await DatabaseService.getTopics();
+        if (freshTopics.length === 0 && (isAdmin || isSuperadmin)) {
+          for (const t of INITIAL_TOPICS) {
+            await DatabaseService.saveTopic(t);
+          }
+          freshTopics = await DatabaseService.getTopics();
+        }
+      } catch (topicErr) {
+        console.warn("Failed to load topics:", topicErr);
+        freshTopics = [];
+      }
+      setTopics(freshTopics);
     } catch (err: any) {
       showToast(err?.message || "Failed to load Firestore data for user.", "info");
     }
@@ -224,6 +259,7 @@ export default function App() {
     setUsers([]);
     setResponses([]);
     setLogs([]);
+    setTopics([]);
     showToast("Signed out successfully.", "info");
   };
 
@@ -388,7 +424,7 @@ export default function App() {
 
         setEditingSurvey(null);
         showToast(`Survey "${surveyData.title}" updated successfully!`, "success");
-        setCurrentView("surveys");
+        setCurrentView("take-survey");
       } catch (err: any) {
         showToast(err.message || "Failed to update survey.", "info");
       }
@@ -412,7 +448,7 @@ export default function App() {
       closes: surveyData.closeDate ? new Date(surveyData.closeDate).toLocaleDateString() : "Open",
       questions: surveyData.questions || [],
       questionCount: surveyData.questions?.length || 0,
-      owner: currentUser?.email || "faculty@school.edu.ph",
+      owner: (currentUser?.email || "faculty@school.edu.ph").trim().toLowerCase(),
       ownerName: currentUser?.name || "Campus Instructor",
       targetAudience: surveyData.targetAudience,
       tags: surveyData.tags || [surveyData.cat || "General"],
@@ -450,7 +486,7 @@ export default function App() {
       }
 
       showToast(`Survey "${newSurvey.title}" saved successfully!`, "success");
-      setCurrentView("surveys");
+      setCurrentView("take-survey");
     } catch (err: any) {
       showToast(err.message || "Failed to save survey.", "info");
     }
@@ -629,7 +665,7 @@ export default function App() {
 
   const handleUpdateSurveyStatus = async (
     surveyId: string | number,
-    newStatus: "published" | "draft" | "scheduled" | "closed"
+    newStatus: SurveyStatus
   ) => {
     const srv = surveys.find((s) => s.id === surveyId);
     if (!srv) return;
@@ -828,6 +864,46 @@ export default function App() {
     }
   };
 
+  const handleSaveTopic = async (topic: Topic) => {
+    try {
+      await DatabaseService.saveTopic(topic);
+      setTopics((prev) => {
+        const exists = prev.some((t) => t.id === topic.id);
+        if (exists) {
+          return prev.map((t) => (t.id === topic.id ? topic : t));
+        }
+        return [...prev, topic].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      });
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: currentUser?.pos || "Admin",
+        action: "Topic Updated",
+        details: `Saved topic "${topic.name}" (${topic.status})`,
+      });
+      showToast(`Topic "${topic.name}" saved.`, "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to save topic.", "info");
+      throw err;
+    }
+  };
+
+  const handleDeleteTopic = async (topicId: string) => {
+    try {
+      await DatabaseService.deleteTopic(topicId);
+      setTopics((prev) => prev.filter((t) => t.id !== topicId));
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: currentUser?.pos || "Admin",
+        action: "Topic Deleted",
+        details: `Deleted topic with ID ${topicId}`,
+      });
+      showToast("Topic deleted successfully.", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to delete topic.", "info");
+      throw err;
+    }
+  };
+
   const handleUpdateProfile = async (updated: Partial<UserProfile>) => {
     if (!currentUser) return;
     const modifiedUser = { ...currentUser, ...updated };
@@ -854,7 +930,8 @@ export default function App() {
   };
 
   const sidebarNavItems = [
-    { id: "surveys", label: "Dashboard", icon: ClipboardList },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "take-survey", label: "Take a Survey", icon: ClipboardList },
     ...(currentUser
       ? [
           {
@@ -864,19 +941,18 @@ export default function App() {
           },
         ]
       : []),
-    { id: "analytics", label: "Macro Analytics", icon: BarChart3 },
-    ...(isSuperadmin ? [{ id: "tagalog-ml", label: "ML Models", icon: BrainCircuit }] : []),
-    { id: "news", label: "News Feed", icon: Newspaper },
+    { id: "analytics", label: "Analytics", icon: BarChart3 },
+    ...(isSuperadmin ? [{ id: "tagalog-ml", label: "Sentiment Analysis", icon: BrainCircuit }] : []),
     ...(canCreateSurvey
       ? [
           {
             id: "create",
-            label: isSuperadmin ? "New Instrument" : "Create Survey",
+            label: "Create Survey",
             icon: PlusCircle,
           },
         ]
       : []),
-    ...(isSuperadmin ? [{ id: "admin", label: "Admin Oversight", icon: ShieldAlert, badge: flaggedCount }] : []),
+    ...(isSuperadmin ? [{ id: "admin", label: "Review Center", icon: ShieldAlert, badge: flaggedCount }] : []),
   ];
 
   // If Firebase is not configured, show a full-page message instead of running
@@ -946,7 +1022,7 @@ export default function App() {
           {/* Brand Header */}
           <div
             className="p-6 border-b border-slate-100 flex items-center gap-3 cursor-pointer"
-            onClick={() => handleNavigate("surveys")}
+            onClick={() => handleNavigate("dashboard")}
           >
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold italic shadow-xs">
               E
@@ -1030,9 +1106,33 @@ export default function App() {
 
         {/* View Router */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          {currentView === "surveys" && (
-            <ThemedSurveySections
+          {currentView === "dashboard" && (
+            <Dashboard
               surveys={surveys}
+              responses={responses}
+              newsList={newsList}
+              notifications={notifications}
+              users={isSuperadmin ? users : []}
+              currentUser={currentUser}
+              onNavigate={handleNavigate}
+              onLikeNews={handleLikeNews}
+              onAddNews={handleAddNews}
+              onMarkNotificationRead={handleMarkNotificationRead}
+              onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+            />
+          )}
+
+          {currentView === "take-survey" && (
+            <ThemedSurveySections
+              surveys={
+                currentUser?.email
+                  ? surveys.filter(
+                      (s) =>
+                        (s.owner || "").trim().toLowerCase() !==
+                        currentUser.email.trim().toLowerCase()
+                    )
+                  : surveys
+              }
               currentUser={currentUser}
               userResponses={responses}
               newsList={newsList}
@@ -1136,10 +1236,10 @@ export default function App() {
                   The Tagalog & Bilingual NLP Machine Learning Studio is restricted to System Administrators for model calibration and institutional dataset supervision.
                 </p>
                 <button
-                  onClick={() => setCurrentView("surveys")}
+                  onClick={() => setCurrentView("take-survey")}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                 >
-                  Return to Surveys Dashboard
+                  Return to Take a Survey
                 </button>
               </div>
             )
@@ -1159,11 +1259,12 @@ export default function App() {
               <SurveyBuilder
                 currentUser={currentUser}
                 categories={DEFAULT_SURVEY_CATEGORIES}
+                topics={topics}
                 onSaveSurvey={handleSaveSurvey}
                 initialSurvey={editingSurvey || undefined}
                 onCancel={() => {
                   setEditingSurvey(null);
-                  setCurrentView("surveys");
+                  setCurrentView("take-survey");
                 }}
               />
             ) : (
@@ -1180,13 +1281,13 @@ export default function App() {
                     onClick={() => setCurrentView("admin")}
                     className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                   >
-                    Go to Admin Moderation
+                    Go to Review Center
                   </button>
                   <button
                     onClick={() => setCurrentView("analytics")}
                     className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
                   >
-                    View Macro Analytics
+                    View Analytics
                   </button>
                 </div>
               </div>
@@ -1201,6 +1302,7 @@ export default function App() {
               responses={responses}
               newsList={newsList}
               mlDataset={mlDataset}
+              topics={topics}
               currentUser={currentUser}
               onClearFlag={handleClearFlag}
               onFlagSurvey={handleFlagSurvey}
@@ -1211,6 +1313,8 @@ export default function App() {
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
               onRestoreBackup={handleRestoreBackup}
+              onSaveTopic={handleSaveTopic}
+              onDeleteTopic={handleDeleteTopic}
               showToast={showToast}
               onNavigateToAnalytics={(surveyId) => {
                 setAnalyticsTargetSurveyId(surveyId || "all");

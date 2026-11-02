@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Survey, Question, UserProfile, TargetAudience } from "../types";
+import { Survey, Question, UserProfile, TargetAudience, Topic, SurveyTopicBlock } from "../types";
 import { DEPARTMENTS_DATA } from "../data/initialData";
 import {
   PlusCircle,
@@ -17,11 +17,13 @@ import {
   Flame,
   ArrowRight,
   Clock,
+  Tag,
 } from "lucide-react";
 
 interface SurveyBuilderProps {
   currentUser: UserProfile | null;
   categories: string[];
+  topics?: Topic[];
   initialSurvey?: Survey | null;
   onSaveSurvey: (surveyData: Partial<Survey>, status: "draft" | "published" | "scheduled") => void;
   onCancel?: () => void;
@@ -30,6 +32,7 @@ interface SurveyBuilderProps {
 export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   currentUser,
   categories,
+  topics = [],
   initialSurvey,
   onSaveSurvey,
   onCancel,
@@ -41,6 +44,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   const [desc, setDesc] = useState<string>(initialSurvey?.desc || "");
   const [themeSection, setThemeSection] = useState<Survey["themeSection"]>(initialSurvey?.themeSection || "academics");
   const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || "2025-2026");
+  const [topicBlocks, setTopicBlocks] = useState<SurveyTopicBlock[]>(initialSurvey?.topicBlocks || []);
 
   // Scheduling
   const [scheduleType, setScheduleType] = useState<"immediate" | "scheduled">(
@@ -101,14 +105,20 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       if (initialSurvey.questions && initialSurvey.questions.length > 0) {
         setQuestions(initialSurvey.questions);
       }
+      if (initialSurvey.topicBlocks) {
+        setTopicBlocks(initialSurvey.topicBlocks);
+      }
     }
   }, [initialSurvey, categories]);
+
+  const generateUniqueQuestionId = () =>
+    `q_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
   const addRatingQuestion = () => {
     setQuestions((prev) => [
       ...prev,
       {
-        id: `q_${Date.now()}`,
+        id: generateUniqueQuestionId(),
         type: "rating",
         text: "",
         min: 1,
@@ -122,7 +132,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     setQuestions((prev) => [
       ...prev,
       {
-        id: `q_${Date.now()}`,
+        id: generateUniqueQuestionId(),
         type: "multiple",
         text: "",
         options: ["Option 1", "Option 2", "Option 3"],
@@ -134,7 +144,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     setQuestions((prev) => [
       ...prev,
       {
-        id: `q_${Date.now()}`,
+        id: generateUniqueQuestionId(),
         type: "checkbox",
         text: "",
         options: ["Choice A", "Choice B", "Choice C"],
@@ -146,7 +156,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     setQuestions((prev) => [
       ...prev,
       {
-        id: `q_${Date.now()}`,
+        id: generateUniqueQuestionId(),
         type: "paragraph",
         text: "",
       },
@@ -229,14 +239,19 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       themeSection,
       isTrending: initialSurvey?.isTrending ?? false,
       academicYear,
-      questions: questions.filter((q) => q.text.trim().length > 0),
+      questions: questions
+        .filter((q) => q.text.trim().length > 0)
+        .map((q) => ({
+          ...q,
+          id: q.id ? String(q.id) : generateUniqueQuestionId(),
+        })),
       questionCount: questions.length,
       responses: initialSurvey?.responses ?? 0,
       created: initialSurvey?.created || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       openDate: scheduleType === "scheduled" ? openDate : (initialSurvey?.openDate || new Date().toISOString()),
       closeDate: closeDate || null,
       closes: closeDate ? new Date(closeDate).toLocaleDateString() : (initialSurvey?.closes || "Open"),
-      owner: initialSurvey?.owner || currentUser?.email || "faculty@school.edu.ph",
+      owner: (initialSurvey?.owner || currentUser?.email || "faculty@school.edu.ph").trim().toLowerCase(),
       ownerName: initialSurvey?.ownerName || currentUser?.name || "Campus Instructor",
       targetAudience: {
         type: targetType,
@@ -246,6 +261,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       requiredAudience: isSuperadmin ? requiredAudience : (initialSurvey?.requiredAudience || "students"),
       allowAnonymous,
       tags: [cat, themeSection || "General", academicYear],
+      topicBlocks: topicBlocks.length > 0 ? topicBlocks : undefined,
     };
 
     onSaveSurvey(surveyPayload, actionStatus);

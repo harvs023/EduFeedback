@@ -15,6 +15,8 @@ import {
   FirestoreMLService,
   FirestoreLogsService,
   FirestoreNotificationService,
+  FirestoreTopicService,
+  INITIAL_TOPICS,
   FirebaseAuthService,
   isFirebaseConfigured,
   getFirebaseAuth,
@@ -31,6 +33,7 @@ import {
   ActivityLog,
   AccountStatus,
   NotificationItem,
+  Topic,
 } from "../types";
 import {
   MASTER_ADMIN_EMAIL,
@@ -138,6 +141,8 @@ export class DatabaseService {
     const initialStatus: AccountStatus = userProfile.status || (isFacultyOrOfficer ? "pending_approval" : "active");
 
     const newUser: UserProfile = {
+      canCreateSurveys: true,
+      canPostNews: true,
       ...userProfile,
       email: cleanEmail,
       status: initialStatus,
@@ -160,12 +165,16 @@ export class DatabaseService {
   // ==========================================
   // SURVEYS
   // ==========================================
-  static async getSurveys(): Promise<Survey[]> {
-    return await FirestoreSurveyService.getAll();
+  static async getSurveys(currentUser?: UserProfile | null): Promise<Survey[]> {
+    return await FirestoreSurveyService.getSurveys(currentUser);
   }
 
   static async saveSurvey(survey: Survey): Promise<void> {
-    await FirestoreSurveyService.save(survey);
+    const normalizedSurvey: Survey = {
+      ...survey,
+      owner: (survey.owner || "").trim().toLowerCase(),
+    };
+    await FirestoreSurveyService.save(normalizedSurvey);
   }
 
   static async deleteSurvey(surveyId: string | number): Promise<void> {
@@ -311,6 +320,21 @@ export class DatabaseService {
 
   static async deleteNotification(id: string): Promise<void> {
     await FirestoreNotificationService.delete(id);
+  }
+
+  // ==========================================
+  // TOPICS
+  // ==========================================
+  static async getTopics(): Promise<Topic[]> {
+    return await FirestoreTopicService.getAll();
+  }
+
+  static async saveTopic(topic: Topic): Promise<void> {
+    await FirestoreTopicService.save(topic);
+  }
+
+  static async deleteTopic(topicId: string): Promise<void> {
+    await FirestoreTopicService.delete(topicId);
   }
 
   /**

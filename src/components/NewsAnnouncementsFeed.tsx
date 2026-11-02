@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Share2,
   X,
+  ChevronDown,
 } from "lucide-react";
 
 interface NewsAnnouncementsFeedProps {
@@ -19,6 +20,8 @@ interface NewsAnnouncementsFeedProps {
   currentUser: UserProfile | null;
   onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => void;
   onLikeNews: (id: string) => void;
+  limit?: number;
+  allowPostOnlyForSuperadmin?: boolean;
 }
 
 export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
@@ -26,10 +29,13 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
   currentUser,
   onAddNews,
   onLikeNews,
+  limit,
+  allowPostOnlyForSuperadmin = true,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [activeArticle, setActiveArticle] = useState<NewsAnnouncement | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
 
   // New post form state
   const [title, setTitle] = useState<string>("");
@@ -39,12 +45,17 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
   const [badgeText, setBadgeText] = useState<string>("Action Taken");
   const [isPinned, setIsPinned] = useState<boolean>(false);
 
-  const canPost = currentUser?.role === "superadmin" || currentUser?.pos === "Student Officer" || currentUser?.pos === "Faculty";
+  const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
+  const canPost = allowPostOnlyForSuperadmin
+    ? isSuperadmin
+    : isSuperadmin || currentUser?.pos === "Student Officer" || currentUser?.pos === "Faculty";
 
   const filteredNews = newsList.filter((item) => {
     if (selectedCategory !== "all" && item.category !== selectedCategory) return false;
     return true;
   });
+
+  const displayedNews = limit && !isExpanded ? filteredNews.slice(0, limit) : filteredNews;
 
   const handleSubmitNewPost = (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,7 +149,7 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
 
       {/* News Feed Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {filteredNews.map((item) => (
+        {displayedNews.map((item) => (
           <div
             key={item.id}
             className={`bg-white rounded-3xl p-6 border transition-all duration-200 flex flex-col justify-between space-y-4 ${
@@ -205,7 +216,28 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
             </div>
           </div>
         ))}
+
+        {displayedNews.length === 0 && (
+          <div className="col-span-full py-12 text-center bg-white rounded-3xl border border-slate-200">
+            <Newspaper className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+            <p className="text-slate-600 font-bold text-sm">No announcements to display</p>
+            <p className="text-slate-400 text-xs mt-1">Check back soon for new institutional updates.</p>
+          </div>
+        )}
       </div>
+
+      {/* Expand / View All button when limit is active */}
+      {limit && filteredNews.length > limit && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="px-5 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2"
+          >
+            <span>{isExpanded ? "Show fewer announcements" : `View all announcements (${filteredNews.length})`}</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+      )}
 
       {/* Article Detail Modal */}
       {activeArticle && (

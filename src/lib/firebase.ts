@@ -42,6 +42,7 @@ import {
   TagalogMLSample,
   ActivityLog,
   NotificationItem,
+  Topic,
 } from "../types";
 import {
   INITIAL_SURVEYS,
@@ -191,6 +192,7 @@ export const COLLECTIONS = {
   ML_DATASET: "ml_dataset",
   LOGS: "logs",
   NOTIFICATIONS: "notifications",
+  TOPICS: "topics",
 };
 
 /**
@@ -231,27 +233,85 @@ export const FirebaseAuthService = {
  * Firestore Surveys Collection Service
  */
 export const FirestoreSurveyService = {
-  async getAll(): Promise<Survey[]> {
+  async getSurveys(currentUser?: UserProfile | null): Promise<Survey[]> {
     const firestore = getFirebaseDb();
     if (!firestore) return [];
-    try {
-      const snap = await getDocs(collection(firestore, COLLECTIONS.SURVEYS));
-      return snap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      })) as Survey[];
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, COLLECTIONS.SURVEYS);
-      return [];
+
+    const isSuperadmin =
+      currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
+
+    if (isSuperadmin) {
+      try {
+        const snap = await getDocs(collection(firestore, COLLECTIONS.SURVEYS));
+        return snap.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        })) as Survey[];
+      } catch (err) {
+        handleFirestoreError(err, OperationType.LIST, COLLECTIONS.SURVEYS);
+        return [];
+      }
     }
+
+    const userEmail = (currentUser?.email || "").trim().toLowerCase();
+    const results: Survey[] = [];
+    const seenIds = new Set<string>();
+
+    // Query 1: where("status", "in", ["published", "scheduled"])
+    try {
+      const q1 = query(
+        collection(firestore, COLLECTIONS.SURVEYS),
+        where("status", "in", ["published", "scheduled"])
+      );
+      const snap1 = await getDocs(q1);
+      for (const docSnap of snap1.docs) {
+        const id = docSnap.id;
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          results.push({ id, ...docSnap.data() } as Survey);
+        }
+      }
+    } catch (err) {
+      console.warn("Firestore public/scheduled surveys query failed:", err);
+    }
+
+    // Query 2: where("owner", "==", userEmail)
+    if (userEmail) {
+      try {
+        const q2 = query(
+          collection(firestore, COLLECTIONS.SURVEYS),
+          where("owner", "==", userEmail)
+        );
+        const snap2 = await getDocs(q2);
+        for (const docSnap of snap2.docs) {
+          const id = docSnap.id;
+          if (!seenIds.has(id)) {
+            seenIds.add(id);
+            results.push({ id, ...docSnap.data() } as Survey);
+          }
+        }
+      } catch (err) {
+        console.warn("Firestore owner surveys query failed:", err);
+      }
+    }
+
+    return results;
+  },
+
+  async getAll(currentUser?: UserProfile | null): Promise<Survey[]> {
+    return this.getSurveys(currentUser);
   },
 
   async save(survey: Survey): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) return;
     const docId = String(survey.id);
+    const normalizedSurvey: Survey = {
+      ...survey,
+      owner: (survey.owner || "").trim().toLowerCase(),
+    };
     try {
-      await setDoc(doc(firestore, COLLECTIONS.SURVEYS, docId), survey, { merge: true });
+      await setDoc(doc(firestore, COLLECTIONS.SURVEYS, docId), normalizedSurvey, { merge: true });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.SURVEYS}/${docId}`);
     }
@@ -360,7 +420,14 @@ export const FirestoreUserService = {
     }
     try {
       const snap = await getDocs(collection(firestore, COLLECTIONS.USERS));
-      return snap.docs.map((docSnap) => docSnap.data() as UserProfile);
+      return snap.docs.map((docSnap) => {
+        const u = docSnap.data() as UserProfile;
+        return {
+          canCreateSurveys: u.canCreateSurveys !== undefined ? u.canCreateSurveys : true,
+          canPostNews: u.canPostNews !== undefined ? u.canPostNews : true,
+          ...u,
+        };
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, COLLECTIONS.USERS);
       return [];
@@ -381,7 +448,12 @@ export const FirestoreUserService = {
       if (snap.exists()) {
         const u = snap.data() as UserProfile;
         if (u.email.toLowerCase() === cleanEmail) {
-          return { ...u, email: cleanEmail };
+          return {
+            canCreateSurveys: u.canCreateSurveys !== undefined ? u.canCreateSurveys : true,
+            canPostNews: u.canPostNews !== undefined ? u.canPostNews : true,
+            ...u,
+            email: cleanEmail,
+          };
         }
       }
       return null;
@@ -396,8 +468,14 @@ export const FirestoreUserService = {
     if (!firestore) return;
     const cleanEmail = user.email.trim().toLowerCase();
     const docId = cleanEmail.replace(/[^a-z0-9_-]/g, "_");
+    const normalizedUser: UserProfile = {
+      canCreateSurveys: user.canCreateSurveys !== undefined ? user.canCreateSurveys : true,
+      canPostNews: user.canPostNews !== undefined ? user.canPostNews : true,
+      ...user,
+      email: cleanEmail,
+    };
     try {
-      await setDoc(doc(firestore, COLLECTIONS.USERS, docId), { ...user, email: cleanEmail }, { merge: true });
+      await setDoc(doc(firestore, COLLECTIONS.USERS, docId), normalizedUser, { merge: true });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.USERS}/${docId}`);
     }
@@ -638,6 +716,63 @@ export const FirestoreNotificationService = {
       await deleteDoc(doc(firestore, COLLECTIONS.NOTIFICATIONS, id));
     } catch (err) {
       console.warn("Failed to delete notification:", err);
+    }
+  },
+};
+
+export const INITIAL_TOPICS: Topic[] = [
+  { id: "topic_teaching_quality", name: "Teaching Quality", status: "active", order: 1, createdAt: Date.now() },
+  { id: "topic_course_content", name: "Course Content", status: "active", order: 2, createdAt: Date.now() },
+  { id: "topic_facilities", name: "Facilities", status: "active", order: 3, createdAt: Date.now() },
+  { id: "topic_internet_wifi", name: "Internet / Wi-Fi", status: "active", order: 4, createdAt: Date.now() },
+  { id: "topic_administration", name: "Administration", status: "active", order: 5, createdAt: Date.now() },
+  { id: "topic_schedule", name: "Schedule", status: "active", order: 6, createdAt: Date.now() },
+  { id: "topic_cleanliness", name: "Cleanliness", status: "active", order: 7, createdAt: Date.now() },
+  { id: "topic_equipment", name: "Equipment", status: "active", order: 8, createdAt: Date.now() },
+  { id: "topic_student_services", name: "Student Services", status: "active", order: 9, createdAt: Date.now() },
+  { id: "topic_general", name: "General", status: "active", order: 10, createdAt: Date.now() },
+  { id: "topic_other", name: "Other", status: "active", order: 11, createdAt: Date.now() },
+];
+
+/**
+ * Firestore Topics Collection Service
+ */
+export const FirestoreTopicService = {
+  async getAll(): Promise<Topic[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    try {
+      const snap = await getDocs(collection(firestore, COLLECTIONS.TOPICS));
+      const topics = snap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      })) as Topic[];
+      return topics.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, COLLECTIONS.TOPICS);
+      throw err;
+    }
+  },
+
+  async save(topic: Topic): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      await setDoc(doc(firestore, COLLECTIONS.TOPICS, topic.id), topic, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.TOPICS}/${topic.id}`);
+      throw err;
+    }
+  },
+
+  async delete(topicId: string): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      await deleteDoc(doc(firestore, COLLECTIONS.TOPICS, topicId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `${COLLECTIONS.TOPICS}/${topicId}`);
+      throw err;
     }
   },
 };

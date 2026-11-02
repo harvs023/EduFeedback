@@ -82,6 +82,8 @@ export const MASTER_ADMIN_USER: UserProfile = {
   department: "Institutional Quality Assurance Office",
   joined: "Jan 15, 2024",
   surveys: 0,
+  canCreateSurveys: true,
+  canPostNews: true,
 };
 
 // Clean Default Users: ONLY the Master Root Administrator is pre-seeded

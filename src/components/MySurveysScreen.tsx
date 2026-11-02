@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Survey, UserProfile, SurveyResponse } from "../types";
+import { Survey, SurveyStatus, UserProfile, SurveyResponse } from "../types";
 import {
   PlusCircle,
   Pencil,
@@ -43,7 +43,7 @@ interface MySurveysScreenProps {
   onTakeSurvey?: (survey: Survey) => void;
   onFlagSurvey?: (surveyId: string | number, reason: string) => void;
   onClearFlag?: (surveyId: string | number) => void;
-  onUpdateSurveyStatus?: (surveyId: string | number, newStatus: "published" | "draft" | "scheduled" | "closed") => void;
+  onUpdateSurveyStatus?: (surveyId: string | number, newStatus: SurveyStatus) => void;
   onDuplicateSurvey?: (survey: Survey) => void;
 }
 
@@ -63,7 +63,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
 }) => {
   const isAdmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "published" | "draft" | "scheduled" | "closed" | "flagged">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "published" | "draft" | "scheduled" | "archived" | "flagged">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [creatorFilter, setCreatorFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"newest" | "responses" | "title" | "flagged">("newest");
@@ -87,12 +87,12 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
     const published = visibleSurveys.filter((s) => s.status === "published").length;
     const drafts = visibleSurveys.filter((s) => s.status === "draft").length;
     const scheduled = visibleSurveys.filter((s) => s.status === "scheduled").length;
-    const closed = visibleSurveys.filter((s) => s.status === "closed").length;
+    const archived = visibleSurveys.filter((s) => s.status === "archived").length;
     const flagged = visibleSurveys.filter((s) => s.flagged).length;
     const totalResponses = visibleSurveys.reduce((acc, curr) => acc + (curr.responses || 0), 0);
     const avgResponses = total > 0 ? (totalResponses / total).toFixed(1) : "0";
 
-    return { total, published, drafts, scheduled, closed, flagged, totalResponses, avgResponses };
+    return { total, published, drafts, scheduled, archived, flagged, totalResponses, avgResponses };
   }, [visibleSurveys]);
 
   // Unique categories
@@ -379,12 +379,12 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
               Scheduled ({stats.scheduled})
             </button>
             <button
-              onClick={() => setStatusFilter("closed")}
+              onClick={() => setStatusFilter("archived")}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                statusFilter === "closed" ? "bg-white text-slate-800 shadow-xs font-semibold" : "text-slate-600 hover:text-slate-900"
+                statusFilter === "archived" ? "bg-white text-slate-800 shadow-xs font-semibold" : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Closed ({stats.closed})
+              Archived ({stats.archived})
             </button>
             <button
               onClick={() => setStatusFilter("flagged")}
@@ -509,8 +509,8 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
           {filteredSurveys.map((survey) => {
             const isDraft = survey.status === "draft";
             const isScheduled = survey.status === "scheduled";
-            const isClosed = survey.status === "closed";
-            const isLive = survey.status === "published" || (!isDraft && !isScheduled && !isClosed);
+            const isArchived = survey.status === "archived";
+            const isLive = survey.status === "published" || (!isDraft && !isScheduled && !isArchived);
             const isFlagged = Boolean(survey.flagged);
 
             return (
@@ -555,9 +555,9 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                           <span>Live</span>
                         </span>
                       )}
-                      {isClosed && (
+                      {isArchived && (
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
-                          Closed
+                          Archived
                         </span>
                       )}
                     </div>
@@ -642,7 +642,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                         onChange={(e) =>
                           onUpdateSurveyStatus(
                             survey.id,
-                            e.target.value as "published" | "draft" | "scheduled" | "closed"
+                            e.target.value as SurveyStatus
                           )
                         }
                         className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 text-[11px] font-bold text-slate-700 cursor-pointer focus:outline-hidden focus:border-indigo-400"
@@ -650,7 +650,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                         <option value="published">🟢 Live / Published</option>
                         <option value="draft">🟡 Draft</option>
                         <option value="scheduled">🔵 Scheduled</option>
-                        <option value="closed">⚪ Closed / Archive</option>
+                        <option value="archived">⚪ Archived</option>
                       </select>
                     </div>
                   )}

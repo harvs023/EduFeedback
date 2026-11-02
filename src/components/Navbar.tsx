@@ -74,7 +74,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const canCreateSurvey = Boolean(currentUser);
 
   const navItems = [
-    { id: "surveys", label: "Surveys", icon: ClipboardList, badge: undefined },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, badge: undefined },
+    { id: "take-survey", label: "Take a Survey", icon: ClipboardList, badge: undefined },
     ...(currentUser
       ? [
           {
@@ -86,13 +87,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         ]
       : []),
     { id: "analytics", label: "Analytics", icon: BarChart3, badge: undefined },
-    ...(isSuperadmin ? [{ id: "tagalog-ml", label: "ML Models", icon: BrainCircuit, badge: "94.2%" }] : []),
-    { id: "news", label: "News & Actions", icon: Newspaper, badgeCount: unreadNewsCount },
+    ...(isSuperadmin ? [{ id: "tagalog-ml", label: "Sentiment Analysis", icon: BrainCircuit, badge: undefined }] : []),
     ...(canCreateSurvey
       ? [
           {
             id: "create",
-            label: isSuperadmin ? "New Instrument" : "Create Survey",
+            label: "Create Survey",
             icon: PlusCircle,
             badge: undefined,
           },
@@ -102,7 +102,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       ? [
           {
             id: "admin",
-            label: "Admin Moderation",
+            label: "Review Center",
             icon: ShieldAlert,
             badgeCount: flaggedSurveysCount,
           },
@@ -226,9 +226,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                           onClick={() => {
                             onMarkNotificationRead?.(n.id);
                             setShowNotifMenu(false);
-                            if (n.type === "news") onNavigate("news");
+                            if (n.type === "news") onNavigate("dashboard");
                             else if (n.type === "response") onNavigate("analytics");
-                            else onNavigate("surveys");
+                            else onNavigate("take-survey");
                           }}
                           className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors ${
                             isUnread ? "bg-indigo-50/30" : ""
@@ -282,11 +282,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     onClick={() => {
                       setShowNotifMenu(false);
-                      onNavigate("news");
+                      onNavigate("dashboard");
                     }}
                     className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
                   >
-                    View Campus News & Updates →
+                    View Campus Dashboard →
                   </button>
                 </div>
               </div>

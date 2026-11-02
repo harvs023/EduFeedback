@@ -17,9 +17,12 @@ export interface UserProfile {
   program?: string;
   section?: string;
   avatarUrl?: string;
+  canCreateSurveys?: boolean;
+  canPostNews?: boolean;
+  restrictionReason?: string;
 }
 
-export type SurveyStatus = "published" | "scheduled" | "draft" | "archived";
+export type SurveyStatus = "draft" | "pending" | "rejected" | "scheduled" | "published" | "archived";
 export type SurveyCategory = "Course" | "Instructor" | "Facilities" | "General" | "Student Services" | "Others";
 
 export type QuestionType = "rating" | "multiple" | "checkbox" | "paragraph";
@@ -32,6 +35,8 @@ export interface Question {
   max?: number;
   labels?: string[];
   options?: string[];
+  blockId?: string;
+  required?: boolean;
 }
 
 export interface TargetAudience {
@@ -55,6 +60,21 @@ export interface TargetAudience {
       }>;
     };
   };
+}
+
+export interface Topic {
+  id: string;
+  name: string;
+  status: "active" | "retired";
+  order: number;
+  createdAt: number;
+}
+
+export interface SurveyTopicBlock {
+  id: string;
+  topicId: string;
+  title: string;
+  description?: string;
 }
 
 export interface Survey {
@@ -89,6 +109,19 @@ export interface Survey {
   isRequired?: boolean; // Admin-designated required/priority survey
   requiredAudience?: "all" | "students" | "faculty" | "officers";
   allowAnonymous?: boolean; // Whether respondents can submit anonymously (if false, identity is recorded for clearance)
+  purpose?: string;
+  criteriaAcceptedAt?: number;
+  submittedAt?: number;
+  reviewedBy?: string;
+  reviewedAt?: number;
+  rejectionReason?: string;
+  eligibleCount?: number;
+  previousSurveyId?: string | number;
+  seriesId?: string;
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: string;
+  topicBlocks?: Array<{ id: string; topicId: string; title: string; description?: string }>;
 }
 
 export interface Answer {

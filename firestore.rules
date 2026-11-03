@@ -72,32 +72,55 @@ service cloud.firestore {
       allow update: if signedIn()
         && userId.lower() == myKey()
         && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['role', 'pos', 'status', 'email', 'joined']);
+              .hasAny(['role', 'pos', 'status', 'email', 'joined',
+                       'canCreateSurveys', 'canPostNews', 'restrictionReason']);
 
       allow create, update, delete: if isAdmin();
     }
 
     // -------------------------------------------------------------- surveys
-    match /surveys/{surveyId} {
+     match /surveys/{surveyId} {
 
-      allow read: if isActive();
+      allow read: if isAdmin()
+        || (isActive() && resource.data.status in ['published', 'scheduled'])
+        || (isActive() && resource.data.owner == myEmail());
 
       allow create: if isActive()
-        && request.resource.data.owner.lower() == myEmail();
+        && request.resource.data.owner == myEmail()
+        && request.resource.data.status in ['draft', 'pending']
+        && request.resource.data.get('responses', 0) == 0
+        && get(myProfilePath()).data.get('canCreateSurveys', true) == true;
+      allow create: if isAdmin();
 
-      allow update: if isAdmin()
-        || (isActive()
-            && resource.data.owner.lower() == myEmail()
-            && request.resource.data.owner == resource.data.owner)
-        || (isActive()
-            && onlyChanges(['responses'])
-            && request.resource.data.responses >= resource.data.responses
-            && request.resource.data.responses <= resource.data.responses + 1);
+      allow update: if isActive()
+        && resource.data.owner == myEmail()
+        && request.resource.data.owner == resource.data.owner
+        && (
+          (resource.data.status in ['draft', 'rejected']
+            && request.resource.data.status in ['draft', 'pending']
+            && request.resource.data.get('responses', 0) == resource.data.get('responses', 0)
+            && get(myProfilePath()).data.get('canCreateSurveys', true) == true)
+          ||
+          (resource.data.status == 'pending'
+            && request.resource.data.status == 'draft')
+          ||
+          (resource.data.status in ['published', 'scheduled']
+            && request.resource.data.status == 'archived'
+            && onlyChanges(['status', 'archivedAt', 'archivedBy', 'archiveReason']))
+        );
+      allow update: if isAdmin();
+
+      allow update: if isActive()
+        && resource.data.status in ['published', 'scheduled']
+        && onlyChanges(['responses'])
+        && request.resource.data.responses >= resource.data.responses
+        && request.resource.data.responses <= resource.data.responses + 1;
 
       allow delete: if isAdmin()
-        || (isActive() && resource.data.owner.lower() == myEmail());
+        || (isActive()
+            && resource.data.owner == myEmail()
+            && resource.data.status in ['draft', 'rejected']);
     }
-
     // ------------------------------------------------------------ responses
     function surveyPath(sid) {
       return /databases/$(database)/documents/surveys/$(string(sid));
@@ -108,7 +131,7 @@ service cloud.firestore {
       allow create: if isActive()
         && request.resource.data.surveyId != null
         && exists(surveyPath(request.resource.data.surveyId))
-        && get(surveyPath(request.resource.data.surveyId)).data.status == 'published'
+        && get(surveyPath(request.resource.data.surveyId)).data.status in ['published', 'scheduled']
         && (
           (request.resource.data.get('isAnonymous', false) == true
             && request.resource.data.userEmail == 'anonymous@school.edu.ph')

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Survey, SurveyStatus, UserProfile, SurveyResponse } from "../types";
+import { getSurveyAvailability } from "../lib/surveyReview";
 import {
   PlusCircle,
   Pencil,
@@ -14,6 +15,7 @@ import {
   Clock,
   Copy,
   AlertCircle,
+  AlertTriangle,
   ExternalLink,
   Filter,
   ShieldCheck,
@@ -44,8 +46,10 @@ interface MySurveysScreenProps {
   onTakeSurvey?: (survey: Survey) => void;
   onFlagSurvey?: (surveyId: string | number, reason: string) => void;
   onClearFlag?: (surveyId: string | number) => void;
-  onUpdateSurveyStatus?: (surveyId: string | number, newStatus: SurveyStatus) => void;
   onDuplicateSurvey?: (survey: Survey) => void;
+  onApproveSurvey?: (surveyId: string | number) => void;
+  onRejectSurvey?: (surveyId: string | number, reason: string) => void;
+  onTakedownSurvey?: (surveyId: string | number, reason: string) => void;
 }
 
 export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
@@ -59,10 +63,15 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
   onTakeSurvey,
   onFlagSurvey,
   onClearFlag,
-  onUpdateSurveyStatus,
   onDuplicateSurvey,
+  onApproveSurvey,
+  onRejectSurvey,
+  onTakedownSurvey,
 }) => {
   const isAdmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
+  const [takedownSurveyId, setTakedownSurveyId] = useState<string | number | null>(null);
+  const [takedownReason, setTakedownReason] = useState<string>("");
+  const [isTakedownBusy, setIsTakedownBusy] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "published" | "draft" | "pending" | "rejected" | "scheduled" | "archived" | "flagged">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -534,6 +543,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
             const isLive = survey.status === "published" || !survey.status;
             const isEditable = survey.status === "draft" || survey.status === "rejected";
             const isFlagged = Boolean(survey.flagged);
+            const availability = getSurveyAvailability(survey);
 
             return (
               <div
@@ -558,7 +568,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       {isDraft && (
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
                           <Clock className="w-3 h-3" />
@@ -592,6 +602,18 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                       {isArchived && (
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
                           Archived
+                        </span>
+                      )}
+                      {(survey.status === "published" || survey.status === "scheduled") && availability === "upcoming" && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          <span>Opens {survey.openDate ? new Date(survey.openDate).toLocaleDateString() : ""}</span>
+                        </span>
+                      )}
+                      {(survey.status === "published" || survey.status === "scheduled") && availability === "closed" && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-300 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>Ended</span>
                         </span>
                       )}
                     </div>
@@ -682,27 +704,91 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                     </div>
                   </div>
 
-                  {/* Admin Inline Status Switcher (When in Admin mode) */}
-                  {isAdmin && onUpdateSurveyStatus && (
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                      <span className="text-[11px] font-semibold text-slate-500">Lifecycle Status:</span>
-                      <select
-                        value={survey.status || "published"}
-                        onChange={(e) =>
-                          onUpdateSurveyStatus(
-                            survey.id,
-                            e.target.value as SurveyStatus
-                          )
-                        }
-                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 text-[11px] font-bold text-slate-700 cursor-pointer focus:outline-hidden focus:border-indigo-400"
-                      >
-                        <option value="published">🟢 Live / Published</option>
-                        <option value="draft">🟡 Draft</option>
-                        <option value="pending">🟠 Pending Approval</option>
-                        <option value="rejected">🔴 Rejected</option>
-                        <option value="scheduled">🔵 Scheduled</option>
-                        <option value="archived">⚪ Archived</option>
-                      </select>
+                  {/* Admin Take Down Control */}
+                  {isAdmin && onTakedownSurvey && (survey.status === "published" || survey.status === "scheduled") && (
+                    <div className="pt-2 border-t border-slate-100">
+                      {takedownSurveyId === survey.id ? (
+                        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-rose-900 flex items-center gap-1 text-[11px]">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                              Take Down Survey
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTakedownSurveyId(null);
+                                setTakedownReason("");
+                              }}
+                              className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-600">
+                            Enter takedown reason (minimum 10 characters):
+                          </p>
+                          <textarea
+                            value={takedownReason}
+                            onChange={(e) => setTakedownReason(e.target.value)}
+                            placeholder="State reason for taking down this instrument..."
+                            rows={2}
+                            className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+                          />
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                            <span>Minimum 10 characters</span>
+                            <span className={takedownReason.trim().length >= 10 ? "text-emerald-600 font-bold" : "text-slate-400"}>
+                              {takedownReason.trim().length}/10 chars
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              disabled={isTakedownBusy || takedownReason.trim().length < 10}
+                              onClick={async () => {
+                                if (takedownReason.trim().length < 10) return;
+                                setIsTakedownBusy(true);
+                                try {
+                                  await onTakedownSurvey(survey.id, takedownReason.trim());
+                                  setTakedownSurveyId(null);
+                                  setTakedownReason("");
+                                } finally {
+                                  setIsTakedownBusy(false);
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                            >
+                              {isTakedownBusy ? "Taking down..." : "Confirm Take Down"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isTakedownBusy}
+                              onClick={() => {
+                                setTakedownSurveyId(null);
+                                setTakedownReason("");
+                              }}
+                              className="px-2.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-slate-500">Administrative Action:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTakedownSurveyId(survey.id);
+                              setTakedownReason("");
+                            }}
+                            className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1"
+                          >
+                            <ShieldAlert className="w-3 h-3 text-rose-600" />
+                            <span>Take down</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

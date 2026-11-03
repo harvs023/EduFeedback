@@ -184,6 +184,10 @@ export interface NotificationItem {
     | "account_approved"
     | "account_pending"
     | "survey"
+    | "survey_pending"
+    | "survey_approved"
+    | "survey_rejected"
+    | "survey_takedown"
     | "approval";
   data?: Record<string, any>;
 }

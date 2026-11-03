@@ -12,6 +12,7 @@ import {
 import { UserManagementView } from "./UserManagementView";
 import { DatabaseBackupView } from "./DatabaseBackupView";
 import { TopicsManager } from "./TopicsManager";
+import { SurveyApprovalsPanel } from "./SurveyApprovalsPanel";
 import {
   ShieldAlert,
   Users,
@@ -72,7 +73,10 @@ interface SuperadminDashboardProps {
   onNavigateToML?: () => void;
   onSaveTopic?: (topic: Topic) => Promise<void> | void;
   onDeleteTopic?: (topicId: string) => Promise<void> | void;
-  initialTab?: "surveys" | "flagged" | "users" | "logs" | "backup" | "topics";
+  onApproveSurvey?: (surveyId: string | number) => void;
+  onRejectSurvey?: (surveyId: string | number, reason: string) => void;
+  onTakedownSurvey?: (surveyId: string | number, reason: string) => void;
+  initialTab?: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics";
   showToast?: (text: string, type?: "success" | "info") => void;
 }
 
@@ -149,19 +153,22 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onNavigateToML,
   onSaveTopic,
   onDeleteTopic,
-  initialTab = "surveys",
+  onApproveSurvey,
+  onRejectSurvey,
+  onTakedownSurvey,
+  initialTab = "approvals",
   showToast,
 }) => {
-  // Tabs: surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics">(
-    initialTab || "surveys"
+  // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
+  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics">(
+    initialTab || "approvals"
   );
 
   // Horizontal scroll container ref & handlers for governance tabs
   const tabsContainerRef = useRef<HTMLDivElement>(null);
 
   const handleTabClick = (
-    tabId: "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics",
+    tabId: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics",
     e?: React.MouseEvent<HTMLButtonElement>
   ) => {
     setActiveTab(tabId);
@@ -227,6 +234,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   // Backup State
   const [backupGenerated, setBackupGenerated] = useState<string | null>(null);
 
+  const pendingSurveys = useMemo(() => surveys.filter((s) => s.status === "pending"), [surveys]);
   const flaggedSurveys = useMemo(() => surveys.filter((s) => s.flagged), [surveys]);
 
   // Extract all unique creation years present in data
@@ -525,6 +533,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
               className="flex-1 flex items-center gap-2 overflow-x-auto scroll-smooth py-1 px-0.5"
             >
               {[
+                { id: "approvals", label: "Survey Approvals", count: pendingSurveys.length, icon: CheckCircle2 },
                 { id: "surveys", label: "Creation Timeframe Directory", count: surveys.length, icon: CalendarDays },
                 { id: "flagged", label: "Flagged Surveys Queue", count: flaggedSurveys.length, icon: Flag },
                 { id: "users", label: "User & Role Directory", count: users.length, icon: Users },
@@ -573,6 +582,18 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* TAB 0: SURVEY APPROVALS */}
+      {activeTab === "approvals" && (
+        <SurveyApprovalsPanel
+          surveys={surveys}
+          users={users}
+          onApproveSurvey={onApproveSurvey}
+          onRejectSurvey={onRejectSurvey}
+          onUpdateUser={onUpdateUser}
+          showToast={showToast}
+        />
+      )}
 
       {/* TAB 1: CREATION TIMEFRAME DIRECTORY (YEAR, MONTH, DATE) */}
       {activeTab === "surveys" && (

@@ -50,7 +50,9 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
     return {};
   });
 
-  const [isAnonymous, setIsAnonymous] = useState<boolean>(true);
+  // Surveys that require names never offer the anonymous option.
+  const requiresName = survey.allowAnonymous === false;
+  const [isAnonymous, setIsAnonymous] = useState<boolean>(!requiresName);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
   const [submittedReceipt, setSubmittedReceipt] = useState<{
     receiptId: string;
@@ -277,16 +279,27 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
           </button>
         </div>
 
-        {/* Anonymity Selection Pill Bar */}
-        {!isReadOnly && (
+        {/* How do you want to answer? */}
+        {!isReadOnly && requiresName && (
+          <div className="p-3.5 bg-indigo-50/70 rounded-2xl border border-indigo-200 flex items-start gap-2.5">
+            <UserCheck className="w-4 h-4 mt-0.5 shrink-0 text-indigo-700" />
+            <div>
+              <div className="text-xs font-bold text-indigo-950">This survey needs your name</div>
+              <div className="text-[11px] text-indigo-900/80 leading-snug mt-0.5">
+                Your name and email ({currentUser?.name || "your account"}) are saved with your answers, so the survey
+                owner and the administrator can see who responded.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReadOnly && !requiresName && (
           <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                Submission Privacy Mode
+                How do you want to answer?
               </span>
-              <span className="text-[10px] text-slate-400 font-medium">
-                {survey.questions.length} Evaluated Questions
-              </span>
+              <span className="text-[10px] text-slate-400 font-medium">{survey.questions.length} questions</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
@@ -300,9 +313,10 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
               >
                 <Lock className={`w-4 h-4 mt-0.5 shrink-0 ${isAnonymous ? "text-blue-700" : "text-slate-400"}`} />
                 <div>
-                  <div className="text-xs font-bold">100% Anonymous (Default)</div>
+                  <div className="text-xs font-bold">Answer anonymously</div>
                   <div className="text-[11px] text-slate-500 leading-tight mt-0.5">
-                    Your name, student ID & email are kept private. Ideal for unbiased evaluation.
+                    Your name and email are not saved with your answers. Your department, program and year level may
+                    still be included for statistics.
                   </div>
                 </div>
               </button>
@@ -318,9 +332,10 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
               >
                 <UserCheck className={`w-4 h-4 mt-0.5 shrink-0 ${!isAnonymous ? "text-indigo-700" : "text-slate-400"}`} />
                 <div>
-                  <div className="text-xs font-bold">Verified Identity Submission</div>
+                  <div className="text-xs font-bold">Answer with my name</div>
                   <div className="text-[11px] text-slate-500 leading-tight mt-0.5">
-                    Attaches verified student profile for clearance & direct department resolution.
+                    Your name and email are saved with your answers, so the survey owner and the administrator can see who
+                    responded.
                   </div>
                 </div>
               </button>

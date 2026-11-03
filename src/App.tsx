@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Survey, SurveyStatus, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem, Topic } from "./types";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
 import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
+import { countEligibleUsers, getSurveyAvailability } from "./lib/surveyReview";
 import { MASTER_ADMIN_EMAIL, DEFAULT_SURVEY_CATEGORIES } from "./data/initialData";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
@@ -183,6 +184,57 @@ export default function App() {
       unsubscribe();
     };
   }, [loadDataForUser]);
+
+  // One-time auto-archive effect after surveys load for closed surveys
+  const archivedClosedSurveysRef = useRef<Set<string | number>>(new Set());
+
+  useEffect(() => {
+    if (!currentUser || surveys.length === 0) return;
+
+    const isSuperadmin =
+      currentUser.role === "superadmin" ||
+      currentUser.pos === "Superadmin" ||
+      currentUser.email?.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
+    const userEmail = (currentUser.email || "").trim().toLowerCase();
+
+    const closedToArchive = surveys.filter((s) => {
+      if (archivedClosedSurveysRef.current.has(s.id)) return false;
+      if (s.status !== "published" && s.status !== "scheduled") return false;
+      if (getSurveyAvailability(s) !== "closed") return false;
+      const isOwner = (s.owner || "").trim().toLowerCase() === userEmail;
+      return isSuperadmin || isOwner;
+    });
+
+    if (closedToArchive.length === 0) return;
+
+    // Immediately record in ref to guard against loops
+    closedToArchive.forEach((s) => archivedClosedSurveysRef.current.add(s.id));
+
+    const now = Date.now();
+    const updatedSurveys = closedToArchive.map((s) => ({
+      ...s,
+      status: "archived" as SurveyStatus,
+      archivedAt: now,
+      archivedBy: "system (closing date)",
+      archiveReason: "Closing date reached",
+    }));
+
+    (async () => {
+      for (const updated of updatedSurveys) {
+        try {
+          await DatabaseService.saveSurvey(updated);
+        } catch (err) {
+          console.warn("Failed to auto-archive closed survey:", err);
+        }
+      }
+      setSurveys((prev) =>
+        prev.map((s) => {
+          const match = updatedSurveys.find((u) => u.id === s.id);
+          return match ? match : s;
+        })
+      );
+    })();
+  }, [surveys, currentUser]);
 
   const handleLogin = async (user: UserProfile) => {
     setCurrentUser(user);
@@ -442,7 +494,7 @@ export default function App() {
           title: "📝 Survey awaiting approval",
           message: `"${survey.title}" by ${survey.ownerName} is waiting for your review.`,
           icon: "📝",
-          type: "survey",
+          type: "survey_pending",
           data: { surveyId: survey.id },
         });
       } catch {}
@@ -715,25 +767,229 @@ export default function App() {
     }
   };
 
-  const handleUpdateSurveyStatus = async (
-    surveyId: string | number,
-    newStatus: SurveyStatus
-  ) => {
+  const handleApproveSurvey = async (surveyId: string | number) => {
+    const isSuperadmin =
+      currentUser?.role === "superadmin" ||
+      currentUser?.pos === "Superadmin" ||
+      currentUser?.email?.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
+
+    if (!isSuperadmin) {
+      showToast("Unauthorized: Superadmin access required.", "info");
+      return;
+    }
+
     const srv = surveys.find((s) => s.id === surveyId);
-    if (!srv) return;
-    const updated = { ...srv, status: newStatus };
+    if (!srv) {
+      showToast("Survey not found.", "info");
+      return;
+    }
+    if (srv.status !== "pending") {
+      showToast("Only pending surveys can be approved.", "info");
+      return;
+    }
+
+    const now = Date.now();
+    let isScheduled = false;
+    if (srv.openDate) {
+      const openTime = Date.parse(srv.openDate);
+      if (!isNaN(openTime) && openTime > now) {
+        isScheduled = true;
+      }
+    }
+
+    const newStatus: SurveyStatus = isScheduled ? "scheduled" : "published";
+    const adminEmail = (currentUser?.email || MASTER_ADMIN_EMAIL).trim().toLowerCase();
+    const eligibleCount = countEligibleUsers(srv, users);
+
+    const updated: Survey = {
+      ...srv,
+      status: newStatus,
+      reviewedBy: adminEmail,
+      reviewedAt: now,
+      rejectionReason: "",
+      eligibleCount,
+    };
+
     try {
       await DatabaseService.saveSurvey(updated);
       setSurveys((prev) => prev.map((s) => (s.id === surveyId ? updated : s)));
+
+      if (srv.owner) {
+        try {
+          const formattedOpen = srv.openDate ? new Date(srv.openDate).toLocaleDateString() : "";
+          const msg = isScheduled
+            ? `Your survey "${srv.title}" has been approved and is scheduled to open on ${formattedOpen}.`
+            : `Your survey "${srv.title}" has been approved and published to the campus community.`;
+
+          await DatabaseService.addNotification({
+            to: srv.owner.toLowerCase(),
+            title: isScheduled ? "📅 Survey Approved & Scheduled" : "✅ Survey Approved",
+            message: msg,
+            icon: isScheduled ? "📅" : "✅",
+            type: "survey_approved",
+            data: { surveyId },
+          });
+        } catch {}
+
+        if (currentUser?.email) {
+          const refreshed = await DatabaseService.getNotifications(currentUser.email);
+          setNotifications(refreshed);
+        }
+      }
+
       await logActivityAndRefresh({
-        user: currentUser?.name || "Admin",
-        pos: currentUser?.pos || "Admin",
-        action: "Survey Status Changed",
-        details: `Updated survey status to "${newStatus}" for ID: ${surveyId}`,
+        user: currentUser?.name || "System Administrator",
+        pos: currentUser?.pos || "Superadmin",
+        action: "Survey Approved",
+        details: `Approved survey "${srv.title}" (Status: ${newStatus}, Eligible: ${eligibleCount})`,
       });
-      showToast(`Survey status updated to ${newStatus}.`, "success");
+
+      showToast(`Survey "${srv.title}" approved (${newStatus})!`, "success");
     } catch (err: any) {
-      showToast(err.message || "Failed to update survey status.", "info");
+      showToast(err.message || "Failed to approve survey.", "info");
+    }
+  };
+
+  const handleRejectSurvey = async (surveyId: string | number, reason: string) => {
+    const isSuperadmin =
+      currentUser?.role === "superadmin" ||
+      currentUser?.pos === "Superadmin" ||
+      currentUser?.email?.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
+
+    if (!isSuperadmin) {
+      showToast("Unauthorized: Superadmin access required.", "info");
+      return;
+    }
+
+    if (!reason || reason.trim().length < 10) {
+      showToast("Rejection reason must be at least 10 characters.", "info");
+      return;
+    }
+
+    const srv = surveys.find((s) => s.id === surveyId);
+    if (!srv) {
+      showToast("Survey not found.", "info");
+      return;
+    }
+
+    const now = Date.now();
+    const adminEmail = (currentUser?.email || MASTER_ADMIN_EMAIL).trim().toLowerCase();
+    const cleanReason = reason.trim();
+
+    const updated: Survey = {
+      ...srv,
+      status: "rejected",
+      rejectionReason: cleanReason,
+      reviewedBy: adminEmail,
+      reviewedAt: now,
+    };
+
+    try {
+      await DatabaseService.saveSurvey(updated);
+      setSurveys((prev) => prev.map((s) => (s.id === surveyId ? updated : s)));
+
+      if (srv.owner) {
+        try {
+          await DatabaseService.addNotification({
+            to: srv.owner.toLowerCase(),
+            title: "❌ Survey Rejected",
+            message: `Your survey "${srv.title}" was not approved: ${cleanReason}`,
+            icon: "❌",
+            type: "survey_rejected",
+            data: { surveyId, reason: cleanReason },
+          });
+        } catch {}
+
+        if (currentUser?.email) {
+          const refreshed = await DatabaseService.getNotifications(currentUser.email);
+          setNotifications(refreshed);
+        }
+      }
+
+      await logActivityAndRefresh({
+        user: currentUser?.name || "System Administrator",
+        pos: currentUser?.pos || "Superadmin",
+        action: "Survey Rejected",
+        details: `Rejected survey "${srv.title}". Reason: ${cleanReason}`,
+      });
+
+      showToast(`Survey "${srv.title}" rejected.`, "info");
+    } catch (err: any) {
+      showToast(err.message || "Failed to reject survey.", "info");
+    }
+  };
+
+  const handleTakedownSurvey = async (surveyId: string | number, reason: string) => {
+    const isSuperadmin =
+      currentUser?.role === "superadmin" ||
+      currentUser?.pos === "Superadmin" ||
+      currentUser?.email?.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
+
+    if (!isSuperadmin) {
+      showToast("Unauthorized: Superadmin access required.", "info");
+      return;
+    }
+
+    if (!reason || reason.trim().length < 10) {
+      showToast("Takedown reason must be at least 10 characters.", "info");
+      return;
+    }
+
+    const srv = surveys.find((s) => s.id === surveyId);
+    if (!srv) {
+      showToast("Survey not found.", "info");
+      return;
+    }
+
+    if (srv.status !== "published" && srv.status !== "scheduled") {
+      showToast("Only published or scheduled surveys can be taken down.", "info");
+      return;
+    }
+
+    const now = Date.now();
+    const adminEmail = (currentUser?.email || MASTER_ADMIN_EMAIL).trim().toLowerCase();
+    const cleanReason = reason.trim();
+
+    const updated: Survey = {
+      ...srv,
+      status: "archived",
+      archivedAt: now,
+      archivedBy: adminEmail,
+      archiveReason: cleanReason,
+    };
+
+    try {
+      await DatabaseService.saveSurvey(updated);
+      setSurveys((prev) => prev.map((s) => (s.id === surveyId ? updated : s)));
+
+      if (srv.owner) {
+        try {
+          await DatabaseService.addNotification({
+            to: srv.owner.toLowerCase(),
+            title: "⛔ Survey Taken Down",
+            message: `Your survey "${srv.title}" has been taken down and archived: ${cleanReason}`,
+            icon: "⛔",
+            type: "survey_takedown",
+            data: { surveyId, reason: cleanReason },
+          });
+        } catch {}
+
+        if (currentUser?.email) {
+          const refreshed = await DatabaseService.getNotifications(currentUser.email);
+          setNotifications(refreshed);
+        }
+      }
+
+      await logActivityAndRefresh({
+        user: currentUser?.name || "System Administrator",
+        pos: currentUser?.pos || "Superadmin",
+        action: "Survey Taken Down",
+        details: `Took down survey "${srv.title}". Reason: ${cleanReason}`,
+      });
+
+      showToast(`Survey "${srv.title}" taken down and archived.`, "info");
+    } catch (err: any) {
+      showToast(err.message || "Failed to take down survey.", "info");
     }
   };
 
@@ -1250,8 +1506,10 @@ export default function App() {
               onTakeSurvey={(survey) => setActiveSurveyForTaking(survey)}
               onFlagSurvey={handleFlagSurvey}
               onClearFlag={handleClearFlag}
-              onUpdateSurveyStatus={handleUpdateSurveyStatus}
               onDuplicateSurvey={handleDuplicateSurvey}
+              onApproveSurvey={handleApproveSurvey}
+              onRejectSurvey={handleRejectSurvey}
+              onTakedownSurvey={handleTakedownSurvey}
             />
           )}
 
@@ -1367,6 +1625,9 @@ export default function App() {
               onRestoreBackup={handleRestoreBackup}
               onSaveTopic={handleSaveTopic}
               onDeleteTopic={handleDeleteTopic}
+              onApproveSurvey={handleApproveSurvey}
+              onRejectSurvey={handleRejectSurvey}
+              onTakedownSurvey={handleTakedownSurvey}
               showToast={showToast}
               onNavigateToAnalytics={(surveyId) => {
                 setAnalyticsTargetSurveyId(surveyId || "all");

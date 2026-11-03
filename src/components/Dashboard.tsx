@@ -7,6 +7,7 @@ import {
   UserProfile,
 } from "../types";
 import { NewsAnnouncementsFeed } from "./NewsAnnouncementsFeed";
+import { getSurveyAvailability } from "../lib/surveyReview";
 import {
   ClipboardList,
   CheckCircle2,
@@ -67,13 +68,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
       .map((r) => String(r.surveyId))
   );
 
-  // 1. Open surveys for you: published, within dates, not yours, not already answered by you
+  // 1. Open surveys for you: availability is "open", not yours, not already answered by you
   const openSurveys = surveys.filter((s) => {
-    if (s.status !== "published") return false;
+    if (getSurveyAvailability(s) !== "open") return false;
     const ownerEmail = (s.owner || "").trim().toLowerCase();
     if (ownerEmail && userEmail && ownerEmail === userEmail) return false;
-    if (s.openDate && new Date(s.openDate).getTime() > now) return false;
-    if (s.closeDate && new Date(s.closeDate).getTime() < now) return false;
     if (answeredSurveyIdSet.has(String(s.id))) return false;
     return true;
   });
@@ -86,6 +85,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     (s) => (s.owner || "").trim().toLowerCase() === userEmail
   );
   const myDraftCount = mySurveys.filter((s) => s.status === "draft").length;
+  const myPendingCount = mySurveys.filter((s) => s.status === "pending").length;
   const myScheduledCount = mySurveys.filter(
     (s) => s.status === "scheduled"
   ).length;
@@ -241,6 +241,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
                   Draft: {myDraftCount}
+                </span>
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-orange-50 text-orange-700 border border-orange-200">
+                  Pending: {myPendingCount}
                 </span>
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
                   Scheduled: {myScheduledCount}

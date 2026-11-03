@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Survey, UserProfile, SurveyResponse, NewsAnnouncement } from "../types";
+import { getSurveyAvailability } from "../lib/surveyReview";
 import {
   Flame,
   Star,
@@ -275,7 +276,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
       const isCreator = currentUser && s.owner?.toLowerCase() === currentUser.email?.toLowerCase();
       if (isCreator) return true;
 
-      if (s.status !== "published" && s.status !== "scheduled") return false;
+      if (getSurveyAvailability(s) !== "open") return false;
       return isEligible(s);
     });
   }, [surveys, currentUser]);

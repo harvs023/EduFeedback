@@ -247,15 +247,13 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
         errors.push("Select at least one target role for the custom audience.");
       }
 
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
       if (scheduleType === "scheduled" && !openDate) errors.push("Set the opening date.");
       if (!closeDate) {
         errors.push("Set a closing date.");
       } else {
         const close = new Date(closeDate);
-        if (isNaN(close.getTime()) || close.getTime() < startOfToday.getTime()) {
-          errors.push("The closing date cannot be in the past.");
+        if (isNaN(close.getTime()) || close.getTime() <= Date.now()) {
+          errors.push("The closing date and time must be in the future.");
         }
         if (scheduleType === "scheduled" && openDate) {
           const open = new Date(openDate);
@@ -531,29 +529,60 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
           </div>
         </div>
 
-        {/* Anonymity & Semester Clearance Policy */}
-        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-          <div className="flex items-center justify-between">
+        {/* Who can see who answered */}
+        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+          <div>
             <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-              Respondent Identity & Clearance Signing Mode
+              Can respondents answer anonymously?
             </span>
-            <label className="inline-flex items-center gap-2 cursor-pointer">
+            <p className="text-[11px] text-slate-500 mt-0.5">Choose one. Respondents are told which applies before they submit.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <label
+              className={`p-3 rounded-xl border cursor-pointer flex items-start gap-2.5 transition-all ${
+                allowAnonymous
+                  ? "bg-blue-50/90 border-blue-400 ring-1 ring-blue-300"
+                  : "bg-white border-slate-200 hover:border-slate-300"
+              }`}
+            >
               <input
-                type="checkbox"
+                type="radio"
+                name="responseIdentity"
                 checked={allowAnonymous}
-                onChange={(e) => setAllowAnonymous(e.target.checked)}
-                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+                onChange={() => setAllowAnonymous(true)}
+                className="mt-0.5 w-4 h-4 accent-blue-600 cursor-pointer"
               />
-              <span className="text-xs font-semibold text-slate-700">
-                {allowAnonymous ? "Allow Anonymous Responses" : "Require Verified Identity (For Clearance Signing)"}
-              </span>
+              <div>
+                <div className="text-xs font-bold text-slate-800">Yes, respondents choose</div>
+                <div className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                  Each person decides to answer anonymously or with their name. Anonymous answers never show a name or
+                  email. Best for evaluating teachers and services.
+                </div>
+              </div>
+            </label>
+            <label
+              className={`p-3 rounded-xl border cursor-pointer flex items-start gap-2.5 transition-all ${
+                !allowAnonymous
+                  ? "bg-indigo-50/90 border-indigo-400 ring-1 ring-indigo-300"
+                  : "bg-white border-slate-200 hover:border-slate-300"
+              }`}
+            >
+              <input
+                type="radio"
+                name="responseIdentity"
+                checked={!allowAnonymous}
+                onChange={() => setAllowAnonymous(false)}
+                className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+              />
+              <div>
+                <div className="text-xs font-bold text-slate-800">No, names are required</div>
+                <div className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                  Every response is saved with the respondent's name and email, and you and the administrator can see who
+                  answered. Use this only when you really need to know, for example for clearance signing.
+                </div>
+              </div>
             </label>
           </div>
-          <p className="text-[11px] text-slate-500 leading-relaxed">
-            {allowAnonymous
-              ? "Respondents may choose whether to submit anonymously or include their student/faculty identity."
-              : "Institutional identity (Name, Student ID, Email) will be recorded and verified for end-of-semester clearance signing."}
-          </p>
         </div>
 
         {/* Admin-Only: Priority & Mandatory Institutional Survey Configuration */}
@@ -604,28 +633,37 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
           </div>
         )}
 
-        {scheduleType === "scheduled" && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-blue-50/50 rounded-2xl border border-blue-200/60">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-blue-50/50 rounded-2xl border border-blue-200/60">
+          {scheduleType === "scheduled" ? (
             <div>
-              <label className="block text-xs font-bold text-blue-900 mb-1">Open Date (Starts at)</label>
+              <label className="block text-xs font-bold text-blue-900 mb-1">Opening date and time (required)</label>
               <input
                 type="datetime-local"
                 value={openDate}
                 onChange={(e) => setOpenDate(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
               />
+              <p className="text-[11px] text-blue-900/70 mt-1">The survey becomes available at this time, once approved.</p>
             </div>
+          ) : (
             <div>
-              <label className="block text-xs font-bold text-blue-900 mb-1">Close Date (Ends at)</label>
-              <input
-                type="datetime-local"
-                value={closeDate}
-                onChange={(e) => setCloseDate(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-              />
+              <label className="block text-xs font-bold text-blue-900 mb-1">Opens</label>
+              <div className="w-full px-3 py-2 bg-white/70 border border-slate-200 rounded-xl text-xs text-slate-600">
+                As soon as the administrator approves it
+              </div>
             </div>
+          )}
+          <div>
+            <label className="block text-xs font-bold text-blue-900 mb-1">Closing date and time (required)</label>
+            <input
+              type="datetime-local"
+              value={closeDate}
+              onChange={(e) => setCloseDate(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
+            />
+            <p className="text-[11px] text-blue-900/70 mt-1">After this time the survey stops accepting responses and is archived.</p>
           </div>
-        )}
+        </div>
 
         {/* SECTION 3: Questions Builder */}
         <div className="pt-4 border-t border-slate-100 space-y-4">

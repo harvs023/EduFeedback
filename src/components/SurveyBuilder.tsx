@@ -1,25 +1,38 @@
 import React, { useState, useEffect } from "react";
-import { Survey, Question, UserProfile, TargetAudience, Topic, SurveyTopicBlock } from "../types";
+import { Survey, Question, UserProfile, TargetAudience, Topic } from "../types";
 import { DEPARTMENTS_DATA } from "../data/initialData";
 import { SurveyCriteriaModal } from "./SurveyCriteriaModal";
+import { TopicBlocksEditor } from "./TopicBlocksEditor";
+import { prepareBlocks, validateBlocks, cleanBlocks, orderQuestionsByBlock } from "../lib/topicBlocks";
 import {
   PlusCircle,
   Pencil,
   ArrowLeft,
-  Trash2,
   Calendar,
   Layers,
   Sparkles,
   Users,
-  Star,
-  CheckSquare,
-  ListFilter,
-  AlignLeft,
   Flame,
   ArrowRight,
   Clock,
   Tag,
 } from "lucide-react";
+
+const DEFAULT_QUESTIONS: Question[] = [
+  {
+    id: "q1",
+    type: "rating",
+    text: "How would you rate the overall effectiveness and delivery of the course/subject?",
+    min: 1,
+    max: 5,
+    labels: ["Poor", "Fair", "Satisfactory", "Very Good", "Outstanding"],
+  },
+  {
+    id: "q2",
+    type: "paragraph",
+    text: "What specific suggestions or comments (in Tagalog or English) do you have for improvement?",
+  },
+];
 
 interface SurveyBuilderProps {
   currentUser: UserProfile | null;
@@ -47,7 +60,6 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   const [criteriaAcceptedAt, setCriteriaAcceptedAt] = useState<number | null>(initialSurvey?.criteriaAcceptedAt ?? null);
   const [submitErrors, setSubmitErrors] = useState<string[]>([]);
   const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || "2025-2026");
-  const [topicBlocks, setTopicBlocks] = useState<SurveyTopicBlock[]>(initialSurvey?.topicBlocks || []);
 
   // Scheduling
   const [scheduleType, setScheduleType] = useState<"immediate" | "scheduled">(
@@ -73,26 +85,16 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     initialSurvey?.allowAnonymous !== undefined ? initialSurvey.allowAnonymous : true
   );
 
-  // Questions builder list
-  const [questions, setQuestions] = useState<Question[]>(
-    initialSurvey?.questions && initialSurvey.questions.length > 0
-      ? initialSurvey.questions
-      : [
-          {
-            id: "q1",
-            type: "rating",
-            text: "How would you rate the overall effectiveness and delivery of the course/subject?",
-            min: 1,
-            max: 5,
-            labels: ["Poor", "Fair", "Satisfactory", "Very Good", "Outstanding"],
-          },
-          {
-            id: "q2",
-            type: "paragraph",
-            text: "What specific suggestions or comments (in Tagalog or English) do you have for improvement?",
-          },
-        ]
+  // Questions, grouped into topic blocks (each question has a blockId)
+  const [builder, setBuilder] = useState(() =>
+    prepareBlocks(
+      initialSurvey?.questions && initialSurvey.questions.length > 0 ? initialSurvey.questions : DEFAULT_QUESTIONS,
+      initialSurvey?.topicBlocks,
+      topics
+    )
   );
+  const questions = builder.questions;
+  const topicBlocks = builder.blocks;
 
   useEffect(() => {
     if (initialSurvey) {
@@ -108,123 +110,10 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       setTargetType(initialSurvey.targetAudience?.type || "all");
       setSelectedRoles(initialSurvey.targetAudience?.filters?.roles || ["students", "faculty", "officers"]);
       if (initialSurvey.questions && initialSurvey.questions.length > 0) {
-        setQuestions(initialSurvey.questions);
-      }
-      if (initialSurvey.topicBlocks) {
-        setTopicBlocks(initialSurvey.topicBlocks);
+        setBuilder(prepareBlocks(initialSurvey.questions, initialSurvey.topicBlocks, topics));
       }
     }
   }, [initialSurvey, categories]);
-
-  const generateUniqueQuestionId = () =>
-    `q_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-
-  const addRatingQuestion = () => {
-    setQuestions((prev) => [
-      ...prev,
-      {
-        id: generateUniqueQuestionId(),
-        type: "rating",
-        text: "",
-        min: 1,
-        max: 5,
-        labels: ["1 (Poor)", "2", "3 (Average)", "4", "5 (Excellent)"],
-      },
-    ]);
-  };
-
-  const addMultipleChoiceQuestion = () => {
-    setQuestions((prev) => [
-      ...prev,
-      {
-        id: generateUniqueQuestionId(),
-        type: "multiple",
-        text: "",
-        options: ["Option 1", "Option 2", "Option 3"],
-      },
-    ]);
-  };
-
-  const addCheckboxQuestion = () => {
-    setQuestions((prev) => [
-      ...prev,
-      {
-        id: generateUniqueQuestionId(),
-        type: "checkbox",
-        text: "",
-        options: ["Choice A", "Choice B", "Choice C"],
-      },
-    ]);
-  };
-
-  const addParagraphQuestion = () => {
-    setQuestions((prev) => [
-      ...prev,
-      {
-        id: generateUniqueQuestionId(),
-        type: "paragraph",
-        text: "",
-      },
-    ]);
-  };
-
-  const removeQuestion = (index: number) => {
-    setQuestions((prev) => prev.filter((_, idx) => idx !== index));
-  };
-
-  const updateQuestionText = (index: number, text: string) => {
-    setQuestions((prev) => {
-      const copy = [...prev];
-      copy[index] = { ...copy[index], text };
-      return copy;
-    });
-  };
-
-  const updateOptionText = (qIndex: number, optIndex: number, val: string) => {
-    setQuestions((prev) => {
-      const copy = [...prev];
-      const opts = [...(copy[qIndex].options || [])];
-      opts[optIndex] = val;
-      copy[qIndex] = { ...copy[qIndex], options: opts };
-      return copy;
-    });
-  };
-
-  const addOptionToQuestion = (qIndex: number) => {
-    setQuestions((prev) => {
-      const copy = [...prev];
-      const opts = [...(copy[qIndex].options || []), `New Option ${(copy[qIndex].options?.length || 0) + 1}`];
-      copy[qIndex] = { ...copy[qIndex], options: opts };
-      return copy;
-    });
-  };
-
-  const removeOptionFromQuestion = (qIndex: number, optIndex: number) => {
-    setQuestions((prev) => {
-      const copy = [...prev];
-      const opts = (copy[qIndex].options || []).filter((_, i) => i !== optIndex);
-      copy[qIndex] = { ...copy[qIndex], options: opts };
-      return copy;
-    });
-  };
-
-  const changeQuestionType = (qIndex: number, newType: Question["type"]) => {
-    setQuestions((prev) => {
-      const copy = [...prev];
-      const current = copy[qIndex];
-      const updated: Question = { ...current, type: newType };
-      if ((newType === "multiple" || newType === "checkbox") && (!updated.options || updated.options.length === 0)) {
-        updated.options = ["Option 1", "Option 2", "Option 3"];
-      }
-      if (newType === "rating") {
-        updated.min = 1;
-        updated.max = 5;
-        updated.labels = ["1 (Poor)", "2 (Fair)", "3 (Average)", "4 (Good)", "5 (Excellent)"];
-      }
-      copy[qIndex] = updated;
-      return copy;
-    });
-  };
 
   const MIN_QUESTIONS = 3;
 
@@ -273,6 +162,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
           errors.push(`Question ${i + 1}: provide at least 2 answer options.`);
         }
       });
+      errors.push(...validateBlocks(questions, topicBlocks, topics));
     }
 
     setSubmitErrors(errors);
@@ -283,6 +173,10 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       return;
     }
 
+    const savedQuestions = orderQuestionsByBlock(questions, topicBlocks)
+      .filter((q) => q.text.trim().length > 0)
+      .map((q) => ({ ...q, id: String(q.id) }));
+
     const surveyPayload: Partial<Survey> = {
       ...(initialSurvey ? { id: initialSurvey.id } : {}),
       title: title.trim(),
@@ -292,13 +186,8 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       criteriaAcceptedAt: criteriaAcceptedAt ?? undefined,
       isTrending: initialSurvey?.isTrending ?? false,
       academicYear,
-      questions: questions
-        .filter((q) => q.text.trim().length > 0)
-        .map((q) => ({
-          ...q,
-          id: q.id ? String(q.id) : generateUniqueQuestionId(),
-        })),
-      questionCount: questions.length,
+      questions: savedQuestions,
+      questionCount: savedQuestions.length,
       responses: initialSurvey?.responses ?? 0,
       created: initialSurvey?.created || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       openDate: scheduleType === "scheduled" ? openDate : (initialSurvey?.openDate || new Date().toISOString()),
@@ -314,7 +203,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       requiredAudience: isSuperadmin ? requiredAudience : (initialSurvey?.requiredAudience || "students"),
       allowAnonymous,
       tags: [cat, academicYear],
-      topicBlocks: topicBlocks.length > 0 ? topicBlocks : undefined,
+      topicBlocks: cleanBlocks(topicBlocks),
     };
 
     onSaveSurvey(surveyPayload, finalStatus);
@@ -643,192 +532,21 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
           </div>
         </div>
 
-        {/* SECTION 3: Questions Builder */}
+        {/* SECTION 3: Topic blocks and questions */}
         <div className="pt-4 border-t border-slate-100 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-serif text-base font-bold text-slate-900">
-                3. Survey Questions ({questions.length})
-              </h2>
-              <p className="text-xs text-slate-500">
-                Define question prompts and customize scales below. Add new questions using the toolbar at the bottom.
-              </p>
-            </div>
-            {questions.length > 0 && (
-              <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                {questions.length} {questions.length === 1 ? "Question" : "Questions"}
-              </span>
-            )}
+          <div>
+            <h2 className="font-serif text-base font-bold text-slate-900">3. Topic Blocks & Questions</h2>
+            <p className="text-xs text-slate-500">
+              Group your questions into topic blocks (for example "Teaching Quality" or "Facilities"). Each block has
+              its own questions. Respondents see the block titles as section headings.
+            </p>
           </div>
-
-          {/* Empty state when no questions yet */}
-          {questions.length === 0 && (
-            <div className="p-8 bg-slate-50 border border-dashed border-slate-300 rounded-2xl text-center space-y-2">
-              <p className="text-sm font-semibold text-slate-700">No questions added yet</p>
-              <p className="text-xs text-slate-500">Choose a question type from the toolbar below to start building your survey.</p>
-            </div>
-          )}
-
-          {/* Questions Stack */}
-          <div className="space-y-4">
-            {questions.map((q, qIdx) => (
-              <div key={qIdx} className="p-5 bg-slate-50/80 rounded-2xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-md bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                      {qIdx + 1}
-                    </span>
-                    {/* Inline Quick-Switch Pill Buttons for Question Types */}
-                    <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs">
-                      {[
-                        { type: "rating", label: "Rating", icon: "⭐" },
-                        { type: "multiple", label: "Multiple", icon: "🔘" },
-                        { type: "checkbox", label: "Checkbox", icon: "☑️" },
-                        { type: "paragraph", label: "Paragraph", icon: "📝" },
-                      ].map((t) => (
-                        <button
-                          key={t.type}
-                          type="button"
-                          onClick={() => changeQuestionType(qIdx, t.type as any)}
-                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                            q.type === t.type
-                              ? "bg-blue-600 text-white shadow-xs"
-                              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-                          }`}
-                          title={`Switch to ${t.label}`}
-                        >
-                          <span>{t.icon}</span>
-                          <span className="hidden sm:inline">{t.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => removeQuestion(qIdx)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
-                    title="Delete question"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <input
-                  type="text"
-                  value={q.text}
-                  onChange={(e) => updateQuestionText(qIdx, e.target.value)}
-                  placeholder="Enter the question text here..."
-                  className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500"
-                />
-
-                {/* Rating Scale configuration preview */}
-                {q.type === "rating" && (
-                  <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-600 space-y-1">
-                    <span className="font-bold text-slate-700">Rating Scale Config:</span>
-                    <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500">
-                      <span>Min: {q.min || 1}</span>
-                      <span>•</span>
-                      <span>Max: {q.max || 5}</span>
-                      <span>•</span>
-                      <span>Labels: {q.labels?.join(", ") || "1 (Poor) to 5 (Excellent)"}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Multiple choice and Checkbox Options */}
-                {(q.type === "multiple" || q.type === "checkbox") && (
-                  <div className="space-y-2 pt-1">
-                    {q.options?.map((opt, oIdx) => (
-                      <div key={oIdx} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={opt}
-                          onChange={(e) => updateOptionText(qIdx, oIdx, e.target.value)}
-                          className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeOptionFromQuestion(qIdx, oIdx)}
-                          className="p-1 text-slate-400 hover:text-rose-600"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => addOptionToQuestion(qIdx)}
-                      className="text-xs font-bold text-blue-600 hover:text-blue-700 cursor-pointer"
-                    >
-                      + Add Option
-                    </button>
-                  </div>
-                )}
-
-                {q.type === "paragraph" && (
-                  <p className="text-[11px] text-slate-400 italic">
-                    Respondents get an open text box. Their comments are analyzed for sentiment (Tagalog, English and Taglish).
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Add Question at the Bottom Toolbar */}
-          <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-50 via-blue-50/20 to-indigo-50/20 rounded-2xl border-2 border-dashed border-slate-300 hover:border-blue-400 transition-all space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
-                  +
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-slate-900">Add Next Question</h3>
-                  <p className="text-[11px] text-slate-500">Append a new question without scrolling back to the top</p>
-                </div>
-              </div>
-              <span className="text-[11px] font-semibold text-slate-400">
-                Item #{questions.length + 1}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
-              <button
-                type="button"
-                onClick={addRatingQuestion}
-                className="px-3 py-2.5 bg-white hover:bg-blue-50 hover:border-blue-300 text-blue-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
-              >
-                <Star className="w-4 h-4 text-amber-500 fill-amber-400 shrink-0" />
-                <span>+ Rating Scale</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={addMultipleChoiceQuestion}
-                className="px-3 py-2.5 bg-white hover:bg-indigo-50 hover:border-indigo-300 text-indigo-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
-              >
-                <ListFilter className="w-4 h-4 text-indigo-600 shrink-0" />
-                <span>+ Multi-Choice</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={addCheckboxQuestion}
-                className="px-3 py-2.5 bg-white hover:bg-emerald-50 hover:border-emerald-300 text-emerald-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
-              >
-                <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>+ Checkbox</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={addParagraphQuestion}
-                className="px-3 py-2.5 bg-white hover:bg-slate-100 hover:border-slate-300 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
-              >
-                <AlignLeft className="w-4 h-4 text-slate-600 shrink-0" />
-                <span>+ Paragraph</span>
-              </button>
-            </div>
-          </div>
+          <TopicBlocksEditor
+            questions={questions}
+            blocks={topicBlocks}
+            topics={topics}
+            onChange={(nextQuestions, nextBlocks) => setBuilder({ questions: nextQuestions, blocks: nextBlocks })}
+          />
         </div>
 
         {submitErrors.length > 0 && (

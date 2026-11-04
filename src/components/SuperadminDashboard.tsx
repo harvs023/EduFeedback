@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useConfirm } from "./ConfirmDialog";
 import {
   Survey,
   SurveyResponse,
@@ -159,6 +160,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   initialTab = "approvals",
   showToast,
 }) => {
+  const { confirm, confirmDialog } = useConfirm();
   // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
   const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics">(
     initialTab || "approvals"
@@ -442,6 +444,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
+      {confirmDialog}
       {/* Superadmin Oversight Header */}
       <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-800 space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -588,6 +591,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
         <SurveyApprovalsPanel
           surveys={surveys}
           users={users}
+          topics={topics}
           onApproveSurvey={onApproveSurvey}
           onRejectSurvey={onRejectSurvey}
           onUpdateUser={onUpdateUser}
@@ -1018,10 +1022,14 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                               )}
 
                               <button
-                                onClick={() => {
-                                  if (window.confirm(`Permanently remove survey "${s.title}" from institutional records?`)) {
-                                    onDeleteSurvey(s.id);
-                                  }
+                                onClick={async () => {
+                                  const ok = await confirm({
+                                    title: "Delete this survey?",
+                                    message: `"${s.title}" will be permanently deleted. This cannot be undone.`,
+                                    confirmLabel: "Delete",
+                                    danger: true,
+                                  });
+                                  if (ok) onDeleteSurvey(s.id);
                                 }}
                                 className="p-2 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-xl transition-colors cursor-pointer border border-slate-200"
                                 title="Delete Survey"
@@ -1160,10 +1168,14 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                                 </button>
                               )}
                               <button
-                                onClick={() => {
-                                  if (window.confirm(`Are you sure you want to permanently delete survey "${s.title}"?`)) {
-                                    onDeleteSurvey(s.id);
-                                  }
+                                onClick={async () => {
+                                  const ok = await confirm({
+                                    title: "Delete this survey?",
+                                    message: `"${s.title}" will be permanently deleted. This cannot be undone.`,
+                                    confirmLabel: "Delete",
+                                    danger: true,
+                                  });
+                                  if (ok) onDeleteSurvey(s.id);
                                 }}
                                 title="Delete Survey"
                                 className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"

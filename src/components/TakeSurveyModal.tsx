@@ -22,6 +22,8 @@ interface TakeSurveyModalProps {
   survey: Survey;
   currentUser: UserProfile | null;
   existingAnswers?: Answer[];
+  /** Creator preview: shows the survey as respondents see it, but nothing can be submitted. */
+  previewOnly?: boolean;
   onClose: () => void;
   onSubmit: (answers: Answer[], isAnonymous?: boolean) => Promise<void>;
 }
@@ -30,10 +32,15 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
   survey,
   currentUser,
   existingAnswers,
+  previewOnly = false,
   onClose,
   onSubmit,
 }) => {
   const isReadOnly = Boolean(existingAnswers && existingAnswers.length > 0);
+
+  // Topic blocks become section headings. Questions are saved in block order by the builder.
+  const blocks = survey.topicBlocks || [];
+  const blockIndexById = new Map<string, number>(blocks.map((b, i) => [b.id, i]));
 
   // Form State: question index -> answer string / selected rating / array
   const [answersState, setAnswersState] = useState<Record<number, any>>(() => {
@@ -123,7 +130,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isReadOnly) return;
+    if (isReadOnly || previewOnly) return;
     if (validateForm()) {
       setShowConfirmModal(true);
     }
@@ -280,7 +287,20 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
         </div>
 
         {/* How do you want to answer? */}
-        {!isReadOnly && requiresName && (
+        {previewOnly && (
+          <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-700" />
+            <div>
+              <div className="text-xs font-bold text-amber-950">Preview only</div>
+              <div className="text-[11px] text-amber-900/80 leading-snug mt-0.5">
+                This is how respondents will see your survey. You can click the answers to try it, but nothing is saved
+                or submitted.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReadOnly && !previewOnly && requiresName && (
           <div className="p-3.5 bg-indigo-50/70 rounded-2xl border border-indigo-200 flex items-start gap-2.5">
             <UserCheck className="w-4 h-4 mt-0.5 shrink-0 text-indigo-700" />
             <div>
@@ -293,7 +313,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
           </div>
         )}
 
-        {!isReadOnly && !requiresName && (
+        {!isReadOnly && !previewOnly && !requiresName && (
           <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
@@ -354,11 +374,25 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
         <form onSubmit={handleFormSubmit} className="space-y-6">
           {survey.questions.map((q, idx) => {
             const currentAnswer = answersState[idx];
+            const blockIndex = q.blockId !== undefined ? blockIndexById.get(q.blockId) : undefined;
+            const block = blockIndex !== undefined ? blocks[blockIndex] : undefined;
+            const startsNewBlock = Boolean(block) && (idx === 0 || survey.questions[idx - 1].blockId !== q.blockId);
             return (
-              <div
-                key={idx}
-                className="p-5 rounded-2xl bg-slate-50/80 border border-slate-200 space-y-3 transition-all"
-              >
+              <React.Fragment key={idx}>
+              {block && startsNewBlock && (
+                <div className={`${idx === 0 ? "" : "pt-4"} space-y-1`}>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-extrabold uppercase tracking-wider">
+                      Section {(blockIndex ?? 0) + 1} of {blocks.length}
+                    </span>
+                  </div>
+                  <h2 className="font-serif text-base sm:text-lg font-bold text-slate-900 border-b border-indigo-100 pb-1.5">
+                    {block.title || "Untitled section"}
+                  </h2>
+                  {block.description && <p className="text-xs text-slate-500 leading-relaxed">{block.description}</p>}
+                </div>
+              )}
+              <div className="p-5 rounded-2xl bg-slate-50/80 border border-slate-200 space-y-3 transition-all">
                 <div className="flex items-start gap-2.5">
                   <span className="w-6 h-6 rounded-lg bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
                     {idx + 1}
@@ -488,6 +522,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                   </div>
                 )}
               </div>
+              </React.Fragment>
             );
           })}
 
@@ -498,10 +533,10 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
               onClick={onClose}
               className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
             >
-              {isReadOnly ? "Close View" : "Cancel"}
+              {previewOnly ? "Close Preview" : isReadOnly ? "Close View" : "Cancel"}
             </button>
 
-            {!isReadOnly && (
+            {!isReadOnly && !previewOnly && (
               <button
                 type="submit"
                 disabled={submitting}

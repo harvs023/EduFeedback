@@ -51,6 +51,7 @@ export default function App() {
 
   // Modals State
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
+  const [previewSurvey, setPreviewSurvey] = useState<Survey | null>(null);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
@@ -137,6 +138,8 @@ export default function App() {
     if (!isFirebaseConfigured()) return;
 
     const unsubscribe = FirebaseAuthService.onAuthChanged(async (fbUser) => {
+      // During sign-up the profile is not saved yet; the sign-up screen finishes the login itself.
+      if (DatabaseService.isRegistering) return;
       if (fbUser && fbUser.email) {
         const cleanEmail = fbUser.email.trim().toLowerCase();
         try {
@@ -222,7 +225,7 @@ export default function App() {
     (async () => {
       for (const updated of updatedSurveys) {
         try {
-          await DatabaseService.saveSurvey(updated);
+          await DatabaseService.archiveSurvey(updated.id, updated.archivedBy, updated.archiveReason, updated.archivedAt);
         } catch (err) {
           console.warn("Failed to auto-archive closed survey:", err);
         }
@@ -992,6 +995,37 @@ export default function App() {
     }
   };
 
+  // Owner closes their own live survey early. Only the archive fields change, as the rules require.
+  const handleArchiveSurvey = async (surveyId: string | number, reason: string) => {
+    const srv = surveys.find((s) => s.id === surveyId);
+    if (!srv) return;
+    if (srv.status !== "published" && srv.status !== "scheduled") {
+      showToast("Only live or scheduled surveys can be archived.", "info");
+      return;
+    }
+    const now = Date.now();
+    const by = (currentUser?.email || "").trim().toLowerCase();
+    const cleanReason = reason.trim() || "Closed early by the owner";
+    try {
+      await DatabaseService.archiveSurvey(surveyId, by, cleanReason, now);
+      setSurveys((prev) =>
+        prev.map((s) =>
+          s.id === surveyId ? { ...s, status: "archived", archivedAt: now, archivedBy: by, archiveReason: cleanReason } : s
+        )
+      );
+      await logActivityAndRefresh({
+        user: currentUser?.name || "User",
+        pos: currentUser?.pos || "Faculty",
+        action: "Survey Archived",
+        details: `Archived survey "${srv.title}". Reason: ${cleanReason}`,
+      });
+      showToast(`"${srv.title}" is archived. It no longer accepts responses.`, "success");
+    } catch (err: any) {
+      console.warn("Failed to archive survey:", err);
+      showToast("Could not archive the survey. Please try again.", "info");
+    }
+  };
+
   const handleDuplicateSurvey = async (survey: Survey) => {
     const newId = `srv_${Date.now()}`;
     const duplicated: Survey = {
@@ -1501,7 +1535,8 @@ export default function App() {
                 setAnalyticsTargetSurveyId(surveyId);
                 setCurrentView("analytics");
               }}
-              onTakeSurvey={(survey) => setActiveSurveyForTaking(survey)}
+              onPreviewSurvey={(survey) => setPreviewSurvey(survey)}
+              onArchiveSurvey={handleArchiveSurvey}
               onFlagSurvey={handleFlagSurvey}
               onClearFlag={handleClearFlag}
               onDuplicateSurvey={handleDuplicateSurvey}
@@ -1642,7 +1677,13 @@ export default function App() {
         <TakeSurveyModal
           survey={activeSurveyForTaking}
           currentUser={currentUser}
-          existingAnswers={responses.find((r) => String(r.surveyId) === String(activeSurveyForTaking.id) && r.userEmail === currentUser?.email)?.answers}
+          existingAnswers={
+            responses.find(
+              (r) =>
+                String(r.surveyId) === String(activeSurveyForTaking.id) &&
+                (r.userEmail || "").trim().toLowerCase() === (currentUser?.email || "").trim().toLowerCase()
+            )?.answers
+          }
           onClose={() => setActiveSurveyForTaking(null)}
           onSubmit={handleSubmitSurveyResponse}
         />
@@ -1653,6 +1694,16 @@ export default function App() {
           currentUser={currentUser}
           onClose={() => setShowProfileModal(false)}
           onUpdateProfile={handleUpdateProfile}
+        />
+      )}
+
+      {previewSurvey && (
+        <TakeSurveyModal
+          survey={previewSurvey}
+          currentUser={currentUser}
+          previewOnly
+          onClose={() => setPreviewSurvey(null)}
+          onSubmit={async () => {}}
         />
       )}
 

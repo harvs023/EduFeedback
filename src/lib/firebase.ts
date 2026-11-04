@@ -32,6 +32,7 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
+  deleteUser,
   User as FirebaseUser,
 } from "firebase/auth";
 import {
@@ -219,6 +220,13 @@ export const FirebaseAuthService = {
     await signOut(authInstance);
   },
 
+  /** Removes the login that was just created (used when saving the profile fails). */
+  async deleteCurrentUser(): Promise<void> {
+    const authInstance = getFirebaseAuth();
+    if (!authInstance?.currentUser) return;
+    await deleteUser(authInstance.currentUser);
+  },
+
   onAuthChanged(callback: (user: FirebaseUser | null) => void) {
     const authInstance = getFirebaseAuth();
     if (!authInstance) {
@@ -325,6 +333,23 @@ export const FirestoreSurveyService = {
       await deleteDoc(doc(firestore, COLLECTIONS.SURVEYS, docId));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `${COLLECTIONS.SURVEYS}/${docId}`);
+    }
+  },
+
+  /** Archives a survey by changing only the archive fields (the rules allow owners exactly this). */
+  async archive(surveyId: string | number, archivedBy: string, archiveReason: string, archivedAt: number): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    const docId = String(surveyId);
+    try {
+      await updateDoc(doc(firestore, COLLECTIONS.SURVEYS, docId), {
+        status: "archived",
+        archivedAt,
+        archivedBy,
+        archiveReason,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.SURVEYS}/${docId}`);
     }
   },
 

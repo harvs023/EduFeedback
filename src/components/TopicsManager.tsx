@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { useConfirm } from "./ConfirmDialog";
 import { Tag, Plus, Pencil, Check, X, Archive, RotateCcw, Trash2 } from "lucide-react";
 import { Survey, Topic } from "../types";
 
@@ -25,6 +26,7 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
   onSaveTopic,
   onDeleteTopic,
 }) => {
+  const { confirm, confirmDialog } = useConfirm();
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -135,7 +137,12 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
   const handleDelete = async (t: Topic) => {
     if (!onDeleteTopic) return;
     if ((usageByTopic[t.id] || 0) > 0) return;
-    const ok = window.confirm(`Delete the topic "${t.name}"? This cannot be undone.`);
+    const ok = await confirm({
+      title: "Delete this topic?",
+      message: `The topic "${t.name}" will be deleted. This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
     if (!ok) return;
     await run(t.id, async () => {
       await onDeleteTopic(t.id);
@@ -144,6 +151,7 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
 
   return (
     <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
+      {confirmDialog}
       <div className="border-b border-slate-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <h2 className="font-serif text-xl font-bold text-slate-900">

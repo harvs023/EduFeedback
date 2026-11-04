@@ -135,26 +135,75 @@ export class DatabaseService {
     return { success: true, user: cloudUser };
   }
 
+  /** True while a sign-up is running, so the app's login listener does not sign the new user out early. */
+  static isRegistering = false;
+
   static async register(userProfile: UserProfile, password: string): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
     const cleanEmail = userProfile.email.trim().toLowerCase();
     const isFacultyOrOfficer = userProfile.pos === "Faculty" || userProfile.pos === "Student Officer";
-    const initialStatus: AccountStatus = userProfile.status || (isFacultyOrOfficer ? "pending_approval" : "active");
+    // Role and status always follow the position. The security rules check these exact pairs.
+    const role: UserProfile["role"] =
+      userProfile.pos === "Faculty" ? "faculty" : userProfile.pos === "Student Officer" ? "officer" : "user";
+    const initialStatus: AccountStatus = isFacultyOrOfficer ? "pending_approval" : "active";
 
     const newUser: UserProfile = {
       canCreateSurveys: true,
       canPostNews: true,
       ...userProfile,
       email: cleanEmail,
+      role,
       status: initialStatus,
       joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     };
 
+    DatabaseService.isRegistering = true;
+    let createdNewLogin = false;
     try {
-      await FirebaseAuthService.register(cleanEmail, password);
-      await FirestoreUserService.save(newUser);
+      try {
+        await FirebaseAuthService.register(cleanEmail, password);
+        createdNewLogin = true;
+      } catch (authErr: any) {
+        if (authErr?.code !== "auth/email-already-in-use") throw authErr;
+        // The login exists already. If it has no profile (an earlier sign-up that broke halfway),
+        // let the person finish it with the same email and password.
+        try {
+          await FirebaseAuthService.signIn(cleanEmail, password);
+        } catch {
+          return { success: false, error: "This email is already registered. Please sign in instead." };
+        }
+        const existing = await FirestoreUserService.getByEmail(cleanEmail);
+        if (existing) {
+          await FirebaseAuthService.signOut();
+          return { success: false, error: "This email is already registered. Please sign in instead." };
+        }
+      }
+
+      try {
+        await FirestoreUserService.save(newUser);
+      } catch (saveErr) {
+        // Do not leave a login without a profile behind.
+        if (createdNewLogin) await FirebaseAuthService.deleteCurrentUser().catch(() => {});
+        await FirebaseAuthService.signOut().catch(() => {});
+        throw saveErr;
+      }
+
+      // Accounts waiting for approval must not stay signed in.
+      if (initialStatus !== "active") await FirebaseAuthService.signOut();
       return { success: true, user: newUser };
     } catch (err: any) {
-      return { success: false, error: err?.message || "Failed to create account with Firebase." };
+      console.warn("Registration failed:", err);
+      const messages: Record<string, string> = {
+        "auth/invalid-email": "Please enter a valid email address.",
+        "auth/weak-password": "Please choose a stronger password (at least 6 characters).",
+        "auth/operation-not-allowed": "Email/password sign-up is switched off in Firebase. Ask the administrator to enable it.",
+        "auth/network-request-failed": "No internet connection. Please try again.",
+      };
+      return {
+        success: false,
+        error: messages[err?.code] || "We could not create your account. Please check your details and try again.",
+      };
+    } finally {
+      DatabaseService.isRegistering = false;
     }
   }
 
@@ -175,6 +224,10 @@ export class DatabaseService {
       owner: (survey.owner || "").trim().toLowerCase(),
     };
     await FirestoreSurveyService.save(normalizedSurvey);
+  }
+
+  static async archiveSurvey(surveyId: string | number, archivedBy: string, archiveReason: string, archivedAt: number): Promise<void> {
+    await FirestoreSurveyService.archive(surveyId, archivedBy.trim().toLowerCase(), archiveReason, archivedAt);
   }
 
   static async deleteSurvey(surveyId: string | number): Promise<void> {

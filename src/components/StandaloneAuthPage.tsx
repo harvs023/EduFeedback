@@ -3,7 +3,6 @@ import { UserProfile, Position } from "../types";
 import {
   DEPARTMENTS_DATA,
   PROGRAMS_BY_DEPARTMENT,
-  MASTER_ADMIN_EMAIL,
 } from "../data/initialData";
 import { DatabaseService } from "../lib/databaseService";
 import { isFirebaseConfigured } from "../lib/firebase";
@@ -125,7 +124,6 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
 
     setIsLoading(true);
     try {
-      let roleType: "superadmin" | "user" = "user";
       const isApprovalRequired = regPos === "Faculty" || regPos === "Student Officer";
       const initialStatus = isApprovalRequired ? "pending_approval" : "active";
 
@@ -133,7 +131,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
         name: regName.trim(),
         email: regEmail.trim(),
         pos: regPos as Position,
-        role: roleType,
+        role: "user", // replaced by the correct role for the position in DatabaseService.register
         status: initialStatus,
         department: regDepartment,
         program: regProgram,
@@ -150,28 +148,8 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
       const result = await DatabaseService.register(newProfile, regPassword);
       if (result.success && result.user) {
         if (isApprovalRequired) {
-          try {
-            await DatabaseService.addLog({
-              user: newProfile.name,
-              pos: newProfile.pos,
-              action: "Faculty/Officer Registration Submitted",
-              details: `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and awaits admin approval.`,
-            });
-          } catch (logErr) {
-            console.warn("Failed to log registration:", logErr);
-          }
-          try {
-            await DatabaseService.addNotification({
-              to: MASTER_ADMIN_EMAIL.toLowerCase(),
-              title: "🛡️ New Account Pending Approval",
-              message: `${newProfile.name} registered as ${newProfile.pos} (${newProfile.email}) and requires admin verification.`,
-              icon: "🛡️",
-              type: "account_pending",
-              data: { email: newProfile.email },
-            });
-          } catch (notifErr) {
-            console.warn("Failed to send pending approval notification:", notifErr);
-          }
+          // A pending account is signed out right away and cannot write logs or notifications yet.
+          // The administrator sees it under Pending Approval in the User & Role Directory.
           setPendingNotice({
             name: newProfile.name,
             pos: newProfile.pos,

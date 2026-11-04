@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { useConfirm } from "./ConfirmDialog";
 import { Survey, SurveyStatus, UserProfile, SurveyResponse } from "../types";
 import { getSurveyAvailability } from "../lib/surveyReview";
 import {
@@ -33,6 +34,7 @@ import {
   X,
   FileSpreadsheet,
   Lock,
+  Archive,
 } from "lucide-react";
 
 interface MySurveysScreenProps {
@@ -43,7 +45,8 @@ interface MySurveysScreenProps {
   onEditSurvey: (survey: Survey) => void;
   onDeleteSurvey: (surveyId: string | number, surveyTitle?: string) => void;
   onViewAnalytics: (surveyId: string | number) => void;
-  onTakeSurvey?: (survey: Survey) => void;
+  onPreviewSurvey?: (survey: Survey) => void;
+  onArchiveSurvey?: (surveyId: string | number, reason: string) => Promise<void> | void;
   onFlagSurvey?: (surveyId: string | number, reason: string) => void;
   onClearFlag?: (surveyId: string | number) => void;
   onDuplicateSurvey?: (survey: Survey) => void;
@@ -60,7 +63,8 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
   onEditSurvey,
   onDeleteSurvey,
   onViewAnalytics,
-  onTakeSurvey,
+  onPreviewSurvey,
+  onArchiveSurvey,
   onFlagSurvey,
   onClearFlag,
   onDuplicateSurvey,
@@ -68,6 +72,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
   onRejectSurvey,
   onTakedownSurvey,
 }) => {
+  const { confirm, confirmDialog } = useConfirm();
   const isAdmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
   const [takedownSurveyId, setTakedownSurveyId] = useState<string | number | null>(null);
   const [takedownReason, setTakedownReason] = useState<string>("");
@@ -78,6 +83,9 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
   const [creatorFilter, setCreatorFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"newest" | "responses" | "title" | "flagged">("newest");
   const [copiedId, setCopiedId] = useState<string | number | null>(null);
+  const [archiveSurveyId, setArchiveSurveyId] = useState<string | number | null>(null);
+  const [archiveReason, setArchiveReason] = useState<string>("");
+  const [isArchiveBusy, setIsArchiveBusy] = useState<boolean>(false);
 
   // Moderation Flag Modal State
   const [flagModalSurvey, setFlagModalSurvey] = useState<{ id: string | number; title: string } | null>(null);
@@ -227,6 +235,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12">
+      {confirmDialog}
       {/* Header Banner - Contextual for Admin vs Creator */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-2">
@@ -542,6 +551,13 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
             const isRejected = survey.status === "rejected";
             const isLive = survey.status === "published" || !survey.status;
             const isEditable = survey.status === "draft" || survey.status === "rejected";
+            const isOwner = (survey.owner || "").trim().toLowerCase() === (currentUser?.email || "").trim().toLowerCase();
+            const isLiveOrScheduled = survey.status === "published" || survey.status === "scheduled";
+            // The rules let owners delete only drafts and rejected surveys; the admin can delete any survey.
+            const canDelete = isAdmin || (isOwner && isEditable);
+            const canArchive = isOwner && isLiveOrScheduled && Boolean(onArchiveSurvey);
+            const hasResults = isLiveOrScheduled || isArchived;
+            const isConfirmingArchive = archiveSurveyId === survey.id;
             const isFlagged = Boolean(survey.flagged);
             const availability = getSurveyAvailability(survey);
 
@@ -793,78 +809,140 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                   )}
                 </div>
 
-                {/* Card Actions Bar */}
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {/* Edit Survey Button */}
-                    {!isEditable && (
-                      <span
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold flex items-center gap-1.5 cursor-not-allowed"
-                        title="Pending, published and archived surveys are locked and cannot be edited"
+                {/* Archive confirmation (owner closes a live survey early) */}
+                {isConfirmingArchive && (
+                  <div className="p-3 bg-slate-50 border border-slate-300 rounded-xl space-y-2 text-xs">
+                    <p className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <Archive className="w-3.5 h-3.5" /> Archive this survey?
+                    </p>
+                    <p className="text-[11px] text-slate-600">
+                      It stops accepting responses right away. Its results stay in Analytics. This cannot be undone, but
+                      you can copy it as a new draft later.
+                    </p>
+                    <input
+                      type="text"
+                      maxLength={200}
+                      value={archiveReason}
+                      onChange={(e) => setArchiveReason(e.target.value)}
+                      placeholder="Reason (optional), e.g. Enough responses collected"
+                      className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:outline-hidden focus:border-indigo-400"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isArchiveBusy}
+                        onClick={async () => {
+                          if (!onArchiveSurvey) return;
+                          setIsArchiveBusy(true);
+                          try {
+                            await onArchiveSurvey(survey.id, archiveReason);
+                            setArchiveSurveyId(null);
+                            setArchiveReason("");
+                          } finally {
+                            setIsArchiveBusy(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50"
                       >
-                        <Lock className="w-3.5 h-3.5" />
-                        <span>Locked</span>
-                      </span>
-                    )}
+                        {isArchiveBusy ? "Archiving..." : "Yes, archive it"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isArchiveBusy}
+                        onClick={() => {
+                          setArchiveSurveyId(null);
+                          setArchiveReason("");
+                        }}
+                        className="px-2.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Card Actions Bar: only the actions that work for this survey's status */}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     {isEditable && (
                       <button
                         onClick={() => onEditSurvey(survey)}
                         className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title="Edit questions, scales, and settings"
+                        title="Edit questions and settings"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                         <span>Edit</span>
                       </button>
                     )}
-
-                    {/* Analytics Button */}
-                    <button
-                      onClick={() => onViewAnalytics(survey.id)}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title="View detailed response analytics & Tagalog sentiment"
-                    >
-                      <BarChart3 className="w-3.5 h-3.5 text-slate-500" />
-                      <span>Analytics</span>
-                    </button>
-
-                    {/* Duplicate Button (Admin & Authors) */}
-                    {onDuplicateSurvey && (
-                      <button
-                        onClick={() => onDuplicateSurvey(survey)}
-                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
-                        title="Duplicate as new draft instrument"
+                    {isPending && (
+                      <span
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold flex items-center gap-1.5 cursor-not-allowed"
+                        title="Locked while the administrator reviews it"
                       >
-                        <Copy className="w-3.5 h-3.5" />
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Waiting for review</span>
+                      </span>
+                    )}
+                    {hasResults && (
+                      <button
+                        onClick={() => onViewAnalytics(survey.id)}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="View responses and analytics"
+                      >
+                        <BarChart3 className="w-3.5 h-3.5" />
+                        <span>Analytics</span>
+                      </button>
+                    )}
+                    {canArchive && !isConfirmingArchive && (
+                      <button
+                        onClick={() => {
+                          setArchiveSurveyId(survey.id);
+                          setArchiveReason("");
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Close this survey now and move it to Archived"
+                      >
+                        <Archive className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Archive</span>
                       </button>
                     )}
                   </div>
 
                   <div className="flex items-center gap-1">
-                    {/* Share Link Button */}
-                    <button
-                      onClick={() => handleCopyLink(survey.id)}
-                      className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
-                      title={copiedId === survey.id ? "Link copied!" : "Copy survey share link"}
-                    >
-                      {copiedId === survey.id ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      ) : (
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-
-                    {/* Take / Preview Survey */}
-                    {onTakeSurvey && (
+                    {onPreviewSurvey && (
                       <button
-                        onClick={() => onTakeSurvey(survey)}
+                        onClick={() => onPreviewSurvey(survey)}
                         className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
-                        title="Preview survey as respondent"
+                        title="Preview as respondent (nothing is submitted)"
                       >
                         <Eye className="w-3.5 h-3.5" />
                       </button>
                     )}
 
-                    {/* Flag / Moderate (For Admins) */}
+                    {isLiveOrScheduled && (
+                      <button
+                        onClick={() => handleCopyLink(survey.id)}
+                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
+                        title={copiedId === survey.id ? "Link copied!" : "Copy survey link"}
+                      >
+                        {copiedId === survey.id ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : (
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
+
+                    {onDuplicateSurvey && (
+                      <button
+                        onClick={() => onDuplicateSurvey(survey)}
+                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
+                        title="Copy as a new draft"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
                     {isAdmin && onFlagSurvey && !isFlagged && (
                       <button
                         onClick={() => {
@@ -872,27 +950,29 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                           setFlagReasonInput("");
                         }}
                         className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
-                        title="Flag survey for compliance or content violation"
+                        title="Flag survey for review"
                       >
                         <Flag className="w-3.5 h-3.5" />
                       </button>
                     )}
 
-                    {/* Delete Survey Button */}
-                    <button
-                      onClick={() => {
-                        const confirmMsg = isAdmin
-                          ? `[Admin Action] Permanently remove survey "${survey.title}"? All responses, questions, and metrics will be wiped.`
-                          : `Are you sure you want to delete "${survey.title}"? All responses and questions will be permanently removed.`;
-                        if (window.confirm(confirmMsg)) {
-                          onDeleteSurvey(survey.id, survey.title);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
-                      title="Permanently remove survey"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canDelete && (
+                      <button
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: "Delete this survey?",
+                            message: `"${survey.title}" will be permanently deleted. This cannot be undone.`,
+                            confirmLabel: "Delete",
+                            danger: true,
+                          });
+                          if (ok) onDeleteSurvey(survey.id, survey.title);
+                        }}
+                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
+                        title="Delete survey"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

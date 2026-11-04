@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Survey, UserProfile } from "../types";
+import { Survey, UserProfile, Topic } from "../types";
 import {
   runPreChecks,
   countEligibleUsers,
@@ -31,6 +31,7 @@ import {
 interface SurveyApprovalsPanelProps {
   surveys: Survey[];
   users: UserProfile[];
+  topics?: Topic[];
   onApproveSurvey?: (surveyId: string | number) => Promise<void> | void;
   onRejectSurvey?: (surveyId: string | number, reason: string) => Promise<void> | void;
   onUpdateUser?: (email: string, changes: Partial<UserProfile>) => Promise<void> | void;
@@ -83,6 +84,7 @@ function formatQuestionType(type: string): string {
 export const SurveyApprovalsPanel: React.FC<SurveyApprovalsPanelProps> = ({
   surveys,
   users,
+  topics = [],
   onApproveSurvey,
   onRejectSurvey,
   onUpdateUser,
@@ -710,11 +712,35 @@ export const SurveyApprovalsPanel: React.FC<SurveyApprovalsPanelProps> = ({
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {survey.questions.map((q, qIndex) => (
-                    <div
-                      key={q.id || qIndex}
-                      className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-xl space-y-2 text-xs"
-                    >
+                  {survey.questions.map((q, qIndex) => {
+                    const blocks = survey.topicBlocks || [];
+                    const blockIndex = blocks.findIndex((b) => b.id === q.blockId);
+                    const block = blockIndex >= 0 ? blocks[blockIndex] : undefined;
+                    const startsNewBlock =
+                      Boolean(block) && (qIndex === 0 || survey.questions[qIndex - 1].blockId !== q.blockId);
+                    const topic = block ? topics.find((t) => t.id === block.topicId) : undefined;
+                    return (
+                    <React.Fragment key={q.id || qIndex}>
+                    {block && startsNewBlock && (
+                      <div className={`${qIndex === 0 ? "" : "pt-3"} space-y-1`}>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-extrabold uppercase tracking-wider">
+                            Section {blockIndex + 1} of {blocks.length}
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            Topic: <span className="font-semibold text-slate-700">{topic?.name || "Unknown topic"}</span>
+                          </span>
+                          {topic?.status === "retired" && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              Retired topic
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm font-bold text-slate-900">{block.title || "Untitled section"}</div>
+                        {block.description && <p className="text-[11px] text-slate-500">{block.description}</p>}
+                      </div>
+                    )}
+                    <div className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-xl space-y-2 text-xs">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-start gap-2">
                           <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">
@@ -761,7 +787,9 @@ export const SurveyApprovalsPanel: React.FC<SurveyApprovalsPanelProps> = ({
                         </div>
                       )}
                     </div>
-                  ))}
+                    </React.Fragment>
+                    );
+                  })}
                 </div>
               )}
             </div>

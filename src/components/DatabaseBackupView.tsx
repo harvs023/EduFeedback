@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from "react";
+import { useConfirm } from "./ConfirmDialog";
 import {
   Survey,
   SurveyResponse,
@@ -62,6 +63,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   onRestoreBackup,
   showToast,
 }) => {
+  const { confirm, confirmDialog } = useConfirm();
   // Snapshots State
   const [snapshots, setSnapshots] = useState<DatabaseSnapshot[]>([]);
   const [isCreatingSnapshot, setIsCreatingSnapshot] = useState(false);
@@ -268,12 +270,14 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   };
 
   // Quick Restore to Snapshot
-  const handleRestoreSnapshot = (snapshot: DatabaseSnapshot) => {
-    if (
-      window.confirm(
-        `Are you sure you want to restore the system to "${snapshot.name}" (${snapshot.createdAt})? Current unsaved modifications will be overwritten.`
-      )
-    ) {
+  const handleRestoreSnapshot = async (snapshot: DatabaseSnapshot) => {
+    const ok = await confirm({
+      title: "Restore this snapshot?",
+      message: `The system will be restored to "${snapshot.name}" (${snapshot.createdAt}). Current data will be overwritten.`,
+      confirmLabel: "Restore",
+      danger: true,
+    });
+    if (ok) {
       const backupData: SystemBackupData = {
         app: "EduFeedback Institutional Evaluation Platform",
         version: "2.5.0-production",
@@ -289,8 +293,14 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   };
 
   // Delete Snapshot
-  const handleDeleteSnapshot = (id: string, name: string) => {
-    if (window.confirm(`Delete snapshot "${name}"?`)) {
+  const handleDeleteSnapshot = async (id: string, name: string) => {
+    const ok = await confirm({
+      title: "Delete this snapshot?",
+      message: `The snapshot "${name}" will be deleted.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (ok) {
       setSnapshots((prev) => prev.filter((s) => s.id !== id));
       showToast("Snapshot deleted.", "info");
     }
@@ -301,6 +311,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
 
   return (
     <div className="space-y-8 pb-12">
+      {confirmDialog}
       {/* Header & Quick Action Bar */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

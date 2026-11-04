@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { useConfirm } from "./ConfirmDialog";
 import { Survey, UserProfile, SurveyResponse } from "../types";
 import { getSurveyAvailability } from "../lib/surveyReview";
 import { DEFAULT_SURVEY_CATEGORIES } from "../data/initialData";
@@ -89,6 +90,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   selectedCategory = "all",
   categories = DEFAULT_SURVEY_CATEGORIES,
 }) => {
+  const { confirm, confirmDialog } = useConfirm();
   const [performanceFilter, setPerformanceFilter] = useState<"all" | "trending" | "top-rated">("all");
   const [internalSearch, setInternalSearch] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<"all" | "unanswered" | "answered">("all");
@@ -101,8 +103,15 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   };
 
   const answeredSurveyIds = useMemo(() => {
-    return new Set(userResponses.map((r) => String(r.surveyId)));
-  }, [userResponses]);
+    // Only the current user's own (named) responses count as "answered".
+    const myEmail = (currentUser?.email || "").trim().toLowerCase();
+    if (!myEmail) return new Set<string>();
+    return new Set(
+      userResponses
+        .filter((r) => (r.userEmail || "").trim().toLowerCase() === myEmail)
+        .map((r) => String(r.surveyId))
+    );
+  }, [userResponses, currentUser]);
 
   // Target audience eligibility check
   const isEligible = (survey: Survey) => {
@@ -117,11 +126,11 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
 
   const effectiveSearch = (searchQuery || internalSearch).trim().toLowerCase();
 
-  // Eligible active surveys for current user (creators can always see their own surveys)
+  // Open surveys the current user can answer. Your own surveys are managed in My Surveys, not here.
   const eligibleSurveys = useMemo(() => {
+    const myEmail = (currentUser?.email || "").trim().toLowerCase();
     return surveys.filter((s) => {
-      const isCreator = currentUser && s.owner?.toLowerCase() === currentUser.email?.toLowerCase();
-      if (isCreator) return true;
+      if (myEmail && (s.owner || "").trim().toLowerCase() === myEmail) return false;
 
       if (getSurveyAvailability(s) !== "open") return false;
       return isEligible(s);
@@ -186,6 +195,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
     if (!currentUser) return [];
     return surveys.filter((s) => {
       if (!s.isRequired || s.status !== "published") return false;
+      if ((s.owner || "").trim().toLowerCase() === currentUser.email.trim().toLowerCase()) return false;
       const isAnswered = answeredSurveyIds.has(String(s.id));
       if (isAnswered) return false;
       if (s.requiredAudience === "faculty") return currentUser.pos === "Faculty";
@@ -197,6 +207,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {/* Simple Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-200">
         <div>
@@ -403,14 +414,12 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
             {filteredSurveys.map((survey) => {
               const isAnswered = answeredSurveyIds.has(String(survey.id));
               const perf = getSurveyPerformanceMetrics(survey);
-              const isCreator = currentUser && survey.owner?.toLowerCase() === currentUser.email?.toLowerCase();
-              const isOwnerOrAdmin = isSuperadmin || isCreator;
 
               return (
                 <div
                   key={survey.id}
                   className={`bg-white p-5 rounded-xl border shadow-xs hover:shadow-sm transition-all flex flex-col justify-between ${
-                    isCreator ? "border-indigo-200 ring-1 ring-indigo-100" : "border-slate-200 hover:border-slate-300"
+                    "border-slate-200 hover:border-slate-300"
                   }`}
                 >
                   <div className="space-y-2.5">
@@ -420,19 +429,6 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
                         <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md text-[11px] font-semibold">
                           {survey.cat}
                         </span>
-
-                        {/* Creator Identifier */}
-                        {isCreator && (
-                          <span className="px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-md text-[10px] font-bold">
-                            Your Survey
-                          </span>
-                        )}
-
-                        {survey.status === "draft" && (
-                          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-[10px] font-bold">
-                            Draft
-                          </span>
-                        )}
 
                         {/* Dynamically Earned Performance Badges */}
                         {perf.isTrending && (
@@ -501,7 +497,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
                       </button>
 
                       {/* Creator and Admin Controls */}
-                      {isOwnerOrAdmin && (
+                      {isSuperadmin && (
                         <div className="flex items-center gap-1">
                           {onEditSurvey && (
                             <button
@@ -525,10 +521,14 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
 
                           {onDeleteSurvey && (
                             <button
-                              onClick={() => {
-                                if (window.confirm(`Are you sure you want to delete the survey "${survey.title}"? This cannot be undone.`)) {
-                                  onDeleteSurvey(survey.id, survey.title);
-                                }
+                              onClick={async () => {
+                                const ok = await confirm({
+                                  title: "Delete this survey?",
+                                  message: `"${survey.title}" will be permanently deleted. This cannot be undone.`,
+                                  confirmLabel: "Delete",
+                                  danger: true,
+                                });
+                                if (ok) onDeleteSurvey(survey.id, survey.title);
                               }}
                               className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
                               title="Delete Survey"

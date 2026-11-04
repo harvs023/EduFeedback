@@ -137,7 +137,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search themes or surveys..."
+            placeholder="Search surveys..."
             className="bg-transparent border-none outline-hidden text-sm w-full text-slate-800 placeholder:text-slate-400"
           />
           {searchQuery && (
@@ -406,7 +406,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search themes or surveys..."
+              placeholder="Search surveys..."
               className="bg-transparent border-none outline-hidden text-sm w-full text-slate-800"
             />
           </div>

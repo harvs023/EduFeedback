@@ -98,9 +98,7 @@ export interface Survey {
   flagReason?: string | null;
   flaggedBy?: string | null;
   flaggedAt?: string | null;
-  // Thematic domain tags (academics, facilities, student-life, governance)
-  // Note: "Trending" and "Top-Rated" are calculated dynamically from performance, not selectable themes
-  themeSection?: "academics" | "facilities" | "student-life" | "governance";
+
   tags?: string[];
   isTrending?: boolean;
   ratingAverage?: number;

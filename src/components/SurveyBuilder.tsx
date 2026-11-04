@@ -46,7 +46,6 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   const [purpose, setPurpose] = useState<string>(initialSurvey?.purpose || "");
   const [criteriaAcceptedAt, setCriteriaAcceptedAt] = useState<number | null>(initialSurvey?.criteriaAcceptedAt ?? null);
   const [submitErrors, setSubmitErrors] = useState<string[]>([]);
-  const [themeSection, setThemeSection] = useState<Survey["themeSection"]>(initialSurvey?.themeSection || "academics");
   const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || "2025-2026");
   const [topicBlocks, setTopicBlocks] = useState<SurveyTopicBlock[]>(initialSurvey?.topicBlocks || []);
 
@@ -102,7 +101,6 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       setDesc(initialSurvey.desc || "");
       setPurpose(initialSurvey.purpose || "");
       setCriteriaAcceptedAt(initialSurvey.criteriaAcceptedAt ?? null);
-      setThemeSection(initialSurvey.themeSection || "academics");
       setAcademicYear(initialSurvey.academicYear || "2025-2026");
       setScheduleType(initialSurvey.status === "scheduled" || initialSurvey.openDate ? "scheduled" : "immediate");
       setOpenDate(initialSurvey.openDate || "");
@@ -292,7 +290,6 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       desc: desc.trim() || "No description provided.",
       purpose: purpose.trim(),
       criteriaAcceptedAt: criteriaAcceptedAt ?? undefined,
-      themeSection,
       isTrending: initialSurvey?.isTrending ?? false,
       academicYear,
       questions: questions
@@ -316,7 +313,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       isRequired: isSuperadmin ? isRequired : (initialSurvey?.isRequired || false),
       requiredAudience: isSuperadmin ? requiredAudience : (initialSurvey?.requiredAudience || "students"),
       allowAnonymous,
-      tags: [cat, themeSection || "General", academicYear],
+      tags: [cat, academicYear],
       topicBlocks: topicBlocks.length > 0 ? topicBlocks : undefined,
     };
 
@@ -428,25 +425,6 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
                   </option>
                 ))}
               </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                Thematic Domain
-              </label>
-              <select
-                value={themeSection}
-                onChange={(e) => setThemeSection(e.target.value as any)}
-                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
-              >
-                <option value="academics">📚 Academic & Course Evaluation</option>
-                <option value="facilities">🏫 Campus Facilities & Technology</option>
-                <option value="student-life">💡 Student Services & Welfare</option>
-                <option value="governance">🏛️ Institutional Governance & Policy</option>
-              </select>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Note: "Trending" (high respondent influx) and "Top Rated" (4.5+ rating) are dynamic performance badges awarded automatically by participant activity.
-              </p>
             </div>
 
             <div>

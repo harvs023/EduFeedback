@@ -65,6 +65,7 @@ export const DEFAULT_SURVEY_CATEGORIES = [
   "Facilities",
   "Service",
   "Student Life",
+  "Governance & Policy",
   "General",
 ];
 

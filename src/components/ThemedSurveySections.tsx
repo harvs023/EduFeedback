@@ -1,36 +1,26 @@
-import React, { useState, useMemo, useEffect } from "react";
-import { Survey, UserProfile, SurveyResponse, NewsAnnouncement } from "../types";
+import React, { useState, useMemo } from "react";
+import { Survey, UserProfile, SurveyResponse } from "../types";
 import { getSurveyAvailability } from "../lib/surveyReview";
+import { DEFAULT_SURVEY_CATEGORIES } from "../data/initialData";
 import {
   Flame,
   Star,
-  BookOpen,
-  Building2,
-  HeartHandshake,
-  Landmark,
   Search,
   CheckCircle2,
   Clock,
   Users,
   Calendar,
   ArrowRight,
-  Sparkles,
   BarChart3,
-  HelpCircle,
-  TrendingUp,
-  Newspaper,
   ClipboardList,
   Pencil,
   Trash2,
-  UserCheck,
-  PlusCircle,
 } from "lucide-react";
 
 interface ThemedSurveySectionsProps {
   surveys: Survey[];
   currentUser: UserProfile | null;
   userResponses?: SurveyResponse[];
-  newsList?: NewsAnnouncement[];
   onTakeSurvey?: (survey: Survey) => void;
   onOpenSurvey?: (survey: Survey) => void;
   onViewAnalytics: (surveyId: string | number) => void;
@@ -40,6 +30,7 @@ interface ThemedSurveySectionsProps {
   onDeleteSurvey?: (surveyId: string | number, surveyTitle?: string) => void;
   searchQuery?: string;
   selectedCategory?: string;
+  categories?: string[];
 }
 
 // Helper to evaluate dynamic performance metrics for surveys
@@ -87,7 +78,6 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   surveys,
   currentUser,
   userResponses = [],
-  newsList = [],
   onTakeSurvey,
   onOpenSurvey,
   onViewAnalytics,
@@ -97,11 +87,10 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   onDeleteSurvey,
   searchQuery = "",
   selectedCategory = "all",
+  categories = DEFAULT_SURVEY_CATEGORIES,
 }) => {
-  const [selectedTheme, setSelectedTheme] = useState<string>("all");
   const [performanceFilter, setPerformanceFilter] = useState<"all" | "trending" | "top-rated">("all");
-  const [performanceTimeframe, setPerformanceTimeframe] = useState<"month" | "year">("year");
-  const [internalSearch, setInternalSearch] = useState<string>("" );
+  const [internalSearch, setInternalSearch] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<"all" | "unanswered" | "answered">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>(selectedCategory);
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
@@ -114,148 +103,6 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   const answeredSurveyIds = useMemo(() => {
     return new Set(userResponses.map((r) => String(r.surveyId)));
   }, [userResponses]);
-
-  // Dynamic Total Respondents Count derived strictly from actual recorded responses
-  const totalRespondentsCount = useMemo(() => {
-    if (userResponses && userResponses.length > 0) {
-      return userResponses.length;
-    }
-    return surveys.reduce((acc, s) => acc + (s.responses || 0), 0);
-  }, [userResponses, surveys]);
-
-  // Dynamic Sentiment Score computed across live response feedback
-  const sentimentMetrics = useMemo(() => {
-    if (!userResponses || userResponses.length === 0) {
-      return {
-        scoreDisplay: "0.0 / 10",
-        label: "No evaluations recorded",
-        hasData: false,
-      };
-    }
-
-    let totalScore = 0;
-    let scoreCount = 0;
-    let positiveCount = 0;
-    let negativeCount = 0;
-    let neutralCount = 0;
-
-    userResponses.forEach((r) => {
-      if (r.sentimentAnalysis?.score !== undefined) {
-        const s = r.sentimentAnalysis.score > 1 ? r.sentimentAnalysis.score : r.sentimentAnalysis.score * 10;
-        totalScore += s;
-        scoreCount++;
-      } else if (r.answers && Array.isArray(r.answers)) {
-        const ratingAnswers = r.answers.filter((a) => typeof a.ratingValue === "number" && a.ratingValue > 0);
-        if (ratingAnswers.length > 0) {
-          const avg5 = ratingAnswers.reduce((sum, a) => sum + (a.ratingValue || 0), 0) / ratingAnswers.length;
-          totalScore += avg5 * 2;
-          scoreCount++;
-        }
-      }
-
-      const sentiment = r.sentimentAnalysis?.sentiment;
-      if (sentiment === "Positive") positiveCount++;
-      else if (sentiment === "Negative") negativeCount++;
-      else if (sentiment) neutralCount++;
-    });
-
-    if (scoreCount === 0) {
-      return {
-        scoreDisplay: "0.0 / 10",
-        label: "No evaluations recorded",
-        hasData: false,
-      };
-    }
-
-    const avg = (totalScore / scoreCount).toFixed(1);
-    let label = "Neutral Sentiment";
-    if (positiveCount > negativeCount && positiveCount >= neutralCount) {
-      label = "Positive (Tagalog/Eng)";
-    } else if (negativeCount > positiveCount) {
-      label = "Needs Attention";
-    }
-
-    return {
-      scoreDisplay: `${avg} / 10`,
-      label,
-      hasData: true,
-    };
-  }, [userResponses]);
-
-  // Dynamic Monthly / Annual Performance Volume from user responses
-  const monthlyVolumeData = useMemo(() => {
-    const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
-    const monthCounts = [0, 0, 0, 0, 0, 0, 0];
-
-    if (!userResponses || userResponses.length === 0) {
-      return {
-        hasData: false,
-        totalVolume: 0,
-        monthLabels,
-        monthCounts,
-        maxCount: 1,
-      };
-    }
-
-    userResponses.forEach((r) => {
-      let monthIdx = -1;
-      if (r.timestamp) {
-        monthIdx = new Date(r.timestamp).getMonth();
-      } else if (r.date) {
-        const parsed = Date.parse(r.date);
-        if (!isNaN(parsed)) {
-          monthIdx = new Date(parsed).getMonth();
-        } else {
-          const first3 = r.date.trim().slice(0, 3).toLowerCase();
-          const lookup = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-          monthIdx = lookup.indexOf(first3);
-        }
-      }
-
-      if (monthIdx >= 0 && monthIdx < 7) {
-        monthCounts[monthIdx]++;
-      } else if (monthIdx >= 7) {
-        monthCounts[6]++;
-      }
-    });
-
-    const totalVolume = monthCounts.reduce((a, b) => a + b, 0);
-    const maxCount = Math.max(...monthCounts, 1);
-
-    return {
-      hasData: totalVolume > 0,
-      totalVolume,
-      monthLabels,
-      monthCounts,
-      maxCount,
-    };
-  }, [userResponses]);
-
-  // Dynamic Local Response Insights extracted from actual responses
-  const latestLocalInsight = useMemo(() => {
-    if (!userResponses || userResponses.length === 0) return null;
-    for (const r of userResponses) {
-      if (r.answers && Array.isArray(r.answers)) {
-        for (const a of r.answers) {
-          const text = (a.answer || "").toString().trim();
-          if (text.length > 10 && isNaN(Number(text)) && !text.toLowerCase().includes("stars")) {
-            return {
-              quote: text,
-              lang: r.sentimentAnalysis?.language || "Tagalog/English",
-              sentiment: r.sentimentAnalysis?.sentiment || "NLP Analyzed",
-            };
-          }
-        }
-      }
-    }
-    return null;
-  }, [userResponses]);
-
-  // Surveys created by the currently logged-in user
-  const myCreatedSurveys = useMemo(() => {
-    if (!currentUser?.email) return [];
-    return surveys.filter((s) => s.owner?.toLowerCase() === currentUser.email?.toLowerCase());
-  }, [surveys, currentUser]);
 
   // Target audience eligibility check
   const isEligible = (survey: Survey) => {
@@ -294,34 +141,19 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
       .sort((a, b) => (b.ratingAverage || 0) - (a.ratingAverage || 0));
   }, [eligibleSurveys]);
 
-  // Purely Thematic Domain Groupings (Academics, Facilities, Student Welfare, Governance)
-  const academicSurveys = useMemo(
-    () => eligibleSurveys.filter((s) => s.cat === "Course" || s.cat === "Instructor" || s.themeSection === "academics"),
-    [eligibleSurveys]
-  );
-  const facilitiesSurveys = useMemo(
-    () => eligibleSurveys.filter((s) => s.cat === "Facilities" || s.themeSection === "facilities"),
-    [eligibleSurveys]
-  );
-  const studentLifeSurveys = useMemo(
-    () => eligibleSurveys.filter((s) => s.cat === "Student Services" || s.themeSection === "student-life"),
-    [eligibleSurveys]
-  );
-  const governanceSurveys = useMemo(
-    () => eligibleSurveys.filter((s) => s.cat === "General" || s.themeSection === "governance"),
-    [eligibleSurveys]
-  );
+  // Category tabs: "All" plus one tab per category from categories list with count of eligible surveys
+  const categoryTabs = useMemo(() => {
+    return [
+      { id: "all", label: "All", count: eligibleSurveys.length },
+      ...categories.map((c) => ({
+        id: c,
+        label: c,
+        count: eligibleSurveys.filter((s) => s.cat === c).length,
+      })),
+    ];
+  }, [eligibleSurveys, categories]);
 
-  // Thematic tabs strictly contain substantive institutional domains (Trending and Top Rated are performance filters)
-  const themeTabs = [
-    { id: "all", label: "All Thematic Domains", count: eligibleSurveys.length, icon: Sparkles },
-    { id: "academics", label: "Academic Quality", count: academicSurveys.length, icon: BookOpen },
-    { id: "facilities", label: "Campus Facilities", count: facilitiesSurveys.length, icon: Building2 },
-    { id: "student-life", label: "Student Welfare", count: studentLifeSurveys.length, icon: HeartHandshake },
-    { id: "governance", label: "Governance & Policies", count: governanceSurveys.length, icon: Landmark },
-  ];
-
-  // Filtered surveys applying theme, performance metric, status, and category
+  // Filtered surveys applying category, performance metric, status, and search query
   const filteredSurveys = useMemo(() => {
     return eligibleSurveys.filter((s) => {
       // 1. Dynamic Performance Filter (Trending / Top Rated earned by performance)
@@ -329,21 +161,15 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
       if (performanceFilter === "trending" && !perf.isTrending) return false;
       if (performanceFilter === "top-rated" && !perf.isTopRated) return false;
 
-      // 2. Thematic Domain Filter
-      if (selectedTheme === "academics" && s.cat !== "Course" && s.cat !== "Instructor" && s.themeSection !== "academics") return false;
-      if (selectedTheme === "facilities" && s.cat !== "Facilities" && s.themeSection !== "facilities") return false;
-      if (selectedTheme === "student-life" && s.cat !== "Student Services" && s.themeSection !== "student-life") return false;
-      if (selectedTheme === "governance" && s.cat !== "General" && s.themeSection !== "governance") return false;
+      // 2. Category Filter (surveys whose category is not in the list still show under "All")
+      if (categoryFilter !== "all" && s.cat !== categoryFilter) return false;
 
       // 3. Response Status Filter
       const isAnswered = answeredSurveyIds.has(String(s.id));
       if (statusFilter === "unanswered" && isAnswered) return false;
       if (statusFilter === "answered" && !isAnswered) return false;
 
-      // 4. Category Filter
-      if (categoryFilter !== "all" && s.cat !== categoryFilter) return false;
-
-      // 5. Search Query
+      // 4. Search Query
       if (effectiveSearch) {
         const matchesTitle = s.title.toLowerCase().includes(effectiveSearch);
         const matchesDesc = s.desc.toLowerCase().includes(effectiveSearch);
@@ -353,7 +179,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
 
       return true;
     });
-  }, [eligibleSurveys, selectedTheme, performanceFilter, effectiveSearch, statusFilter, categoryFilter, answeredSurveyIds]);
+  }, [eligibleSurveys, performanceFilter, categoryFilter, statusFilter, effectiveSearch, answeredSurveyIds]);
 
   // Priority / Mandatory Institutional Surveys assigned to current user
   const pendingRequiredSurveys = useMemo(() => {
@@ -371,6 +197,17 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Simple Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-200">
+        <div>
+          <h1 className="font-serif text-2xl font-bold text-slate-900">Take a Survey</h1>
+          <p className="text-xs text-slate-500 mt-0.5">Surveys available to you</p>
+        </div>
+        <div className="px-3 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-xs font-bold text-indigo-700 w-fit">
+          {eligibleSurveys.length} {eligibleSurveys.length === 1 ? "survey" : "surveys"} available
+        </div>
+      </div>
+
       {/* Priority / Mandatory Institutional Survey Banner (First thing shown on homepage) */}
       {pendingRequiredSurveys.length > 0 && (
         <div className="space-y-3">
@@ -410,361 +247,17 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
         </div>
       )}
 
-      {/* Top 3 Stat Cards (from Sleek Interface design) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">TOTAL RESPONDENTS</div>
-          <div className="text-2xl font-bold text-slate-900">
-            {totalRespondentsCount.toLocaleString()}
-          </div>
-          <div className={`text-xs font-medium mt-1 ${totalRespondentsCount > 0 ? "text-emerald-600" : "text-slate-400"}`}>
-            {totalRespondentsCount > 0 ? `${totalRespondentsCount.toLocaleString()} total submissions recorded` : "0 in current cycle"}
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">SENTIMENT SCORE</div>
-          <div className="text-2xl font-bold text-slate-900">
-            {sentimentMetrics.scoreDisplay}
-          </div>
-          <div className={`text-xs font-medium mt-1 ${sentimentMetrics.hasData ? "text-blue-600" : "text-slate-400"}`}>
-            {sentimentMetrics.label}
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">ACTIVE SURVEYS</div>
-          <div className="text-2xl font-bold text-slate-900">{filteredSurveys.length}</div>
-          <div className="text-slate-500 text-xs font-medium mt-1">
-            {filteredSurveys.length === 0
-              ? "0 active in catalog"
-              : `across ${themeTabs.filter((t) => t.id !== "all" && t.count > 0).length || 1} theme${
-                  (themeTabs.filter((t) => t.id !== "all" && t.count > 0).length || 1) === 1 ? "" : "s"
-                }`}
-          </div>
-        </div>
-      </div>
-
-      {/* Main Grid: Left 8 Cols (Performance comparison & Category cards) + Right 4 Cols (News update & Top Performing) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column (8 cols) */}
-        <div className="lg:col-span-8 space-y-6">
-          {/* Annual Performance Comparison Bar Chart card */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="font-bold text-lg text-slate-900">Annual Performance Comparison</h2>
-                <p className="text-xs text-slate-500">Student feedback volume & response velocity</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPerformanceTimeframe("month")}
-                  className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
-                    performanceTimeframe === "month"
-                      ? "bg-indigo-600 text-white shadow-xs font-semibold"
-                      : "border border-slate-200 hover:bg-slate-50 text-slate-600"
-                  }`}
-                >
-                  Past Month
-                </button>
-                <button
-                  onClick={() => setPerformanceTimeframe("year")}
-                  className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
-                    performanceTimeframe === "year"
-                      ? "bg-indigo-600 text-white shadow-xs font-semibold"
-                      : "border border-slate-200 hover:bg-slate-50 text-slate-600"
-                  }`}
-                >
-                  Past Year
-                </button>
-              </div>
-            </div>
-
-            {/* Dynamic response velocity bar visualization */}
-            {!monthlyVolumeData.hasData ? (
-              <div className="h-32 flex flex-col items-center justify-center text-center p-4 bg-slate-50/70 rounded-xl border border-dashed border-slate-200">
-                <BarChart3 className="w-6 h-6 text-slate-400 mb-1" />
-                <p className="text-xs font-semibold text-slate-700">No Annual Response Data Available</p>
-                <p className="text-[11px] text-slate-400 max-w-xs mt-0.5">
-                  Feedback volume and velocity will automatically plot here as survey submissions are received.
-                </p>
-              </div>
-            ) : (
-              <div>
-                <div className="relative h-32 flex items-end justify-between gap-3 sm:gap-4 px-2 pt-4">
-                  {monthlyVolumeData.monthLabels.map((lbl, idx) => {
-                    const count = monthlyVolumeData.monthCounts[idx];
-                    const heightPct = count > 0
-                      ? Math.max(16, Math.round((count / monthlyVolumeData.maxCount) * 100))
-                      : 8;
-                    const bgColors = [
-                      "bg-indigo-100 hover:bg-indigo-200",
-                      "bg-indigo-200 hover:bg-indigo-300",
-                      "bg-indigo-300 hover:bg-indigo-400",
-                      "bg-indigo-400 hover:bg-indigo-500",
-                      "bg-indigo-500 hover:bg-indigo-600",
-                      "bg-indigo-600 hover:bg-indigo-700",
-                      "bg-indigo-700 hover:bg-indigo-800",
-                    ][idx % 7];
-
-                    return (
-                      <div
-                        key={lbl}
-                        className={`w-full ${bgColors} rounded-t relative group transition-all`}
-                        style={{ height: `${heightPct}%` }}
-                      >
-                        <div className="absolute -top-7 left-1/2 -translate-x-1/2 text-[10px] hidden group-hover:block bg-slate-800 text-white px-2 py-0.5 rounded shadow-xs whitespace-nowrap z-10 font-mono">
-                          {count.toLocaleString()} resp
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="flex justify-between text-[10px] text-slate-400 mt-2 px-2 uppercase font-bold tracking-widest">
-                  {monthlyVolumeData.monthLabels.map((lbl) => (
-                    <span key={lbl}>{lbl}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Categorized Themes & Trending Now Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Categorized Themes Pill Card */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold text-slate-900">Categorized Themes</h3>
-                <span className="text-[10px] text-slate-400 font-medium">Domain Classification</span>
-              </div>
-              <div className="space-y-2">
-                <div
-                  onClick={() => setSelectedTheme("academics")}
-                  className={`flex items-center justify-between text-sm p-2 rounded-lg cursor-pointer transition-colors ${
-                    selectedTheme === "academics" ? "bg-blue-50 border border-blue-200" : "bg-slate-50 hover:bg-slate-100"
-                  }`}
-                >
-                  <span className="flex items-center gap-2 text-slate-700 font-medium">
-                    <div className="w-2 h-2 rounded-full bg-blue-500"></div> Academic Quality
-                  </span>
-                  <span className="font-mono text-xs font-semibold text-slate-600">{academicSurveys.length} surveys</span>
-                </div>
-                <div
-                  onClick={() => setSelectedTheme("facilities")}
-                  className={`flex items-center justify-between text-sm p-2 rounded-lg cursor-pointer transition-colors ${
-                    selectedTheme === "facilities" ? "bg-amber-50 border border-amber-200" : "hover:bg-slate-50"
-                  }`}
-                >
-                  <span className="flex items-center gap-2 text-slate-700 font-medium">
-                    <div className="w-2 h-2 rounded-full bg-amber-500"></div> Campus Facilities
-                  </span>
-                  <span className="font-mono text-xs font-semibold text-slate-600">{facilitiesSurveys.length} surveys</span>
-                </div>
-                <div
-                  onClick={() => setSelectedTheme("student-life")}
-                  className={`flex items-center justify-between text-sm p-2 rounded-lg cursor-pointer transition-colors ${
-                    selectedTheme === "student-life" ? "bg-emerald-50 border border-emerald-200" : "hover:bg-slate-50"
-                  }`}
-                >
-                  <span className="flex items-center gap-2 text-slate-700 font-medium">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Student Welfare
-                  </span>
-                  <span className="font-mono text-xs font-semibold text-slate-600">{studentLifeSurveys.length} surveys</span>
-                </div>
-                <div
-                  onClick={() => setSelectedTheme("governance")}
-                  className={`flex items-center justify-between text-sm p-2 rounded-lg cursor-pointer transition-colors ${
-                    selectedTheme === "governance" ? "bg-purple-50 border border-purple-200" : "hover:bg-slate-50"
-                  }`}
-                >
-                  <span className="flex items-center gap-2 text-slate-700 font-medium">
-                    <div className="w-2 h-2 rounded-full bg-purple-500"></div> Governance & Policy
-                  </span>
-                  <span className="font-mono text-xs font-semibold text-slate-600">{governanceSurveys.length} surveys</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Trending Now spotlight card (Calculated Dynamically from response velocity) */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold text-amber-600 flex items-center gap-1.5">
-                  <Flame className="w-4 h-4 fill-amber-500 text-amber-500" />
-                  <span>Trending Now</span>
-                </h3>
-                <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded font-semibold border border-amber-200">
-                  Mass Response Reach
-                </span>
-              </div>
-
-              {dynamicTrendingSurveys.length === 0 ? (
-                <div className="py-6 text-center text-xs text-slate-400">
-                  No active surveys currently meet mass velocity criteria.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {dynamicTrendingSurveys.slice(0, 3).map((s, idx) => {
-                    const perf = getSurveyPerformanceMetrics(s);
-                    return (
-                      <div
-                        key={s.id}
-                        onClick={() => handleLaunchSurvey(s)}
-                        className="flex items-start gap-3 group cursor-pointer hover:bg-amber-50/50 p-1.5 -mx-1.5 rounded-lg transition-colors"
-                        title="Click to take or view this trending survey"
-                      >
-                        <div className="text-base font-extrabold text-amber-500/70 font-mono mt-0.5">
-                          0{idx + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-bold text-slate-800 group-hover:text-amber-700 truncate">
-                            {s.title}
-                          </div>
-                          <div className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5">
-                            <span className="font-semibold text-slate-700">{perf.totalResponses} respondents</span>
-                            <span>•</span>
-                            <span className="text-emerald-600 font-semibold">
-                              {perf.velocityDaily > 0 ? `${perf.velocityDaily} resp/day` : "Mass reach"}
-                            </span>
-                            <span>•</span>
-                            <span className="text-slate-400">{s.cat}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column (4 cols) */}
-        <div className="lg:col-span-4 space-y-6">
-          {/* Dark News Update Card */}
-          <div className="bg-indigo-900 rounded-2xl p-6 text-white shadow-md">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold flex items-center gap-2 uppercase tracking-widest text-indigo-200">
-                <Newspaper className="w-4 h-4 text-indigo-300" />
-                <span>News Update</span>
-              </h3>
-              <span className="text-[10px] bg-indigo-800/80 text-indigo-300 px-2 py-0.5 rounded font-mono font-medium">
-                {newsList.length} {newsList.length === 1 ? "Update" : "Updates"}
-              </span>
-            </div>
-
-            {newsList.length === 0 ? (
-              <div className="py-6 text-center border border-indigo-800/60 rounded-xl bg-indigo-950/40 p-4">
-                <p className="text-xs text-indigo-200 font-medium">No announcements published</p>
-                <p className="text-[11px] text-indigo-400 mt-1">
-                  Campus updates and announcements will appear here when posted by administration.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {newsList.slice(0, 2).map((item) => (
-                  <div key={item.id} className="border-l-2 border-indigo-400 pl-4 py-1">
-                    <div className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider">
-                      {item.category || item.tag || "CAMPUS NEWS"}
-                    </div>
-                    <div className="text-xs leading-relaxed text-indigo-50 mt-0.5 font-semibold">
-                      {item.title}
-                    </div>
-                    {item.summary && (
-                      <div className="text-[11px] leading-relaxed text-indigo-200/90 mt-1 line-clamp-2">
-                        {item.summary}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Top Performing Surveys Card (Calculated Dynamically from ratings) */}
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                <span>Top Performing Surveys</span>
-              </h3>
-              <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-semibold border border-indigo-200">
-                Verified Ratings
-              </span>
-            </div>
-
-            {dynamicTopRatedSurveys.length === 0 ? (
-              <div className="py-6 text-center text-xs text-slate-400">
-                Surveys with 4.4+ rating and volume will appear here.
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {dynamicTopRatedSurveys.slice(0, 3).map((s, idx) => {
-                  const perf = getSurveyPerformanceMetrics(s);
-                  return (
-                    <div
-                      key={s.id}
-                      onClick={() => handleLaunchSurvey(s)}
-                      className="flex items-center gap-3.5 group cursor-pointer hover:bg-slate-50 p-1 -mx-1 rounded-lg transition-colors"
-                      title="Click to view survey"
-                    >
-                      <div className="w-7 h-7 bg-indigo-50 text-indigo-700 rounded-lg flex items-center justify-center font-bold text-xs shrink-0">
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 truncate">
-                          {s.title}
-                        </div>
-                        <div className="w-full bg-slate-100 h-1.5 rounded-full mt-1.5 overflow-hidden">
-                          <div
-                            className="h-full bg-indigo-600 rounded-full transition-all"
-                            style={{ width: `${perf.satisfactionPercent}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-[11px] font-bold text-slate-800">{perf.ratingAverage.toFixed(1)} ★</div>
-                        <div className="text-[9px] text-slate-400">{perf.satisfactionPercent}% sat.</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Local Response Insights Quote */}
-            <div className="mt-6 pt-5 border-t border-slate-100">
-              <div className="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-widest">
-                Local Response Insights
-              </div>
-              {latestLocalInsight ? (
-                <div className="bg-slate-50 p-3 rounded-lg italic text-[11px] text-slate-600 leading-relaxed border border-slate-200/60">
-                  "{latestLocalInsight.quote}"
-                  <span className="not-italic font-bold text-indigo-600 ml-1 block mt-1">
-                    — {latestLocalInsight.sentiment} ({latestLocalInsight.lang})
-                  </span>
-                </div>
-              ) : (
-                <div className="bg-slate-50 p-3 rounded-lg text-[11px] text-slate-400 text-center py-4 border border-dashed border-slate-200">
-                  No local feedback comments recorded yet.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter and Theme Selector Bar */}
+      {/* Filter and Category Selector Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3.5">
-        {/* Row 1: Thematic Domains */}
+        {/* Row 1: Categories */}
         <div className="flex items-center justify-between flex-wrap gap-2.5">
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
-            {themeTabs.map((tab) => {
-              const isSelected = selectedTheme === tab.id;
+            {categoryTabs.map((tab) => {
+              const isSelected = categoryFilter === tab.id;
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setSelectedTheme(tab.id)}
+                  onClick={() => setCategoryFilter(tab.id)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${
                     isSelected
                       ? "bg-indigo-600 text-white shadow-xs font-semibold"
@@ -784,7 +277,18 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
             })}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={internalSearch}
+                onChange={(e) => setInternalSearch(e.target.value)}
+                placeholder="Search surveys..."
+                className="pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 outline-hidden placeholder:text-slate-400 w-36 sm:w-44 focus:bg-white focus:border-indigo-400"
+              />
+            </div>
+
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
@@ -794,21 +298,9 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
               <option value="unanswered">Pending</option>
               <option value="answered">Completed</option>
             </select>
-
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 outline-hidden"
-            >
-              <option value="all">Category: All</option>
-              <option value="Course">Course</option>
-              <option value="Instructor">Instructor</option>
-              <option value="Facilities">Facilities</option>
-              <option value="Student Services">Student Services</option>
-              <option value="General">General</option>
-            </select>
           </div>
         </div>
+
 
         {/* Row 2: Performance Filters */}
         <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
@@ -896,7 +388,6 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
             </p>
             <button
               onClick={() => {
-                setSelectedTheme("all");
                 setPerformanceFilter("all");
                 setInternalSearch("");
                 setStatusFilter("all");

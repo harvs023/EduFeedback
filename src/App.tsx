@@ -548,7 +548,6 @@ export default function App() {
       title: surveyData.title || "Untitled Survey",
       cat: surveyData.cat || "General",
       desc: surveyData.desc || "",
-      themeSection: surveyData.themeSection || "academics",
       isTrending: surveyData.isTrending || false,
       academicYear: surveyData.academicYear || "2025-2026",
       created: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
@@ -574,7 +573,7 @@ export default function App() {
         user: currentUser?.name || "Admin",
         pos: currentUser?.pos || "Faculty",
         action: finalStatus === "pending" ? "Survey Submitted for Approval" : "Survey Created",
-        details: `${finalStatus === "pending" ? "Submitted" : "Created"} new survey "${newSurvey.title}" in section "${newSurvey.themeSection}"`,
+        details: `${finalStatus === "pending" ? "Submitted" : "Created"} new survey "${newSurvey.title}"`,
       });
 
       await notifyAdminIfPending(newSurvey);
@@ -1443,7 +1442,6 @@ export default function App() {
               }
               currentUser={currentUser}
               userResponses={responses}
-              newsList={newsList}
               searchQuery={searchQuery}
               selectedCategory={selectedCategory}
               onTakeSurvey={(survey) => {

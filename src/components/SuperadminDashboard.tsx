@@ -724,7 +724,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
               {/* Secondary Filter: Category */}
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Category Theme
+                  Category
                 </label>
                 <select
                   value={filterCategory}

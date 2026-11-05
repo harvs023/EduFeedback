@@ -14,7 +14,7 @@ import {
   Eye,
   CheckCircle,
   Clock,
-  Copy,
+  CopyPlus,
   AlertCircle,
   AlertTriangle,
   ExternalLink,
@@ -47,6 +47,7 @@ interface MySurveysScreenProps {
   onViewAnalytics: (surveyId: string | number) => void;
   onPreviewSurvey?: (survey: Survey) => void;
   onArchiveSurvey?: (surveyId: string | number, reason: string) => Promise<void> | void;
+  onWithdrawSurvey?: (surveyId: string | number) => Promise<void> | void;
   onFlagSurvey?: (surveyId: string | number, reason: string) => void;
   onClearFlag?: (surveyId: string | number) => void;
   onDuplicateSurvey?: (survey: Survey) => void;
@@ -65,6 +66,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
   onViewAnalytics,
   onPreviewSurvey,
   onArchiveSurvey,
+  onWithdrawSurvey,
   onFlagSurvey,
   onClearFlag,
   onDuplicateSurvey,
@@ -558,6 +560,8 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
             const canArchive = isOwner && isLiveOrScheduled && Boolean(onArchiveSurvey);
             const hasResults = isLiveOrScheduled || isArchived;
             const isConfirmingArchive = archiveSurveyId === survey.id;
+            const canWithdraw = isOwner && isPending && Boolean(onWithdrawSurvey);
+
             const isFlagged = Boolean(survey.flagged);
             const availability = getSurveyAvailability(survey);
 
@@ -883,6 +887,23 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                         <span>Waiting for review</span>
                       </span>
                     )}
+                    {canWithdraw && (
+                      <button
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: "Withdraw from review?",
+                            message: `"${survey.title}" goes back to your drafts. The administrator will no longer see it. You can edit it and submit it again.`,
+                            confirmLabel: "Withdraw",
+                          });
+                          if (ok && onWithdrawSurvey) await onWithdrawSurvey(survey.id);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Take it back to draft so you can edit it"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Withdraw</span>
+                      </button>
+                    )}
                     {hasResults && (
                       <button
                         onClick={() => onViewAnalytics(survey.id)}
@@ -939,7 +960,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                         className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
                         title="Copy as a new draft"
                       >
-                        <Copy className="w-3.5 h-3.5" />
+                        <CopyPlus className="w-3.5 h-3.5" />
                       </button>
                     )}
 

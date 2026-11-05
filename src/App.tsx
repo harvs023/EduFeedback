@@ -995,6 +995,29 @@ export default function App() {
     }
   };
 
+  // Owner takes a pending survey back to draft so it can be edited again.
+  const handleWithdrawSurvey = async (surveyId: string | number) => {
+    const srv = surveys.find((s) => s.id === surveyId);
+    if (!srv || srv.status !== "pending") {
+      showToast("Only surveys waiting for review can be withdrawn.", "info");
+      return;
+    }
+    try {
+      await DatabaseService.withdrawSurvey(surveyId);
+      setSurveys((prev) => prev.map((s) => (s.id === surveyId ? { ...s, status: "draft" } : s)));
+      await logActivityAndRefresh({
+        user: currentUser?.name || "User",
+        pos: currentUser?.pos || "Faculty",
+        action: "Survey Withdrawn",
+        details: `Withdrew "${srv.title}" from review (back to draft)`,
+      });
+      showToast(`"${srv.title}" is back in your drafts. You can edit it and submit again.`, "success");
+    } catch (err: any) {
+      console.warn("Failed to withdraw survey:", err);
+      showToast("Could not withdraw the survey. Please try again.", "info");
+    }
+  };
+
   // Owner closes their own live survey early. Only the archive fields change, as the rules require.
   const handleArchiveSurvey = async (surveyId: string | number, reason: string) => {
     const srv = surveys.find((s) => s.id === surveyId);
@@ -1028,8 +1051,28 @@ export default function App() {
 
   const handleDuplicateSurvey = async (survey: Survey) => {
     const newId = `srv_${Date.now()}`;
+    // A copy is a new, independent survey: same questions and blocks, no link to the original,
+    // and none of the original's review / archive / flag details.
+    const {
+      submittedAt: _submittedAt,
+      reviewedBy: _reviewedBy,
+      reviewedAt: _reviewedAt,
+      rejectionReason: _rejectionReason,
+      archivedAt: _archivedAt,
+      archivedBy: _archivedBy,
+      archiveReason: _archiveReason,
+      flagReason: _flagReason,
+      flaggedBy: _flaggedBy,
+      flaggedAt: _flaggedAt,
+      eligibleCount: _eligibleCount,
+      criteriaAcceptedAt: _criteriaAcceptedAt,
+      previousSurveyId: _previousSurveyId,
+      seriesId: _seriesId,
+      ratingAverage: _ratingAverage,
+      ...base
+    } = survey;
     const duplicated: Survey = {
-      ...survey,
+      ...base,
       id: newId,
       title: `${survey.title} (Copy)`,
       status: "draft",
@@ -1037,8 +1080,11 @@ export default function App() {
       created: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       createdAtTimestamp: Date.now(),
       flagged: false,
-      flagReason: undefined,
-      owner: currentUser?.email || survey.owner,
+      isTrending: false,
+      openDate: null,
+      closeDate: null,
+      closes: survey.openEnded ? "Until archived" : "Open",
+      owner: (currentUser?.email || survey.owner).trim().toLowerCase(),
       ownerName: currentUser?.name || survey.ownerName,
     };
     try {
@@ -1048,9 +1094,9 @@ export default function App() {
         user: currentUser?.name || "Admin",
         pos: currentUser?.pos || "Admin",
         action: "Survey Duplicated",
-        details: `Cloned survey "${survey.title}" into draft instrument`,
+        details: `Copied survey "${survey.title}" as a new draft`,
       });
-      showToast("Survey duplicated as draft!", "success");
+      showToast("Survey copied as a new draft. Set its dates, then submit it.", "success");
     } catch (err: any) {
       showToast(err.message || "Failed to duplicate survey.", "info");
     }
@@ -1537,6 +1583,7 @@ export default function App() {
               }}
               onPreviewSurvey={(survey) => setPreviewSurvey(survey)}
               onArchiveSurvey={handleArchiveSurvey}
+              onWithdrawSurvey={handleWithdrawSurvey}
               onFlagSurvey={handleFlagSurvey}
               onClearFlag={handleClearFlag}
               onDuplicateSurvey={handleDuplicateSurvey}
@@ -1603,6 +1650,14 @@ export default function App() {
                 currentUser={currentUser}
                 categories={DEFAULT_SURVEY_CATEGORIES}
                 topics={topics}
+                myPendingCount={
+                  surveys.filter(
+                    (s) =>
+                      s.status === "pending" &&
+                      (s.owner || "").trim().toLowerCase() === (currentUser?.email || "").trim().toLowerCase() &&
+                      s.id !== editingSurvey?.id
+                  ).length
+                }
                 onSaveSurvey={handleSaveSurvey}
                 initialSurvey={editingSurvey || undefined}
                 onCancel={() => {

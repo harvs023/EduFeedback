@@ -353,6 +353,18 @@ export const FirestoreSurveyService = {
     }
   },
 
+  /** Owner takes a pending survey back to draft (the rules allow exactly this change). */
+  async withdraw(surveyId: string | number): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    const docId = String(surveyId);
+    try {
+      await updateDoc(doc(firestore, COLLECTIONS.SURVEYS, docId), { status: "draft" });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.SURVEYS}/${docId}`);
+    }
+  },
+
   async incrementResponses(surveyId: string | number): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) throw new Error("Firestore is not initialized.");

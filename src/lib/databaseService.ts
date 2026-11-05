@@ -230,6 +230,10 @@ export class DatabaseService {
     await FirestoreSurveyService.archive(surveyId, archivedBy.trim().toLowerCase(), archiveReason, archivedAt);
   }
 
+  static async withdrawSurvey(surveyId: string | number): Promise<void> {
+    await FirestoreSurveyService.withdraw(surveyId);
+  }
+
   static async deleteSurvey(surveyId: string | number): Promise<void> {
     await FirestoreSurveyService.delete(surveyId);
   }

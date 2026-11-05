@@ -120,6 +120,8 @@ export interface Survey {
   archivedBy?: string;
   archiveReason?: string;
   topicBlocks?: Array<{ id: string; topicId: string; title: string; description?: string }>;
+  /** True = no closing date; the survey runs until the owner or admin archives it. */
+  openEnded?: boolean;
 }
 
 export interface Answer {

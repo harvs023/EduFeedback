@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Survey, Question, UserProfile, TargetAudience, Topic } from "../types";
 import { DEPARTMENTS_DATA } from "../data/initialData";
 import { SurveyCriteriaModal } from "./SurveyCriteriaModal";
+import { schoolYearFor } from "../lib/schoolYear";
 import { TopicBlocksEditor } from "./TopicBlocksEditor";
 import { prepareBlocks, validateBlocks, cleanBlocks, orderQuestionsByBlock } from "../lib/topicBlocks";
 import {
@@ -17,6 +18,9 @@ import {
   Clock,
   Tag,
 } from "lucide-react";
+
+/** Most surveys one person may have waiting for review at the same time (admin has no limit). */
+const MAX_PENDING_SURVEYS = 3;
 
 const DEFAULT_QUESTIONS: Question[] = [
   {
@@ -38,6 +42,8 @@ interface SurveyBuilderProps {
   currentUser: UserProfile | null;
   categories: string[];
   topics?: Topic[];
+  /** How many of this user's other surveys are waiting for review. */
+  myPendingCount?: number;
   initialSurvey?: Survey | null;
   onSaveSurvey: (surveyData: Partial<Survey>, status: "draft" | "pending" | "published" | "scheduled") => void;
   onCancel?: () => void;
@@ -47,6 +53,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   currentUser,
   categories,
   topics = [],
+  myPendingCount = 0,
   initialSurvey,
   onSaveSurvey,
   onCancel,
@@ -59,7 +66,8 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   const [purpose, setPurpose] = useState<string>(initialSurvey?.purpose || "");
   const [criteriaAcceptedAt, setCriteriaAcceptedAt] = useState<number | null>(initialSurvey?.criteriaAcceptedAt ?? null);
   const [submitErrors, setSubmitErrors] = useState<string[]>([]);
-  const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || "2025-2026");
+  // Filled in automatically (school year starts in August); an existing survey keeps its own value.
+  const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || schoolYearFor());
 
   // Scheduling
   const [scheduleType, setScheduleType] = useState<"immediate" | "scheduled">(
@@ -67,6 +75,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   );
   const [openDate, setOpenDate] = useState<string>(initialSurvey?.openDate || "");
   const [closeDate, setCloseDate] = useState<string>(initialSurvey?.closeDate || "");
+  const [openEnded, setOpenEnded] = useState<boolean>(Boolean(initialSurvey?.openEnded));
 
   // Target audience
   const [targetType, setTargetType] = useState<TargetAudience["type"]>(initialSurvey?.targetAudience?.type || "all");
@@ -103,10 +112,11 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       setDesc(initialSurvey.desc || "");
       setPurpose(initialSurvey.purpose || "");
       setCriteriaAcceptedAt(initialSurvey.criteriaAcceptedAt ?? null);
-      setAcademicYear(initialSurvey.academicYear || "2025-2026");
+      setAcademicYear(initialSurvey.academicYear || schoolYearFor());
       setScheduleType(initialSurvey.status === "scheduled" || initialSurvey.openDate ? "scheduled" : "immediate");
       setOpenDate(initialSurvey.openDate || "");
       setCloseDate(initialSurvey.closeDate || "");
+      setOpenEnded(Boolean(initialSurvey.openEnded));
       setTargetType(initialSurvey.targetAudience?.type || "all");
       setSelectedRoles(initialSurvey.targetAudience?.filters?.roles || ["students", "faculty", "officers"]);
       if (initialSurvey.questions && initialSurvey.questions.length > 0) {
@@ -127,6 +137,13 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     const errors: string[] = [];
     if (!title.trim()) errors.push("Enter a survey title.");
 
+    if (finalStatus === "pending" && myPendingCount >= MAX_PENDING_SURVEYS) {
+      errors.push(
+        `You already have ${myPendingCount} surveys waiting for review (the limit is ${MAX_PENDING_SURVEYS}). ` +
+          "Wait for a decision or withdraw one in My Surveys. You can still save this one as a draft."
+      );
+    }
+
     if (finalStatus !== "draft") {
       if (title.trim() && title.trim().length < 5) errors.push("The title must be at least 5 characters.");
       if (purpose.trim().length < 20) errors.push("Describe the purpose of the survey (at least 20 characters).");
@@ -135,8 +152,10 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       }
 
       if (scheduleType === "scheduled" && !openDate) errors.push("Set the opening date.");
-      if (!closeDate) {
-        errors.push("Set a closing date.");
+      if (openEnded) {
+        // No closing date: runs until archived.
+      } else if (!closeDate) {
+        errors.push("Set a closing date, or choose \"Keeps running until I archive it\".");
       } else {
         const close = new Date(closeDate);
         if (isNaN(close.getTime()) || close.getTime() <= Date.now()) {
@@ -191,8 +210,13 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       responses: initialSurvey?.responses ?? 0,
       created: initialSurvey?.created || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       openDate: scheduleType === "scheduled" ? openDate : (initialSurvey?.openDate || new Date().toISOString()),
-      closeDate: closeDate || null,
-      closes: closeDate ? new Date(closeDate).toLocaleDateString() : (initialSurvey?.closes || "Open"),
+      closeDate: openEnded ? null : closeDate || null,
+      closes: openEnded
+        ? "Until archived"
+        : closeDate
+        ? new Date(closeDate).toLocaleDateString()
+        : initialSurvey?.closes || "Open",
+      openEnded,
       owner: (initialSurvey?.owner || currentUser?.email || "faculty@school.edu.ph").trim().toLowerCase(),
       ownerName: initialSurvey?.ownerName || currentUser?.name || "Campus Instructor",
       targetAudience: {
@@ -318,16 +342,14 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                Academic Year
+                School Year
               </label>
-              <select
-                value={academicYear}
-                onChange={(e) => setAcademicYear(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-800"
+              <div
+                className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-600"
+                title="Set automatically from the date. The school year starts in August."
               >
-                <option value="2025-2026">AY 2025–2026 (Current)</option>
-                <option value="2024-2025">AY 2024–2025</option>
-              </select>
+                SY {academicYear.replace("-", "–")} <span className="font-medium text-slate-400">(automatic)</span>
+              </div>
             </div>
           </div>
 
@@ -521,14 +543,45 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
             </div>
           )}
           <div>
-            <label className="block text-xs font-bold text-blue-900 mb-1">Closing date and time (required)</label>
-            <input
-              type="datetime-local"
-              value={closeDate}
-              onChange={(e) => setCloseDate(e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
-            />
-            <p className="text-[11px] text-blue-900/70 mt-1">After this time the survey stops accepting responses and is archived.</p>
+            <label className="block text-xs font-bold text-blue-900 mb-1">When does it close?</label>
+            <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 mb-2">
+              <button
+                type="button"
+                onClick={() => setOpenEnded(false)}
+                className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                  !openEnded ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                On a date
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpenEnded(true)}
+                className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                  openEnded ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                Keeps running until I archive it
+              </button>
+            </div>
+            {openEnded ? (
+              <p className="text-[11px] text-blue-900/70">
+                No closing date. It accepts responses until you archive it in My Surveys. Analytics can show results per
+                year, semester or month, so long-running surveys stay easy to read.
+              </p>
+            ) : (
+              <>
+                <input
+                  type="datetime-local"
+                  value={closeDate}
+                  onChange={(e) => setCloseDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs"
+                />
+                <p className="text-[11px] text-blue-900/70 mt-1">
+                  After this time the survey stops accepting responses and is archived.
+                </p>
+              </>
+            )}
           </div>
         </div>
 

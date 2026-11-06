@@ -8,7 +8,7 @@ import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
 import { HistoricalAnalyticsView } from "./components/HistoricalAnalyticsView";
 import { TagalogMLTrainingStudio } from "./components/TagalogMLTrainingStudio";
-import { NewsAnnouncementsFeed } from "./components/NewsAnnouncementsFeed";
+import { NewsAnnouncementsFeed, MAX_PENDING_NEWS } from "./components/NewsAnnouncementsFeed";
 import { Dashboard } from "./components/Dashboard";
 import { SurveyBuilder } from "./components/SurveyBuilder";
 import { MySurveysScreen } from "./components/MySurveysScreen";
@@ -52,6 +52,7 @@ export default function App() {
   // Modals State
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
   const [previewSurvey, setPreviewSurvey] = useState<Survey | null>(null);
+  const [answeredSurveyIds, setAnsweredSurveyIds] = useState<string[]>([]);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
@@ -103,7 +104,7 @@ export default function App() {
       const [cloudResponses, cloudUsers, cloudNews, cloudMl, cloudLogs] = await Promise.all([
         DatabaseService.getResponses(user, cloudSurveys).catch(() => []),
         isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
-        DatabaseService.getNews().catch(() => []),
+        DatabaseService.getNews(user).catch(() => []),
         isAuthor ? DatabaseService.getMLDataset(user).catch(() => []) : Promise.resolve([]),
         isSuperadmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
       ]);
@@ -128,6 +129,7 @@ export default function App() {
         freshTopics = [];
       }
       setTopics(freshTopics);
+      setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load data from Firestore.", "info");
     }
@@ -180,6 +182,7 @@ export default function App() {
         setResponses([]);
         setLogs([]);
         setTopics([]);
+        setAnsweredSurveyIds([]);
       }
     });
 
@@ -268,7 +271,7 @@ export default function App() {
       const [scopedResponses, scopedUsers, freshNews, freshMl, freshLogs] = await Promise.all([
         DatabaseService.getResponses(user, activeSurveys).catch(() => []),
         isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
-        DatabaseService.getNews().catch(() => []),
+        DatabaseService.getNews(user).catch(() => []),
         isAuthor ? DatabaseService.getMLDataset(user).catch(() => []) : Promise.resolve([]),
         isSuperadmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
       ]);
@@ -292,6 +295,7 @@ export default function App() {
         freshTopics = [];
       }
       setTopics(freshTopics);
+      setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load Firestore data for user.", "info");
     }
@@ -315,6 +319,7 @@ export default function App() {
     setResponses([]);
     setLogs([]);
     setTopics([]);
+    setAnsweredSurveyIds([]);
     showToast("Signed out successfully.", "info");
   };
 
@@ -377,11 +382,13 @@ export default function App() {
     }
 
     const newResponse: SurveyResponse = {
-      id: `resp_${Date.now()}`,
+      id: `resp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
       surveyId: activeSurveyForTaking.id,
       surveyTitle: activeSurveyForTaking.title,
       category: activeSurveyForTaking.cat,
-      userEmail: isAnonymous ? "anonymous@school.edu.ph" : currentUser?.email || "anonymous@school.edu.ph",
+      userEmail: isAnonymous
+        ? "anonymous@school.edu.ph"
+        : (currentUser?.email || "anonymous@school.edu.ph").trim().toLowerCase(),
       userName: isAnonymous ? "Anonymous Respondent" : currentUser?.name,
       isAnonymous,
       date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
@@ -390,30 +397,32 @@ export default function App() {
       department: currentUser?.department || "College of Computer Studies",
       program: currentUser?.program || "BS Computer Science",
       year: currentUser?.year || "3rd Year",
-      section: currentUser?.section || "CS-3A",
+      // Respondents are told only department, program and year level stay with anonymous answers.
+      ...(isAnonymous ? {} : { section: currentUser?.section || "CS-3A" }),
       sentimentAnalysis: detectedSentiment,
       answers,
     };
 
+    await DatabaseService.saveResponse(newResponse, currentUser?.email || "");
+
+    // The answer window stays open here so it can show the receipt; "Done" closes it.
+    setSurveys((prev) =>
+      prev.map((s) => (s.id === activeSurveyForTaking.id ? { ...s, responses: (s.responses || 0) + 1 } : s))
+    );
+    setResponses((prev) => [newResponse, ...prev]);
+    setAnsweredSurveyIds((prev) => [...prev, String(activeSurveyForTaking.id)]);
+
     try {
-      await DatabaseService.saveResponse(newResponse);
-
-      // Update in-memory survey responses count
-      setSurveys((prev) =>
-        prev.map((s) => (s.id === activeSurveyForTaking.id ? { ...s, responses: (s.responses || 0) + 1 } : s))
-      );
-      setResponses((prev) => [newResponse, ...prev]);
-
+      // An anonymous answer must never put the person's name in the activity log.
       await logActivityAndRefresh({
-        user: currentUser?.name || "Student",
-        pos: currentUser?.pos || "Student",
+        user: isAnonymous ? "Anonymous Respondent" : currentUser?.name || "Student",
+        pos: isAnonymous ? "Anonymous" : currentUser?.pos || "Student",
         action: "Survey Response Submitted",
         details: `Submitted response for survey: "${activeSurveyForTaking.title}"`,
       });
-      setActiveSurveyForTaking(null);
 
       // Dynamic Notification: Notify survey owner
-      const targetOwner = activeSurveyForTaking.creatorEmail || activeSurveyForTaking.owner;
+      const targetOwner = activeSurveyForTaking.owner;
       if (targetOwner && targetOwner.toLowerCase() !== currentUser?.email.toLowerCase()) {
         try {
           await DatabaseService.addNotification({
@@ -443,10 +452,8 @@ export default function App() {
         const refreshed = await DatabaseService.getNotifications(currentUser.email);
         setNotifications(refreshed);
       }
-
-      showToast("Survey response submitted successfully!", "success");
-    } catch (err: any) {
-      showToast(err.message || "Failed to submit survey response.", "info");
+    } catch (err) {
+      console.warn("Response saved, but a follow-up step failed:", err);
     }
   };
 
@@ -642,43 +649,135 @@ export default function App() {
   };
 
   // News Announcements Handlers
-  const handleAddNews = async (news: Omit<NewsAnnouncement, "id" | "likesCount">) => {
+  // Returns true when the post was saved, so the form knows it can close.
+  const handleAddNews = async (news: Omit<NewsAnnouncement, "id" | "likesCount">): Promise<boolean> => {
+    const isAdminUser = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
+    const myEmail = (currentUser?.email || "").trim().toLowerCase();
+    if (!isAdminUser && currentUser?.canPostNews === false) {
+      showToast("Posting news is switched off for your account. Please contact the administrator.", "info");
+      return false;
+    }
+    const myPending = newsList.filter((n) => n.status === "pending" && n.authorEmail === myEmail).length;
+    if (!isAdminUser && myPending >= MAX_PENDING_NEWS) {
+      showToast(`You already have ${MAX_PENDING_NEWS} posts waiting for review.`, "info");
+      return false;
+    }
+
+    const now = Date.now();
     const newPost: NewsAnnouncement = {
-      id: `news_${Date.now()}`,
-      likesCount: 0,
       ...news,
+      id: `news_${now}_${Math.random().toString(36).slice(2, 9)}`,
+      likesCount: 0,
+      authorEmail: myEmail,
+      submittedAt: now,
+      // Only the administrator publishes directly or pins; everyone else goes through approval.
+      status: isAdminUser ? "published" : "pending",
+      isPinned: isAdminUser ? Boolean(news.isPinned) : false,
+      ...(isAdminUser ? { reviewedBy: myEmail, reviewedAt: now } : {}),
     };
+
     try {
       await DatabaseService.saveNews(newPost);
-      setNewsList((prev) => [newPost, ...prev]);
+    } catch (err: any) {
+      console.warn("Could not save the news post:", err);
+      showToast("Could not save your post. Please try again.", "info");
+      return false;
+    }
+    setNewsList((prev) => [newPost, ...prev]);
+    showToast(
+      isAdminUser ? "Announcement published!" : "Post submitted. The administrator will review it.",
+      "success"
+    );
 
+    try {
       await logActivityAndRefresh({
-        user: currentUser?.name || "Admin",
-        pos: currentUser?.pos || "Admin",
-        action: "Campus News Published",
-        details: `Published institutional announcement: "${newPost.title}"`,
+        user: currentUser?.name || "User",
+        pos: currentUser?.pos || "User",
+        action: isAdminUser ? "Campus News Published" : "Campus News Submitted",
+        details: `${isAdminUser ? "Published" : "Submitted for review"}: "${newPost.title}"`,
       });
-
-      // Dynamic Notification: Broadcast announcement to administrator
-      try {
+      if (!isAdminUser) {
         await DatabaseService.addNotification({
           to: MASTER_ADMIN_EMAIL.toLowerCase(),
-          title: "📢 Campus Announcement",
-          message: newPost.title,
+          title: "📢 News awaiting approval",
+          message: `"${newPost.title}" by ${newPost.author} is waiting for your review.`,
           icon: "📢",
           type: "news",
           data: { newsId: newPost.id },
         });
-      } catch {}
-      if (currentUser?.email) {
-        const refreshed = await DatabaseService.getNotifications(currentUser.email);
-        setNotifications(refreshed);
       }
-
-      showToast("Campus announcement published!", "success");
-    } catch (err: any) {
-      showToast(err.message || "Failed to publish announcement.", "info");
+    } catch (err) {
+      console.warn("Post saved, but a follow-up step failed:", err);
     }
+    return true;
+  };
+
+  const handleReviewNews = async (id: string, decision: "approve" | "reject", reason: string = "") => {
+    const post = newsList.find((n) => n.id === id);
+    if (!post || post.status !== "pending") {
+      showToast("Only posts waiting for review can be approved or rejected.", "info");
+      return;
+    }
+    const cleanReason = reason.trim();
+    const updated: NewsAnnouncement = {
+      ...post,
+      status: decision === "approve" ? "published" : "rejected",
+      reviewedBy: (currentUser?.email || "").trim().toLowerCase(),
+      reviewedAt: Date.now(),
+      rejectionReason: decision === "reject" ? cleanReason : "",
+    };
+    try {
+      await DatabaseService.saveNews(updated);
+    } catch (err: any) {
+      console.warn("Could not review the news post:", err);
+      showToast("Could not save your decision. Please try again.", "info");
+      return;
+    }
+    setNewsList((prev) => prev.map((n) => (n.id === id ? updated : n)));
+    showToast(decision === "approve" ? `"${post.title}" is now published.` : `"${post.title}" was rejected.`, "success");
+
+    try {
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Administrator",
+        pos: currentUser?.pos || "Superadmin",
+        action: decision === "approve" ? "News Approved" : "News Rejected",
+        details: `${decision === "approve" ? "Approved" : "Rejected"} "${post.title}"${cleanReason ? `. Reason: ${cleanReason}` : ""}`,
+      });
+      if (post.authorEmail) {
+        await DatabaseService.addNotification({
+          to: post.authorEmail,
+          title: decision === "approve" ? "✅ News post approved" : "❌ News post rejected",
+          message:
+            decision === "approve"
+              ? `Your post "${post.title}" is now published.`
+              : `Your post "${post.title}" was rejected: ${cleanReason}`,
+          icon: decision === "approve" ? "✅" : "❌",
+          type: "news",
+          data: { newsId: id },
+        });
+      }
+    } catch (err) {
+      console.warn("Decision saved, but a follow-up step failed:", err);
+    }
+  };
+
+  const handleDeleteNews = async (id: string) => {
+    const post = newsList.find((n) => n.id === id);
+    try {
+      await DatabaseService.deleteNews(id);
+    } catch (err: any) {
+      console.warn("Could not delete the news post:", err);
+      showToast("Could not delete the post. Please try again.", "info");
+      return;
+    }
+    setNewsList((prev) => prev.filter((n) => n.id !== id));
+    showToast("Post deleted.", "info");
+    await logActivityAndRefresh({
+      user: currentUser?.name || "User",
+      pos: currentUser?.pos || "User",
+      action: "News Deleted",
+      details: `Deleted news post "${post?.title || id}"`,
+    });
   };
 
   const handleLikeNews = async (id: string) => {
@@ -1484,7 +1583,7 @@ export default function App() {
           onCategoryChange={setSelectedCategory}
           notifications={notifications}
           unreadNotifsCount={notifications.filter((n) => !n.read).length}
-          unreadNewsCount={newsList.length}
+          unreadNewsCount={newsList.filter((n) => n.status === "published" || !n.status).length}
           flaggedSurveysCount={flaggedCount}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onMarkNotificationRead={handleMarkNotificationRead}
@@ -1501,8 +1600,10 @@ export default function App() {
               notifications={notifications}
               users={isSuperadmin ? users : []}
               currentUser={currentUser}
+              answeredSurveyIds={answeredSurveyIds}
               onNavigate={handleNavigate}
               onLikeNews={handleLikeNews}
+              onDeleteNews={handleDeleteNews}
               onAddNews={handleAddNews}
               onMarkNotificationRead={handleMarkNotificationRead}
               onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
@@ -1522,6 +1623,7 @@ export default function App() {
               }
               currentUser={currentUser}
               userResponses={responses}
+              answeredSurveyIds={answeredSurveyIds}
               searchQuery={searchQuery}
               selectedCategory={selectedCategory}
               onTakeSurvey={(survey) => {
@@ -1529,6 +1631,15 @@ export default function App() {
                   setAuthModalMode("login");
                   setShowAuthModal(true);
                   showToast("Please sign in or register to take this survey.", "info");
+                  return;
+                }
+                const myEmail = currentUser.email.trim().toLowerCase();
+                const hasNamedAnswer = responses.some(
+                  (r) =>
+                    String(r.surveyId) === String(survey.id) && (r.userEmail || "").trim().toLowerCase() === myEmail
+                );
+                if (answeredSurveyIds.includes(String(survey.id)) && !hasNamedAnswer) {
+                  showToast("You already answered this survey anonymously. Each person can answer once.", "info");
                   return;
                 }
                 setActiveSurveyForTaking(survey);
@@ -1641,6 +1752,7 @@ export default function App() {
               currentUser={currentUser}
               onAddNews={handleAddNews}
               onLikeNews={handleLikeNews}
+              onDeleteNews={handleDeleteNews}
             />
           )}
 
@@ -1710,6 +1822,7 @@ export default function App() {
               onAddUser={handleAddUser}
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
+              onReviewNews={handleReviewNews}
               onRestoreBackup={handleRestoreBackup}
               onSaveTopic={handleSaveTopic}
               onDeleteTopic={handleDeleteTopic}

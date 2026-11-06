@@ -50,6 +50,11 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   onApproveUser,
   onPromoteUser,
 }) => {
+  const countAuthoredSurveys = (email: string) => {
+    const clean = (email || "").trim().toLowerCase();
+    return surveys.filter((s) => (s.owner || "").trim().toLowerCase() === clean).length;
+  };
+
   // Search & Filter States
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
@@ -156,7 +161,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       `"${u.section || "N/A"}"`,
       `"${u.studentId || "N/A"}"`,
       `"${u.joined || "Aug 2024"}"`,
-      `"${u.surveys || 0}"`,
+      `"${countAuthoredSurveys(u.email)}"`,
     ]);
 
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
@@ -586,7 +591,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                       {/* Surveys Authored */}
                       <td className="p-4">
                         <span className="font-bold text-slate-900 text-xs">
-                          {surveys ? surveys.filter((s) => s.creatorEmail === u.email || (s.creatorRole === u.pos && !s.creatorEmail)).length : (u.surveys || 0)}
+                          {countAuthoredSurveys(u.email)}
                         </span>{" "}
                         <span className="text-[11px] text-slate-500">surveys</span>
                       </td>
@@ -927,13 +932,22 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 onUpdateUser(editingUser.email, {
                   name: editingUser.name,
                   pos: editingUser.pos,
-                  role: editingUser.pos === "Superadmin" ? "superadmin" : "user",
+                  // Role follows the position, the same pairs the security rules expect.
+                  role:
+                    editingUser.pos === "Superadmin"
+                      ? "superadmin"
+                      : editingUser.pos === "Faculty"
+                      ? "faculty"
+                      : editingUser.pos === "Student Officer"
+                      ? "officer"
+                      : "user",
                   department: editingUser.department,
                   program: editingUser.program,
                   year: editingUser.year,
                   section: editingUser.section,
                   studentId: editingUser.studentId,
                   status: editingUser.status,
+                  canPostNews: editingUser.canPostNews !== false,
                 });
                 setEditingUser(null);
               }}
@@ -1034,6 +1048,21 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   />
                 </div>
               </div>
+
+              <label className="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editingUser.canPostNews !== false}
+                  onChange={(e) => setEditingUser({ ...editingUser, canPostNews: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                />
+                <span>
+                  <span className="block font-bold text-slate-800">Can post news</span>
+                  <span className="block text-[11px] text-slate-500">
+                    Posts still need your approval before anyone sees them. Turn this off if the person misuses it.
+                  </span>
+                </span>
+              </label>
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button

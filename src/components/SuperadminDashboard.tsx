@@ -14,6 +14,7 @@ import { UserManagementView } from "./UserManagementView";
 import { DatabaseBackupView } from "./DatabaseBackupView";
 import { TopicsManager } from "./TopicsManager";
 import { SurveyApprovalsPanel } from "./SurveyApprovalsPanel";
+import { NewsApprovalsPanel } from "./NewsApprovalsPanel";
 import {
   ShieldAlert,
   Users,
@@ -48,6 +49,7 @@ import {
   TrendingUp,
   Tag,
   Building,
+  Newspaper,
 } from "lucide-react";
 
 interface SuperadminDashboardProps {
@@ -68,8 +70,6 @@ interface SuperadminDashboardProps {
   onUpdateUser?: (email: string, changes: Partial<UserProfile>) => void;
   onDeleteUser?: (email: string) => void;
   onRestoreBackup?: (backupData: SystemBackupData, mode: "overwrite" | "merge") => void;
-  onResetDatabase?: () => void;
-  onClearDatabase?: () => void;
   onNavigateToAnalytics?: (surveyId?: string | number | "all") => void;
   onNavigateToML?: () => void;
   onSaveTopic?: (topic: Topic) => Promise<void> | void;
@@ -77,7 +77,8 @@ interface SuperadminDashboardProps {
   onApproveSurvey?: (surveyId: string | number) => void;
   onRejectSurvey?: (surveyId: string | number, reason: string) => void;
   onTakedownSurvey?: (surveyId: string | number, reason: string) => void;
-  initialTab?: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics";
+  onReviewNews?: (id: string, decision: "approve" | "reject", reason?: string) => Promise<void> | void;
+  initialTab?: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news";
   showToast?: (text: string, type?: "success" | "info") => void;
 }
 
@@ -148,8 +149,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onUpdateUser,
   onDeleteUser,
   onRestoreBackup,
-  onResetDatabase,
-  onClearDatabase,
   onNavigateToAnalytics,
   onNavigateToML,
   onSaveTopic,
@@ -157,12 +156,13 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onApproveSurvey,
   onRejectSurvey,
   onTakedownSurvey,
+  onReviewNews,
   initialTab = "approvals",
   showToast,
 }) => {
   const { confirm, confirmDialog } = useConfirm();
   // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics">(
+  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics" | "news">(
     initialTab || "approvals"
   );
 
@@ -170,7 +170,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   const tabsContainerRef = useRef<HTMLDivElement>(null);
 
   const handleTabClick = (
-    tabId: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics",
+    tabId: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics" | "news",
     e?: React.MouseEvent<HTMLButtonElement>
   ) => {
     setActiveTab(tabId);
@@ -237,6 +237,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   const [backupGenerated, setBackupGenerated] = useState<string | null>(null);
 
   const pendingSurveys = useMemo(() => surveys.filter((s) => s.status === "pending"), [surveys]);
+  const pendingNewsCount = (newsList || []).filter((n) => n.status === "pending").length;
   const flaggedSurveys = useMemo(() => surveys.filter((s) => s.flagged), [surveys]);
 
   // Extract all unique creation years present in data
@@ -537,6 +538,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
             >
               {[
                 { id: "approvals", label: "Survey Approvals", count: pendingSurveys.length, icon: CheckCircle2 },
+                { id: "news", label: "News Approvals", count: pendingNewsCount, icon: Newspaper },
                 { id: "surveys", label: "Creation Timeframe Directory", count: surveys.length, icon: CalendarDays },
                 { id: "flagged", label: "Flagged Surveys Queue", count: flaggedSurveys.length, icon: Flag },
                 { id: "users", label: "User & Role Directory", count: users.length, icon: Users },
@@ -1339,6 +1341,10 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
       )}
 
       {/* TAB 6: SURVEY TOPICS */}
+      {activeTab === "news" && (
+        <NewsApprovalsPanel newsList={newsList || []} onReview={onReviewNews || (() => {})} />
+      )}
+
       {activeTab === "topics" && (
         <TopicsManager
           topics={topics}
@@ -1359,8 +1365,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           mlDataset={mlDataset}
           currentUser={currentUser}
           onRestoreBackup={onRestoreBackup || (() => {})}
-          onResetDatabase={onResetDatabase || (() => {})}
-          onClearDatabase={onClearDatabase || (() => {})}
           showToast={showToast || (() => {})}
         />
       )}

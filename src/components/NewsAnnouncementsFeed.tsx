@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useConfirm } from "./ConfirmDialog";
 import { NewsAnnouncement, UserProfile } from "../types";
 import {
   Newspaper,
@@ -13,15 +14,21 @@ import {
   Share2,
   X,
   ChevronDown,
+  Clock,
+  Trash2,
 } from "lucide-react";
+
+/** Most posts one person may have waiting for review (admin has no limit). */
+export const MAX_PENDING_NEWS = 3;
 
 interface NewsAnnouncementsFeedProps {
   newsList: NewsAnnouncement[];
   currentUser: UserProfile | null;
-  onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => void;
+  /** Resolves to true when the post was saved. */
+  onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => Promise<boolean>;
   onLikeNews: (id: string) => void;
+  onDeleteNews?: (id: string) => Promise<void> | void;
   limit?: number;
-  allowPostOnlyForSuperadmin?: boolean;
 }
 
 export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
@@ -29,9 +36,11 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
   currentUser,
   onAddNews,
   onLikeNews,
+  onDeleteNews,
   limit,
-  allowPostOnlyForSuperadmin = true,
 }) => {
+  const { confirm, confirmDialog } = useConfirm();
+  const [isSaving, setIsSaving] = useState<boolean>(false);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [activeArticle, setActiveArticle] = useState<NewsAnnouncement | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
@@ -46,36 +55,62 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
   const [isPinned, setIsPinned] = useState<boolean>(false);
 
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
-  const canPost = allowPostOnlyForSuperadmin
-    ? isSuperadmin
-    : isSuperadmin || currentUser?.pos === "Student Officer" || currentUser?.pos === "Faculty";
+  const canPost = isSuperadmin || (Boolean(currentUser) && currentUser?.canPostNews !== false);
+  const myEmail = (currentUser?.email || "").trim().toLowerCase();
+  const myPosts = newsList.filter((n) => n.authorEmail === myEmail);
+  const myPendingCount = myPosts.filter((n) => n.status === "pending").length;
+  const atPendingLimit = !isSuperadmin && myPendingCount >= MAX_PENDING_NEWS;
 
+  // The public feed shows published posts only (older posts without a status count as published).
   const filteredNews = newsList.filter((item) => {
+    if (item.status && item.status !== "published") return false;
     if (selectedCategory !== "all" && item.category !== selectedCategory) return false;
     return true;
   });
 
   const displayedNews = limit && !isExpanded ? filteredNews.slice(0, limit) : filteredNews;
 
-  const handleSubmitNewPost = (e: React.FormEvent) => {
+  const handleSubmitNewPost = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
+    if (!title.trim() || !content.trim() || atPendingLimit) return;
 
-    onAddNews({
-      title: title.trim(),
-      summary: summary.trim() || title.trim(),
-      content: content.trim(),
-      category,
-      author: currentUser?.name || "Campus Administration",
-      date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-      isPinned,
-      badgeText: badgeText.trim() || "Announcement",
+    setIsSaving(true);
+    try {
+      const saved = await onAddNews({
+        title: title.trim(),
+        summary: summary.trim() || title.trim(),
+        content: content.trim(),
+        category,
+        author: currentUser?.name || "Campus Administration",
+        date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        isPinned: isSuperadmin && isPinned,
+        badgeText: badgeText.trim() || "Announcement",
+      });
+      // Keep what was typed if saving failed, so nothing is lost.
+      if (saved) {
+        setTitle("");
+        setSummary("");
+        setContent("");
+        setIsPinned(false);
+        setShowCreateModal(false);
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeletePost = async (post: NewsAnnouncement) => {
+    if (!onDeleteNews) return;
+    const ok = await confirm({
+      title: "Delete this post?",
+      message: `"${post.title}" will be permanently deleted. This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
     });
-
-    setTitle("");
-    setSummary("");
-    setContent("");
-    setShowCreateModal(false);
+    if (ok) {
+      await onDeleteNews(post.id);
+      setActiveArticle(null);
+    }
   };
 
   const getCategoryBadgeColor = (cat: NewsAnnouncement["category"]) => {
@@ -95,6 +130,7 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
 
   return (
     <div className="space-y-8 pb-12">
+      {confirmDialog}
       {/* Top Banner */}
       <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white rounded-3xl p-6 sm:p-10 shadow-xl border border-slate-800 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -118,7 +154,7 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
               className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2 shrink-0 cursor-pointer"
             >
               <PlusCircle className="w-4 h-4" />
-              <span>Post Announcement</span>
+              <span>{isSuperadmin ? "Post Announcement" : "Post News"}</span>
             </button>
           )}
         </div>
@@ -146,6 +182,58 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
           ))}
         </div>
       </div>
+
+      {/* My Posts: status of the person's own posts */}
+      {!isSuperadmin && myPosts.length > 0 && (
+        <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-3">
+          <h2 className="font-serif text-base font-bold text-slate-900">My Posts ({myPosts.length})</h2>
+          <div className="space-y-2.5">
+            {myPosts.map((post) => (
+              <div key={post.id} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-slate-900">{post.title}</span>
+                  <div className="flex items-center gap-2">
+                    {post.status === "pending" && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200 inline-flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> Waiting for review
+                      </span>
+                    )}
+                    {post.status === "rejected" && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 inline-flex items-center gap-1">
+                        <X className="w-3 h-3" /> Rejected
+                      </span>
+                    )}
+                    {post.status === "published" && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Published
+                      </span>
+                    )}
+                    {(post.status === "pending" || post.status === "rejected") && onDeleteNews && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePost(post)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                        title="Delete this post"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {post.status === "rejected" && (
+                  <p className="text-[11px] text-rose-700">
+                    Reason: {post.rejectionReason || "No reason was given."} To change it, delete this post and post
+                    again.
+                  </p>
+                )}
+                {post.status === "published" && (
+                  <p className="text-[11px] text-slate-500">Only the administrator can remove a published post.</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* News Feed Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -292,12 +380,24 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
                 <span>{activeArticle.likesCount} Helpful Reactions</span>
               </button>
 
-              <button
-                onClick={() => setActiveArticle(null)}
-                className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold"
-              >
-                Close Memo
-              </button>
+              <div className="flex items-center gap-2">
+                {isSuperadmin && onDeleteNews && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePost(activeArticle)}
+                    className="px-3 py-2 bg-white border border-rose-200 hover:bg-rose-50 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setActiveArticle(null)}
+                  className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  Close Memo
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -315,8 +415,14 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
           >
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-serif text-lg font-bold text-slate-900">Post Institutional Announcement</h3>
-                <p className="text-xs text-slate-500">Publish action report or general campus update</p>
+                <h3 className="font-serif text-lg font-bold text-slate-900">
+                  {isSuperadmin ? "Post Institutional Announcement" : "Post News"}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {isSuperadmin
+                    ? "Publishes right away."
+                    : "The administrator reviews your post before anyone else can see it."}
+                </p>
               </div>
               <button
                 onClick={() => setShowCreateModal(false)}
@@ -389,18 +495,27 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
                 />
               </div>
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="pin-post"
-                  checked={isPinned}
-                  onChange={(e) => setIsPinned(e.target.checked)}
-                  className="rounded text-blue-600"
-                />
-                <label htmlFor="pin-post" className="text-xs font-medium text-slate-700">
-                  Pin this announcement to top of feed
-                </label>
-              </div>
+              {isSuperadmin && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="pin-post"
+                    checked={isPinned}
+                    onChange={(e) => setIsPinned(e.target.checked)}
+                    className="rounded text-blue-600"
+                  />
+                  <label htmlFor="pin-post" className="text-xs font-medium text-slate-700">
+                    Pin this announcement to top of feed
+                  </label>
+                </div>
+              )}
+
+              {atPendingLimit && (
+                <p className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-semibold text-amber-900">
+                  You already have {MAX_PENDING_NEWS} posts waiting for review. Wait for a decision or delete one in My
+                  Posts.
+                </p>
+              )}
 
               <div className="pt-2 flex justify-end gap-2">
                 <button
@@ -412,9 +527,10 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs"
+                  disabled={isSaving || atPendingLimit}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Publish Announcement
+                  {isSaving ? "Saving..." : isSuperadmin ? "Publish Announcement" : "Submit for Approval"}
                 </button>
               </div>
             </form>

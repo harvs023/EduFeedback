@@ -41,6 +41,14 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
 
+    function surveyPath(sid) {
+      return /databases/$(database)/documents/surveys/$(string(sid));
+    }
+
+    function myReceiptPath(sid) {
+      return /databases/$(database)/documents/users/$(myKey())/receipts/$(string(sid));
+    }
+
     match /topics/{topicId} {
       allow read: if isActive();
       allow write: if isAdmin();
@@ -76,6 +84,19 @@ service cloud.firestore {
                        'canCreateSurveys', 'canPostNews', 'restrictionReason']);
 
       allow create, update, delete: if isAdmin();
+    }
+
+    // ------------------------------------------------- "already answered" records
+    // One per person per survey. Holds only the survey id, with no answers or link to a
+    // response. Only its owner can read it, and it can never be edited or deleted.
+    match /users/{userId}/receipts/{surveyId} {
+      allow read: if isActive() && userId == myKey();
+      allow create: if isActive()
+        && userId == myKey()
+        && request.resource.data.keys().hasOnly(['surveyId'])
+        && request.resource.data.surveyId == surveyId
+        && exists(surveyPath(surveyId))
+        && get(surveyPath(surveyId)).data.status in ['published', 'scheduled'];
     }
 
     // -------------------------------------------------------------- surveys
@@ -122,16 +143,15 @@ service cloud.firestore {
             && resource.data.status in ['draft', 'rejected']);
     }
     // ------------------------------------------------------------ responses
-    function surveyPath(sid) {
-      return /databases/$(database)/documents/surveys/$(string(sid));
-    }
-
     match /responses/{responseId} {
 
       allow create: if isActive()
         && request.resource.data.surveyId != null
         && exists(surveyPath(request.resource.data.surveyId))
         && get(surveyPath(request.resource.data.surveyId)).data.status in ['published', 'scheduled']
+        // One response per person: no earlier record, and the record is saved together with this response.
+        && !exists(myReceiptPath(request.resource.data.surveyId))
+        && existsAfter(myReceiptPath(request.resource.data.surveyId))
         && (
           (request.resource.data.get('isAnonymous', false) == true
             && request.resource.data.userEmail == 'anonymous@school.edu.ph')
@@ -152,10 +172,25 @@ service cloud.firestore {
 
     // ----------------------------------------------------------------- news
     match /news/{newsId} {
-      allow read: if isActive();
+      allow read: if isAdmin()
+        || (isActive() && resource.data.status == 'published')
+        || (isActive() && resource.data.authorEmail == myEmail());
+
+      allow create: if isActive()
+        && get(myProfilePath()).data.get('canPostNews', true) == true
+        && request.resource.data.authorEmail == myEmail()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.likesCount == 0
+        && request.resource.data.get('isPinned', false) == false;
+
+      allow delete: if isActive()
+        && resource.data.authorEmail == myEmail()
+        && resource.data.status in ['pending', 'rejected'];
+
       allow write: if isAdmin();
 
       allow update: if isActive()
+        && resource.data.status == 'published'
         && onlyChanges(['likesCount'])
         && (request.resource.data.likesCount == resource.data.likesCount + 1
             || request.resource.data.likesCount == resource.data.likesCount - 1);

@@ -43,9 +43,9 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
   const blockIndexById = new Map<string, number>(blocks.map((b, i) => [b.id, i]));
 
   // Form State: question index -> answer string / selected rating / array
-  const [answersState, setAnswersState] = useState<Record<number, any>>(() => {
+  const [answersState, setAnswersState] = useState<Record<string, any>>(() => {
     if (existingAnswers && existingAnswers.length > 0) {
-      const initial: Record<number, any> = {};
+      const initial: Record<string, any> = {};
       survey.questions.forEach((q, idx) => {
         const found = existingAnswers.find((a) => a.question === q.text);
         if (found) {
@@ -236,7 +236,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                 <span className="font-bold flex items-center gap-1.5">
                   {submittedReceipt.isAnonymous ? (
                     <span className="text-emerald-700 flex items-center gap-1">
-                      <Lock className="w-3.5 h-3.5" /> 100% Anonymous
+                      <Lock className="w-3.5 h-3.5" /> Anonymous
                     </span>
                   ) : (
                     <span className="text-indigo-700 flex items-center gap-1">
@@ -564,7 +564,8 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   You are about to submit your response for{" "}
-                  <span className="font-semibold text-slate-800">"{survey.title}"</span>.
+                  <span className="font-semibold text-slate-800">"{survey.title}"</span>. You can answer each survey
+                  only once, and this cannot be changed afterwards.
                 </p>
               </div>
 
@@ -574,7 +575,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                   <span className="font-bold flex items-center gap-1.5 text-slate-900">
                     {isAnonymous ? (
                       <span className="text-emerald-700 flex items-center gap-1">
-                        <Lock className="w-3.5 h-3.5" /> 100% Anonymous
+                        <Lock className="w-3.5 h-3.5" /> Anonymous
                       </span>
                     ) : (
                       <span className="text-indigo-700 flex items-center gap-1">

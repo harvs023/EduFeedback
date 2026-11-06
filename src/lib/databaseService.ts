@@ -272,9 +272,12 @@ export class DatabaseService {
     });
   }
 
-  static async saveResponse(response: SurveyResponse): Promise<void> {
-    await FirestoreResponseService.add(response);
-    await FirestoreSurveyService.incrementResponses(response.surveyId);
+  static async saveResponse(response: SurveyResponse, respondentEmail: string): Promise<void> {
+    await FirestoreResponseService.submitWithReceipt(response, respondentEmail);
+  }
+
+  static async getAnsweredSurveyIds(email: string): Promise<string[]> {
+    return await FirestoreResponseService.getAnsweredSurveyIds(email);
   }
 
   // ==========================================
@@ -304,8 +307,12 @@ export class DatabaseService {
   // ==========================================
   // NEWS & ANNOUNCEMENTS
   // ==========================================
-  static async getNews(): Promise<NewsAnnouncement[]> {
-    return await FirestoreNewsService.getAll();
+  static async getNews(currentUser?: UserProfile | null): Promise<NewsAnnouncement[]> {
+    return await FirestoreNewsService.getVisible(currentUser);
+  }
+
+  static async deleteNews(id: string): Promise<void> {
+    await FirestoreNewsService.delete(id);
   }
 
   static async saveNews(newsItem: NewsAnnouncement): Promise<void> {

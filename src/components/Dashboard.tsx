@@ -34,9 +34,11 @@ interface DashboardProps {
   notifications: NotificationItem[];
   users: UserProfile[];
   currentUser: UserProfile | null;
+  answeredSurveyIds?: string[];
   onNavigate: (view: string) => void;
   onLikeNews: (id: string) => void;
-  onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => void;
+  onDeleteNews?: (id: string) => Promise<void> | void;
+  onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => Promise<boolean>;
   onMarkNotificationRead?: (id: string) => void;
   onMarkAllNotificationsRead?: () => void;
 }
@@ -48,8 +50,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   notifications,
   users,
   currentUser,
+  answeredSurveyIds = [],
   onNavigate,
   onLikeNews,
+  onDeleteNews,
   onAddNews,
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
@@ -62,11 +66,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const now = Date.now();
 
   // Answered survey IDs set
-  const answeredSurveyIdSet = new Set(
-    responses
+  const answeredSurveyIdSet = new Set([
+    ...responses
       .filter((r) => (r.userEmail || "").trim().toLowerCase() === userEmail)
-      .map((r) => String(r.surveyId))
-  );
+      .map((r) => String(r.surveyId)),
+    ...answeredSurveyIds,
+  ]);
 
   // 1. Open surveys for you: availability is "open", not yours, not already answered by you
   const openSurveys = surveys.filter((s) => {
@@ -115,8 +120,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
           currentUser={currentUser}
           onAddNews={onAddNews}
           onLikeNews={onLikeNews}
+          onDeleteNews={onDeleteNews}
           limit={5}
-          allowPostOnlyForSuperadmin={true}
         />
       </section>
 

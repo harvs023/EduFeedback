@@ -215,6 +215,13 @@ export interface NewsAnnouncement {
   badgeText?: string;
   likesCount: number;
   hasRead?: boolean;
+  /** Older posts have no status; only the admin can see those. */
+  status?: "pending" | "published" | "rejected";
+  authorEmail?: string;
+  submittedAt?: number;
+  reviewedBy?: string;
+  reviewedAt?: number;
+  rejectionReason?: string;
 }
 
 export interface TagalogMLSample {

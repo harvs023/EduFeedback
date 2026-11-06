@@ -19,6 +19,7 @@ import {
   updateDoc,
   deleteDoc,
   increment,
+  writeBatch,
   query,
   where,
   orderBy,
@@ -364,19 +365,6 @@ export const FirestoreSurveyService = {
       handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.SURVEYS}/${docId}`);
     }
   },
-
-  async incrementResponses(surveyId: string | number): Promise<void> {
-    const firestore = getFirebaseDb();
-    if (!firestore) throw new Error("Firestore is not initialized.");
-    const docId = String(surveyId);
-    try {
-      await updateDoc(doc(firestore, COLLECTIONS.SURVEYS, docId), {
-        responses: increment(1),
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.SURVEYS}/${docId}`);
-    }
-  },
 };
 
 /**
@@ -399,14 +387,45 @@ export const FirestoreResponseService = {
     }
   },
 
-  async add(response: SurveyResponse): Promise<void> {
+  /**
+   * Saves the response, the "already answered" record and the response count together:
+   * either all three are saved or none. The record holds only the survey id.
+   */
+  async submitWithReceipt(response: SurveyResponse, email: string): Promise<void> {
     const firestore = getFirebaseDb();
-    if (!firestore) return;
-    const docId = String(response.id);
+    if (!firestore) throw new Error("The database is not available. Please try again.");
+    const userKey = email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    const surveyDocId = String(response.surveyId);
+    const receiptRef = doc(firestore, COLLECTIONS.USERS, userKey, "receipts", surveyDocId);
+
+    let alreadyAnswered = false;
     try {
-      await setDoc(doc(firestore, COLLECTIONS.RESPONSES, docId), response);
+      const batch = writeBatch(firestore);
+      alreadyAnswered = (await getDoc(receiptRef)).exists();
+      if (!alreadyAnswered) {
+        batch.set(doc(firestore, COLLECTIONS.RESPONSES, String(response.id)), response);
+        batch.set(receiptRef, { surveyId: surveyDocId });
+        batch.update(doc(firestore, COLLECTIONS.SURVEYS, surveyDocId), { responses: increment(1) });
+        await batch.commit();
+      }
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `${COLLECTIONS.RESPONSES}/${docId}`);
+      console.warn("Could not save the survey response:", err);
+      throw new Error("We could not save your answers. Please check your connection and try again.");
+    }
+    if (alreadyAnswered) throw new Error("You have already answered this survey. Each person can answer once.");
+  },
+
+  /** The surveys this person has answered, named or anonymous. */
+  async getAnsweredSurveyIds(email: string): Promise<string[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    const userKey = email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    try {
+      const snap = await getDocs(collection(firestore, COLLECTIONS.USERS, userKey, "receipts"));
+      return snap.docs.map((docSnap) => docSnap.id);
+    } catch (err) {
+      console.warn("Could not load answered surveys:", err);
+      return [];
     }
   },
 
@@ -535,18 +554,39 @@ export const FirestoreUserService = {
  * Firestore Campus News Collection Service
  */
 export const FirestoreNewsService = {
-  async getAll(): Promise<NewsAnnouncement[]> {
+  /** Admin: every post. Everyone else: published posts plus their own, as the rules allow. */
+  async getVisible(currentUser?: UserProfile | null): Promise<NewsAnnouncement[]> {
     const firestore = getFirebaseDb();
-    if (!firestore) return [];
+    if (!firestore || !currentUser) return [];
+    const newsRef = collection(firestore, COLLECTIONS.NEWS);
+    const isAdmin = currentUser.role === "superadmin" || currentUser.pos === "Superadmin";
+    const queries = isAdmin
+      ? [newsRef]
+      : [
+          query(newsRef, where("status", "==", "published")),
+          query(newsRef, where("authorEmail", "==", currentUser.email.trim().toLowerCase())),
+        ];
+    const byId = new Map<string, NewsAnnouncement>();
+    for (const q of queries) {
+      try {
+        const snap = await getDocs(q);
+        snap.docs.forEach((docSnap) => {
+          byId.set(docSnap.id, { ...(docSnap.data() as NewsAnnouncement), id: docSnap.id });
+        });
+      } catch (err) {
+        console.warn("Could not load news:", err);
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
+  },
+
+  async delete(id: string): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
     try {
-      const snap = await getDocs(collection(firestore, COLLECTIONS.NEWS));
-      return snap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      })) as NewsAnnouncement[];
+      await deleteDoc(doc(firestore, COLLECTIONS.NEWS, id));
     } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, COLLECTIONS.NEWS);
-      return [];
+      handleFirestoreError(err, OperationType.DELETE, `${COLLECTIONS.NEWS}/${id}`);
     }
   },
 
@@ -907,7 +947,7 @@ export async function seedFirestoreWithData(data: {
 
     currentCollection = COLLECTIONS.LOGS;
     for (const log of data.logs) {
-      currentDocId = log.id;
+      currentDocId = log.id || doc(collection(firestore, COLLECTIONS.LOGS)).id;
       await setDoc(doc(firestore, COLLECTIONS.LOGS, currentDocId), log);
     }
 

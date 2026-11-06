@@ -22,6 +22,8 @@ interface ThemedSurveySectionsProps {
   surveys: Survey[];
   currentUser: UserProfile | null;
   userResponses?: SurveyResponse[];
+  /** Surveys this person answered, named or anonymous ("already answered" records). */
+  answeredSurveyIds?: string[];
   onTakeSurvey?: (survey: Survey) => void;
   onOpenSurvey?: (survey: Survey) => void;
   onViewAnalytics: (surveyId: string | number) => void;
@@ -79,6 +81,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   surveys,
   currentUser,
   userResponses = [],
+  answeredSurveyIds: receiptSurveyIds = [],
   onTakeSurvey,
   onOpenSurvey,
   onViewAnalytics,
@@ -102,8 +105,8 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
     else if (onOpenSurvey) onOpenSurvey(survey);
   };
 
-  const answeredSurveyIds = useMemo(() => {
-    // Only the current user's own (named) responses count as "answered".
+  // Surveys answered with the person's name: these answers can be opened again.
+  const namedAnswerIds = useMemo(() => {
     const myEmail = (currentUser?.email || "").trim().toLowerCase();
     if (!myEmail) return new Set<string>();
     return new Set(
@@ -112,6 +115,12 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
         .map((r) => String(r.surveyId))
     );
   }, [userResponses, currentUser]);
+
+  // Everything this person answered, including anonymous answers.
+  const answeredSurveyIds = useMemo(
+    () => new Set<string>([...namedAnswerIds, ...receiptSurveyIds]),
+    [namedAnswerIds, receiptSurveyIds]
+  );
 
   // Target audience eligibility check
   const isEligible = (survey: Survey) => {
@@ -485,16 +494,25 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleLaunchSurvey(survey)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                          isAnswered
-                            ? "bg-slate-100 hover:bg-slate-200 text-slate-700"
-                            : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
-                        }`}
-                      >
-                        {isAnswered ? "View Answers" : "Take Survey"}
-                      </button>
+                      {isAnswered && !namedAnswerIds.has(String(survey.id)) ? (
+                        <span
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-default"
+                          title="You answered this anonymously, so your answers are not linked to you and cannot be shown."
+                        >
+                          Completed
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleLaunchSurvey(survey)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                            isAnswered
+                              ? "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                              : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+                          }`}
+                        >
+                          {isAnswered ? "View Answers" : "Take Survey"}
+                        </button>
+                      )}
 
                       {/* Creator and Admin Controls */}
                       {isSuperadmin && (

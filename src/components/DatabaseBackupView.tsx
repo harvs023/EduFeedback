@@ -379,7 +379,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
             <div className="flex items-center gap-1.5 text-purple-600 mb-1">
               <BrainCircuit className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">ML Corpus</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider">Old Sample Phrases</span>
             </div>
             <div className="font-serif text-2xl font-black text-purple-700">{mlDataset.length}</div>
             <span className="text-[11px] text-purple-600">Tagalog sentences</span>
@@ -434,7 +434,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                 <li>All Survey Questionnaires, Options, and Form Settings ({surveys.length})</li>
                 <li>All Student Feedback Entries & Sentiment Ratings ({responses.length})</li>
                 <li>All User Profiles, Roles, and Departmental Assignments ({users.length})</li>
-                <li>Tagalog & Taglish Machine Learning Training Datasets ({mlDataset.length})</li>
+                <li>Old sentiment sample phrases, no longer used ({mlDataset.length})</li>
                 <li>Institutional Activity & Audit Security Logs ({logs.length})</li>
                 <li>Campus News & Survey Result Announcements ({newsList.length})</li>
               </ul>

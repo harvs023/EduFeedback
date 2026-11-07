@@ -124,10 +124,52 @@ export interface Survey {
   openEnded?: boolean;
 }
 
+export type Polarity = "Positive" | "Neutral" | "Negative";
+export type CommentLanguage = "Tagalog" | "Taglish" | "English" | "Other";
+export type CommentEmotion = "Satisfied" | "Frustrated" | "Confused" | "Hopeful" | "Neutral";
+
+/** Result for one comment (Paragraph answer), following docs/sentiment-prompt-v1.md. */
+export interface CommentAnalysis {
+  analyzable: boolean;
+  /** The 3-label result that is evaluated in the thesis. null when not analyzable. */
+  polarity: Polarity | null;
+  /** Display label: polarity, or "Constructive Suggestion". */
+  sentiment: Polarity | "Constructive Suggestion" | null;
+  isSuggestion: boolean;
+  score: number | null;
+  /** Gemini's own certainty. Always null for the word-list fallback, which cannot measure one. */
+  confidence: number | null;
+  language: CommentLanguage;
+  emotion: CommentEmotion;
+  keywords: string[];
+  englishTranslation: string;
+  sarcasmDetected: boolean;
+  reason: string;
+  /** "fallback" = word list used because Gemini was unavailable; must be labeled in the UI. */
+  method: "gemini" | "fallback";
+  /** The model name the app asked for, e.g. "gemini-3.1-flash-lite". */
+  model: string | null;
+  /** The exact version Gemini reported answering with, e.g. "3.1-flash-lite-05-2026". */
+  modelVersion?: string | null;
+  promptVersion: string;
+  analyzedAt: number;
+  /** Server signature over the comment text and this whole result. Checked only by the server. */
+  signature?: string;
+}
+
 export interface Answer {
   question: string;
   answer: string;
   ratingValue?: number;
+  /** Only on Paragraph answers that had text. */
+  analysis?: CommentAnalysis;
+  /** Earlier results replaced by a re-run, oldest first. Kept as a record, never deleted. */
+  previousAnalyses?: CommentAnalysis[];
+  /**
+   * Screen-only flag (never saved): the saved result failed the server's signature check, so it is
+   * hidden from totals and Analytics and the response needs a re-run.
+   */
+  signatureFailed?: boolean;
 }
 
 export interface SurveyResponse {
@@ -149,15 +191,28 @@ export interface SurveyResponse {
   year?: string;
   section?: string;
   pos?: string;
+  /**
+   * no_comment: no Paragraph answer had text. not_analyzable: comments were empty/joke/nonsense.
+   * not_analyzed: the analysis service could not be reached; the admin can re-run it.
+   */
+  commentStatus?: "no_comment" | "analyzed" | "not_analyzable" | "not_analyzed";
+  /** Summary of the analyzable comments in this response. Missing when there were none. */
   sentimentAnalysis?: {
     sentiment: "Positive" | "Negative" | "Neutral" | "Constructive Suggestion";
+    polarity?: Polarity;
     score: number;
     language: string;
-    aspects: string[];
+    aspects?: string[];
     sarcasmDetected?: boolean;
-    confidence?: number;
+    confidence?: number | null;
     emotion?: string;
+    method?: "gemini" | "fallback";
+    model?: string | null;
+    promptVersion?: string;
+    commentCount?: number;
   };
+  /** Earlier response summaries replaced by a re-run, oldest first. */
+  previousSentimentAnalyses?: Array<NonNullable<SurveyResponse["sentimentAnalysis"]>>;
 }
 
 export interface NotificationItem {

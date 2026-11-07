@@ -233,7 +233,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                 </div>
                 <h3 className="text-sm font-bold text-white">Tagalog &amp; Taglish NLP</h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Evaluates Filipino colloquial feedback, nuances, and suggestions with high-precision sentiment models and fine-tuned accuracy.
+                  Reads comments in Tagalog, English and Taglish and sorts them as Positive, Neutral or Negative using Google Gemini.
                 </p>
               </div>
 

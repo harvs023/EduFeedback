@@ -3,11 +3,19 @@ import { Survey, SurveyStatus, SurveyResponse, UserProfile, TagalogMLSample, New
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
 import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
 import { countEligibleUsers, getSurveyAvailability } from "./lib/surveyReview";
+import {
+  analyzeResponse,
+  needsReanalysis,
+  resultKey,
+  SUBMIT_ANALYSIS_TIMEOUT_MS,
+  trustedResponses,
+  verifySavedResults,
+} from "./lib/sentiment";
 import { MASTER_ADMIN_EMAIL, DEFAULT_SURVEY_CATEGORIES } from "./data/initialData";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
 import { HistoricalAnalyticsView } from "./components/HistoricalAnalyticsView";
-import { TagalogMLTrainingStudio } from "./components/TagalogMLTrainingStudio";
+import { SentimentAnalysisView } from "./components/SentimentAnalysisView";
 import { NewsAnnouncementsFeed, MAX_PENDING_NEWS } from "./components/NewsAnnouncementsFeed";
 import { Dashboard } from "./components/Dashboard";
 import { SurveyBuilder } from "./components/SurveyBuilder";
@@ -53,6 +61,10 @@ export default function App() {
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
   const [previewSurvey, setPreviewSurvey] = useState<Survey | null>(null);
   const [answeredSurveyIds, setAnsweredSurveyIds] = useState<string[]>([]);
+  // Saved sentiment results confirmed by the server's signature check (see lib/sentiment.ts).
+  const [validResultKeys, setValidResultKeys] = useState<Set<string>>(new Set());
+  const [signatureCheck, setSignatureCheck] = useState<"checking" | "done" | "unavailable">("done");
+  const checkedResultKeys = useRef<Set<string>>(new Set());
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
@@ -342,44 +354,46 @@ export default function App() {
   };
 
   // Submit Survey Response Handler
+  // Check signatures of saved results we have not checked yet (new responses, re-runs).
+  useEffect(() => {
+    const items = responses.flatMap((r) =>
+      r.answers.flatMap((a, i) =>
+        a.analysis && !checkedResultKeys.current.has(resultKey(r.id, i, a.analysis))
+          ? [{ key: resultKey(r.id, i, a.analysis), text: a.answer, analysis: a.analysis }]
+          : []
+      )
+    );
+    if (items.length === 0) return;
+    let cancelled = false;
+    setSignatureCheck("checking");
+    verifySavedResults(items).then((outcome) => {
+      if (cancelled) return;
+      if (!outcome) {
+        setSignatureCheck("unavailable");
+        return;
+      }
+      outcome.checked.forEach((k) => checkedResultKeys.current.add(k));
+      setValidResultKeys((prev) => new Set([...prev, ...outcome.valid]));
+      setSignatureCheck("done");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [responses]);
+
+  // What Analytics and the Sentiment Analysis screen may count: confirmed results only.
+  const trustedResponseList = React.useMemo(
+    () => trustedResponses(responses, validResultKeys),
+    [responses, validResultKeys]
+  );
+
   const handleSubmitSurveyResponse = async (answers: any[], isAnonymous: boolean = true) => {
     if (!activeSurveyForTaking) return;
 
-    // Detect if any answers have Tagalog / open feedback
-    let detectedSentiment: any = {
-      sentiment: "Positive",
-      score: 0.9,
-      aspects: ["General"],
-      language: "Taglish",
-      sarcasmDetected: false,
-    };
-    const paragraphAns = answers.find((a) => a.answer && a.answer.length > 10 && !a.ratingValue);
-
-    if (paragraphAns) {
-      try {
-        const res = await authFetch("/api/ml/analyze-tagalog", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: paragraphAns.answer,
-            surveyContext: activeSurveyForTaking.title,
-          }),
-        });
-        const data = await res.json();
-        if (data.success && data.result) {
-          detectedSentiment = {
-            sentiment: data.result.sentiment,
-            score: data.result.score,
-            aspects: data.result.aspects || ["General"],
-            language: data.result.language || "Taglish",
-            sarcasmDetected: Boolean(data.result.sarcasmDetected),
-            emotion: data.result.emotion,
-          };
-        }
-      } catch (e) {
-        console.warn("Tagalog NLP inference fallback used:", e);
-      }
-    }
+    // Every comment is analyzed; a response without comments is "no_comment", never "Positive".
+    // A slow or unreachable service never blocks the respondent: after SUBMIT_ANALYSIS_TIMEOUT_MS the
+    // answers are saved as "not_analyzed" and the admin re-runs them from the Sentiment Analysis screen.
+    const analysis = await analyzeResponse(activeSurveyForTaking, answers, SUBMIT_ANALYSIS_TIMEOUT_MS);
 
     const newResponse: SurveyResponse = {
       id: `resp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
@@ -399,8 +413,9 @@ export default function App() {
       year: currentUser?.year || "3rd Year",
       // Respondents are told only department, program and year level stay with anonymous answers.
       ...(isAnonymous ? {} : { section: currentUser?.section || "CS-3A" }),
-      sentimentAnalysis: detectedSentiment,
-      answers,
+      answers: analysis.answers,
+      commentStatus: analysis.commentStatus,
+      ...(analysis.sentimentAnalysis ? { sentimentAnalysis: analysis.sentimentAnalysis } : {}),
     };
 
     await DatabaseService.saveResponse(newResponse, currentUser?.email || "");
@@ -610,45 +625,71 @@ export default function App() {
     setCurrentView("create");
   };
 
-  // ML Training Sample Handlers
-  const handleAddMlSample = async (sample: Omit<TagalogMLSample, "id">) => {
-    const newSample: TagalogMLSample = {
-      id: `sample_${Date.now()}`,
-      ...sample,
-    };
-    try {
-      await DatabaseService.addMLSample(newSample);
-      setMlDataset((prev) => [newSample, ...prev]);
-
-      await logActivityAndRefresh({
-        user: currentUser?.name || "Admin",
-        pos: currentUser?.pos || "Admin",
-        action: "ML Dataset Sample Added",
-        details: `Added new Tagalog feedback training sample: "${sample.text.slice(0, 30)}..."`,
-      });
-      showToast("New Tagalog sample added to machine learning corpus!", "success");
-    } catch (err: any) {
-      showToast(err.message || "Failed to add training sample.", "info");
+  // Admin: re-run sentiment for responses saved before this version, never analyzed, or analyzed by
+  // the fallback word list. Paced at about one response every 2 seconds to stay under the server's
+  // limit of 30 requests per minute.
+  const handleReanalyzeResponses = async (
+    onProgress: (done: number, total: number) => void
+  ): Promise<{ updated: number; failed: number }> => {
+    const targets = trustedResponseList
+      .filter(needsReanalysis)
+      .map((t) => responses.find((r) => r.id === t.id) || t);
+    let updated = 0;
+    let failed = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const r = targets[i];
+      const survey = surveys.find((s) => String(s.id) === String(r.surveyId));
+      if (!survey) {
+        failed++;
+      } else {
+        // The old result moves into history; it is never thrown away.
+        const plainAnswers = r.answers.map(({ analysis: old, ...a }) =>
+          old ? { ...a, previousAnalyses: [...(a.previousAnalyses || []), old] } : a
+        );
+        const previousSentimentAnalyses = [
+          ...(r.previousSentimentAnalyses || []),
+          ...(r.sentimentAnalysis ? [r.sentimentAnalysis] : []),
+        ];
+        const result = await analyzeResponse(survey, plainAnswers);
+        if (result.commentStatus === "not_analyzed") {
+          failed++;
+        } else {
+          try {
+            await DatabaseService.updateResponseAnalysis(r.id, { ...result, previousSentimentAnalyses });
+            setResponses((prev) =>
+              prev.map((x) =>
+                x.id === r.id
+                  ? {
+                      ...x,
+                      answers: result.answers,
+                      commentStatus: result.commentStatus,
+                      sentimentAnalysis: result.sentimentAnalysis,
+                      previousSentimentAnalyses,
+                    }
+                  : x
+              )
+            );
+            updated++;
+          } catch (err) {
+            console.warn("Could not save re-run result:", err);
+            failed++;
+          }
+        }
+      }
+      onProgress(i + 1, targets.length);
+      if (i < targets.length - 1) await new Promise((res) => setTimeout(res, 2100));
     }
-  };
-
-  const handleDeleteMlSample = async (id: string) => {
-    try {
-      await DatabaseService.deleteMLSample(id);
-      setMlDataset((prev) => prev.filter((s) => s.id !== id));
+    if (updated > 0) {
       await logActivityAndRefresh({
-        user: currentUser?.name || "Admin",
+        user: currentUser?.name || "Administrator",
         pos: currentUser?.pos || "Superadmin",
-        action: "ML Dataset Sample Deleted",
-        details: `Deleted training phrase with ID ${id} from NLP corpus`,
+        action: "Sentiment Re-run",
+        details: `Re-ran sentiment analysis for ${updated} response(s)`,
       });
-      showToast("Training sample removed from corpus.", "info");
-    } catch (err: any) {
-      showToast(err?.message || "Failed to remove training sample.", "info");
     }
+    return { updated, failed };
   };
 
-  // News Announcements Handlers
   // Returns true when the post was saved, so the form knows it can close.
   const handleAddNews = async (news: Omit<NewsAnnouncement, "id" | "likesCount">): Promise<boolean> => {
     const isAdminUser = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
@@ -1546,17 +1587,6 @@ export default function App() {
           </nav>
         </div>
 
-        {/* ML Processing Status card */}
-        <div className="p-4 bg-slate-50 m-4 rounded-xl border border-slate-200">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">ML Processing</div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="text-xs font-semibold text-slate-800">Tagalog Processor Active</span>
-          </div>
-          <div className="text-[10px] text-slate-500 leading-relaxed">
-            Sentiment analysis for local responses enabled (94.2% accuracy)
-          </div>
-        </div>
       </aside>
 
       {/* Main Content Area */}
@@ -1707,11 +1737,8 @@ export default function App() {
           {currentView === "analytics" && (
             <HistoricalAnalyticsView
               surveys={surveys}
-              responses={responses}
+              responses={trustedResponseList}
               initialSurveyId={analyticsTargetSurveyId}
-              mlDataset={mlDataset}
-              onAddMlSample={handleAddMlSample}
-              onNavigateToMLStudio={isSuperadmin ? () => setCurrentView("tagalog-ml") : undefined}
               isAdmin={isSuperadmin}
               currentUser={currentUser}
               onCreateSurvey={canCreateSurvey ? () => { setEditingSurvey(null); setCurrentView("create"); } : undefined}
@@ -1720,12 +1747,11 @@ export default function App() {
 
           {currentView === "tagalog-ml" && (
             isSuperadmin ? (
-              <TagalogMLTrainingStudio
-                dataset={mlDataset}
+              <SentimentAnalysisView
+                responses={trustedResponseList}
+                signatureCheck={signatureCheck}
                 surveys={surveys}
-                responses={responses}
-                onAddSample={handleAddMlSample}
-                onDeleteSample={handleDeleteMlSample}
+                onReanalyze={handleReanalyzeResponses}
               />
             ) : (
               <div className="bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-xs max-w-lg mx-auto mt-12 space-y-4">
@@ -1734,7 +1760,7 @@ export default function App() {
                 </div>
                 <h3 className="font-serif text-lg font-bold text-slate-900">Administrator Access Required</h3>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  The Tagalog & Bilingual NLP Machine Learning Studio is restricted to System Administrators for model calibration and institutional dataset supervision.
+                  The Sentiment Analysis screen is only available to the System Administrator.
                 </p>
                 <button
                   onClick={() => setCurrentView("take-survey")}
@@ -1784,7 +1810,7 @@ export default function App() {
                 </div>
                 <h3 className="font-serif text-lg font-bold text-slate-900">Administrator Role Notice</h3>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  As System Administrator, your primary responsibilities are system configuration, content moderation, ML model supervision, and macro institutional analytics. Survey authoring is delegated to university community members (Students, Student Officers, and Faculty).
+                  As System Administrator, your primary responsibilities are system configuration, content moderation, sentiment analysis review, and macro institutional analytics. Survey authoring is delegated to university community members (Students, Student Officers, and Faculty).
                 </p>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <button

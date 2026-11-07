@@ -42,9 +42,6 @@ interface HistoricalAnalyticsViewProps {
   surveys: Survey[];
   responses: SurveyResponse[];
   initialSurveyId?: string | number | "all";
-  mlDataset?: TagalogMLSample[];
-  onAddMlSample?: (sample: Omit<TagalogMLSample, "id">) => void;
-  onNavigateToMLStudio?: () => void;
   isAdmin?: boolean;
   currentUser?: UserProfile | null;
   onCreateSurvey?: () => void;
@@ -54,9 +51,6 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
   surveys,
   responses,
   initialSurveyId = "all",
-  mlDataset = [],
-  onAddMlSample,
-  onNavigateToMLStudio,
   isAdmin = false,
   currentUser = null,
   onCreateSurvey,
@@ -118,7 +112,7 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
   }, [initialSurveyId, isAdmin, accessibleSurveyIds]);
 
   const [timeframe, setTimeframe] = useState<TimeframeFilter>("all");
-  const [activeTab, setActiveTab] = useState<"overview" | "timeline" | "demographics" | "questions" | "comparison" | "ml-synthesis">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "timeline" | "demographics" | "questions" | "comparison">("overview");
 
   // Comparison Module State (Survey A vs Survey B)
   const [compareSurveyAId, setCompareSurveyAId] = useState<string>(() => {
@@ -132,10 +126,6 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
       : "all";
   });
 
-  const [isGeneratingMlSynthesis, setIsGeneratingMlSynthesis] = useState<boolean>(false);
-  const [mlSynthesisResult, setMlSynthesisResult] = useState<any | null>(null);
-  const [mlSynthesisError, setMlSynthesisError] = useState<string | null>(null);
-  const [showSuppliedPhrases, setShowSuppliedPhrases] = useState<boolean>(false);
   const [phraseSentimentFilter, setPhraseSentimentFilter] = useState<string>("All");
 
   const timeframeScrollRef = useRef<HTMLDivElement>(null);
@@ -151,11 +141,6 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
   };
 
   // Quick phrase supplier state for Admin / Creator
-  const [quickPhraseText, setQuickPhraseText] = useState<string>("");
-  const [quickPhraseSentiment, setQuickPhraseSentiment] = useState<"Positive" | "Negative" | "Neutral" | "Constructive Suggestion">("Positive");
-  const [quickPhraseAspect, setQuickPhraseAspect] = useState<string>("Pagtuturo");
-  const [quickPhraseLanguage, setQuickPhraseLanguage] = useState<"Tagalog" | "Taglish" | "English">("Tagalog");
-  const [supplySuccessMsg, setSupplySuccessMsg] = useState<string | null>(null);
 
   // Dynamic list of years spanning from 2024 through 2040 and beyond
   const availableYears = useMemo(() => {
@@ -480,12 +465,15 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
       Neutral: 0,
       Negative: 0,
     };
+    // Only responses whose comments were analyzed count. No comment is not "Positive".
+    let analyzed = 0;
     filteredResponses.forEach((r) => {
-      const s = r.sentimentAnalysis?.sentiment || "Positive";
-      if (sentiments[s] !== undefined) sentiments[s] += 1;
-      else sentiments.Positive += 1;
+      const s = r.sentimentAnalysis?.sentiment;
+      if (!s || sentiments[s] === undefined) return;
+      sentiments[s] += 1;
+      analyzed += 1;
     });
-    const total = filteredResponses.length || 1;
+    const total = analyzed || 1;
     return {
       positivePct: Math.round((sentiments.Positive / total) * 100),
       suggestionPct: Math.round((sentiments["Constructive Suggestion"] / total) * 100),
@@ -494,61 +482,6 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
       raw: sentiments,
     };
   }, [filteredResponses]);
-
-  // Generate Machine Learning Model Survey Synthesis (Driven by Admin-Supplied Corpus)
-  const handleGenerateMlSynthesis = async () => {
-    setIsGeneratingMlSynthesis(true);
-    setMlSynthesisError(null);
-    setActiveTab("ml-synthesis");
-    try {
-      const sampleTexts = filteredResponses.flatMap((r) => r.answers.map((a) => a.answer)).slice(0, 15);
-      const res = await authFetch("/api/ml/survey-synthesis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          surveyTitle: selectedSurvey?.title || "All Institutional Surveys (Comprehensive Multi-Year)",
-          category: selectedSurvey?.cat || "Comprehensive",
-          timeframe,
-          totalResponses: filteredResponses.length,
-          ratingsBreakdown: {
-            averageRating: overallMetrics.avgRating !== "—" ? `${overallMetrics.avgRating} / 5.0` : "N/A",
-            positivePercentage: `${tagalogSentimentBreakdown.positivePct}%`,
-            suggestionPercentage: `${tagalogSentimentBreakdown.suggestionPct}%`,
-          },
-          feedbackSamples: sampleTexts,
-          suppliedDataset: mlDataset || [],
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.insights) {
-        setMlSynthesisResult(data.insights);
-      } else {
-        setMlSynthesisError(data.error || "Unable to synthesize ML summary. Please try again.");
-      }
-    } catch (err: any) {
-      console.error("ML Survey Synthesis error:", err);
-      setMlSynthesisError("Network connection error while contacting ML analytics service.");
-    } finally {
-      setIsGeneratingMlSynthesis(false);
-    }
-  };
-
-  const handleQuickSupplySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickPhraseText.trim()) return;
-    if (onAddMlSample) {
-      onAddMlSample({
-        text: quickPhraseText.trim(),
-        sentiment: quickPhraseSentiment,
-        aspect: quickPhraseAspect,
-        language: quickPhraseLanguage,
-        verified: true,
-      });
-      setSupplySuccessMsg(`Supplied new ${quickPhraseSentiment} phrase to ML model corpus!`);
-      setQuickPhraseText("");
-      setTimeout(() => setSupplySuccessMsg(null), 3500);
-    }
-  };
 
   const handleExportCSV = () => {
     const headers = ["Response_ID", "Survey_Title", "Category", "Date", "Department", "Program", "Year", "Section", "Answers_Summary"];
@@ -606,9 +539,12 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
 
     // Sentiments
     const getSentimentBreakdown = (resps: SurveyResponse[]) => {
-      let pos = 0, neg = 0, neu = 0, total = resps.length;
+      let pos = 0, neg = 0, neu = 0, total = 0;
       resps.forEach((r) => {
-        const s = r.sentimentAnalysis?.sentiment;
+        // Responses without analyzed comments are left out, not counted as Neutral.
+        const s = r.sentimentAnalysis?.polarity ?? r.sentimentAnalysis?.sentiment;
+        if (!s) return;
+        total++;
         if (s === "Positive") pos++;
         else if (s === "Negative") neg++;
         else neu++;
@@ -761,28 +697,6 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={handleGenerateMlSynthesis}
-              disabled={isGeneratingMlSynthesis}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-700 to-blue-700 hover:from-indigo-800 hover:to-blue-800 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-500/20 cursor-pointer transition-all disabled:opacity-50"
-            >
-              <BrainCircuit className="w-4 h-4" />
-              <span>{isGeneratingMlSynthesis ? "Synthesizing with ML..." : "Synthesize with ML Model"}</span>
-            </button>
-
-            {isAdmin && (
-              <button
-                onClick={() => {
-                  setActiveTab("ml-synthesis");
-                  setShowSuppliedPhrases(true);
-                }}
-                className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl cursor-pointer transition-colors border border-indigo-200"
-              >
-                <Database className="w-4 h-4" />
-                <span>Supplied Phrases ({mlDataset?.length ?? 0})</span>
-              </button>
-            )}
-
             <button
               onClick={handleExportCSV}
               className="flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer transition-colors"
@@ -994,7 +908,6 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
             { id: "demographics", label: "Colleges & Cohorts", icon: Users },
             { id: "questions", label: "Question Breakdowns", icon: BookOpen },
             { id: "comparison", label: "Comparative Analysis (Before vs Now)", icon: ArrowLeftRight, badge: "Compare" },
-            { id: "ml-synthesis", label: "ML Survey Synthesis", icon: BrainCircuit, badge: "ML Model" },
           ].map((tab) => {
             const Icon = tab.icon;
             const isSelected = activeTab === tab.id;
@@ -1431,417 +1344,6 @@ export const HistoricalAnalyticsView: React.FC<HistoricalAnalyticsViewProps> = (
               <p className="text-sm font-semibold text-slate-600">
                 Please select an individual survey above from the dropdown to review specific question breakdowns.
               </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tab 5: ML Model Survey Synthesis (Trained on Admin-Supplied Phrases) */}
-      {activeTab === "ml-synthesis" && (
-        <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-700 to-blue-700 text-white flex items-center justify-center shadow-md shadow-indigo-500/20">
-                <BrainCircuit className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-serif text-lg font-bold text-slate-900 flex items-center gap-2 flex-wrap">
-                  <span>Machine Learning Model Survey Synthesis & Institutional Report</span>
-                  <span className="px-2 py-0.5 text-[10px] font-bold text-indigo-700 bg-indigo-50 rounded-full border border-indigo-200">
-                    Local ML Language Model
-                  </span>
-                  {isAdmin ? (
-                    <span className="px-2 py-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-full border border-emerald-200">
-                      {mlDataset.length} Admin-Supplied Phrases
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-full border border-emerald-200">
-                      Trained Bilingual Model
-                    </span>
-                  )}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {isAdmin
-                    ? "Project summary synthesized directly from student survey responses using admin-trained bilingual phrases"
-                    : "Project summary synthesized directly from student survey responses using validated bilingual NLP models"}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {isAdmin && (
-                <button
-                  onClick={() => setShowSuppliedPhrases(!showSuppliedPhrases)}
-                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>{showSuppliedPhrases ? "Hide Training Corpus" : "View & Supply Phrases"}</span>
-                  {showSuppliedPhrases ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                </button>
-              )}
-
-              <button
-                onClick={handleGenerateMlSynthesis}
-                disabled={isGeneratingMlSynthesis}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-              >
-                <BrainCircuit className="w-3.5 h-3.5" />
-                <span>{isGeneratingMlSynthesis ? "Synthesizing..." : "Synthesize with ML Model"}</span>
-              </button>
-
-              {isAdmin && onNavigateToMLStudio && (
-                <button
-                  onClick={onNavigateToMLStudio}
-                  className="px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1 border border-indigo-200"
-                  title="Open Full ML Training Studio"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>ML Studio</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Admin / Creator Phrase Supplier Drawer (Admin Only) */}
-          {isAdmin && showSuppliedPhrases && (
-            <div className="p-5 bg-gradient-to-br from-slate-50 to-indigo-50/40 rounded-2xl border border-indigo-100 space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <h4 className="text-xs font-extrabold text-indigo-950 uppercase tracking-wider flex items-center gap-2">
-                    <Database className="w-4 h-4 text-indigo-600" />
-                    <span>Admin-Supplied Training Corpus for ML Model ({mlDataset.length} Sentences)</span>
-                  </h4>
-                  <p className="text-[11px] text-slate-600 mt-0.5">
-                    Supply the model with positive, neutral, or negative sentences so it learns how to categorize and summarize survey feedback.
-                  </p>
-                </div>
-
-                {/* Sentiment Filter Pills */}
-                <div className="flex items-center gap-1 flex-wrap">
-                  {["All", "Positive", "Negative", "Constructive Suggestion", "Neutral"].map((s) => {
-                    const count = s === "All" ? mlDataset.length : mlDataset.filter((d) => d.sentiment === s).length;
-                    return (
-                      <button
-                        key={s}
-                        onClick={() => setPhraseSentimentFilter(s)}
-                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
-                          phraseSentimentFilter === s
-                            ? "bg-indigo-700 text-white shadow-xs"
-                            : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
-                        }`}
-                      >
-                        {s} ({count})
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Quick Phrase Supply Form */}
-              <form onSubmit={handleQuickSupplySubmit} className="bg-white p-3.5 rounded-xl border border-indigo-200/80 shadow-xs space-y-2.5">
-                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                  Supply a New Sentence or Phrase to Train the Model:
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
-                  <input
-                    type="text"
-                    value={quickPhraseText}
-                    onChange={(e) => setQuickPhraseText(e.target.value)}
-                    placeholder="e.g., 'Napakabilis ng serbisyo sa registrar' or 'Mainit sa classroom 302'..."
-                    className="sm:col-span-6 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
-                  />
-                  <select
-                    value={quickPhraseSentiment}
-                    onChange={(e) => setQuickPhraseSentiment(e.target.value as any)}
-                    className="sm:col-span-2 px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700"
-                  >
-                    <option value="Positive">Positive</option>
-                    <option value="Negative">Negative</option>
-                    <option value="Constructive Suggestion">Suggestion</option>
-                    <option value="Neutral">Neutral</option>
-                  </select>
-                  <select
-                    value={quickPhraseAspect}
-                    onChange={(e) => setQuickPhraseAspect(e.target.value)}
-                    className="sm:col-span-2 px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700"
-                  >
-                    <option value="Pagtuturo">Pagtuturo</option>
-                    <option value="Internet / Wi-Fi">Wi-Fi</option>
-                    <option value="Pasilidad">Pasilidad</option>
-                    <option value="Aklatan">Aklatan</option>
-                    <option value="Canteen">Canteen</option>
-                    <option value="Administrasyon">Admin</option>
-                    <option value="Student Welfare">Welfare</option>
-                    <option value="Kagamitan">Kagamitan</option>
-                    <option value="Kurso">Kurso</option>
-                  </select>
-                  <button
-                    type="submit"
-                    className="sm:col-span-2 px-3 py-2 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Supply</span>
-                  </button>
-                </div>
-
-                {supplySuccessMsg && (
-                  <div className="p-2 bg-emerald-50 text-emerald-800 text-xs font-bold rounded-lg flex items-center gap-1.5 border border-emerald-200">
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>{supplySuccessMsg}</span>
-                  </div>
-                )}
-              </form>
-
-              {/* Scrollable list of supplied phrases */}
-              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
-                {mlDataset.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                    No training phrases supplied yet. Enter a phrase above to add to the model training corpus.
-                  </div>
-                ) : (
-                  mlDataset
-                    .filter((d) => phraseSentimentFilter === "All" || d.sentiment === phraseSentimentFilter)
-                    .map((sample) => (
-                      <div
-                        key={sample.id}
-                        className="p-2.5 bg-white rounded-xl border border-slate-200 text-xs flex items-center justify-between gap-3 hover:border-indigo-300 transition-colors"
-                      >
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <span
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
-                              sample.sentiment === "Positive"
-                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                : sample.sentiment === "Negative"
-                                ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                : sample.sentiment === "Constructive Suggestion"
-                                ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                : "bg-slate-100 text-slate-700 border border-slate-200"
-                            }`}
-                          >
-                            {sample.sentiment}
-                          </span>
-                          <span className="text-slate-800 font-medium truncate">{sample.text}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-slate-500 font-bold">
-                          <span className="bg-slate-100 px-2 py-0.5 rounded-md">{sample.aspect}</span>
-                          <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-md">{sample.language}</span>
-                        </div>
-                      </div>
-                    ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {mlSynthesisError && (
-            <div className="p-4 bg-rose-50 rounded-2xl border border-rose-200 flex items-center justify-between gap-3 text-xs text-rose-800">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>{mlSynthesisError}</span>
-              </div>
-              <button
-                onClick={handleGenerateMlSynthesis}
-                className="px-3 py-1 bg-rose-600 text-white rounded-lg font-semibold hover:bg-rose-700 transition-colors"
-              >
-                Retry
-              </button>
-            </div>
-          )}
-
-          {isGeneratingMlSynthesis ? (
-            <div className="p-12 text-center space-y-3">
-              <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="text-sm font-bold text-slate-800">
-                {isAdmin
-                  ? `Machine Learning Model analyzing survey responses against ${mlDataset.length} supplied training sentences...`
-                  : "Machine Learning Model analyzing survey responses with bilingual NLP language model..."}
-              </p>
-              <p className="text-xs text-slate-400">
-                Matching student qualitative input with positive, negative, and constructive aspect buckets
-              </p>
-            </div>
-          ) : mlSynthesisResult ? (
-            <div className="space-y-6 divide-y divide-slate-100">
-              {/* Executive Summary Generated by ML Model */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <BrainCircuit className="w-3.5 h-3.5" />
-                    <span>ML Institutional Synthesis & Project Summary</span>
-                  </span>
-                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
-                    EduBilingual-BERT-v2.5 Classification
-                  </span>
-                </div>
-                <p className="text-sm text-slate-800 leading-relaxed font-medium bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                  {mlSynthesisResult.executiveSummary}
-                </p>
-              </div>
-
-              {/* Model Metadata & Training Baseline */}
-              {mlSynthesisResult.modelMetadata && (
-                <div className="pt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="p-3 bg-indigo-50/70 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block">ML Model Engine</span>
-                    <span className="text-xs font-extrabold text-indigo-950 mt-0.5 block">{mlSynthesisResult.modelMetadata.architecture}</span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                      {isAdmin ? "Supplied Training Data" : "Model Calibration"}
-                    </span>
-                    <span className="text-xs font-extrabold text-slate-800 mt-0.5 block">
-                      {isAdmin ? mlSynthesisResult.modelMetadata.trainedCorpusSize : "Supervised Bilingual NLP"}
-                    </span>
-                  </div>
-                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-                    <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Validation F1 Score</span>
-                    <span className="text-xs font-extrabold text-emerald-900 mt-0.5 block">{mlSynthesisResult.modelMetadata.classificationConfidence}</span>
-                  </div>
-                  <div className="p-3 bg-blue-50 rounded-xl border border-blue-200">
-                    <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">Model Source</span>
-                    <span className="text-xs font-extrabold text-blue-900 mt-0.5 block">Local Trained Weights</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Strengths & Improvements Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6">
-                <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200/60 space-y-2">
-                  <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs uppercase tracking-wider">
-                    <CheckCircle className="w-4 h-4" />
-                    <span>Demonstrated Institutional Strengths (Commended by Students)</span>
-                  </div>
-                  <ul className="space-y-1.5 text-xs text-emerald-900 font-medium">
-                    {mlSynthesisResult.keyStrengths?.map((s: string, i: number) => (
-                      <li key={i} className="flex items-start gap-1.5">
-                        <span className="text-emerald-600 font-bold">•</span>
-                        <span>{s}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="p-4 bg-rose-50 rounded-2xl border border-rose-200/60 space-y-2">
-                  <div className="flex items-center gap-2 text-rose-800 font-bold text-xs uppercase tracking-wider">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>Critical Operational Bottlenecks (Requiring Administrative Action)</span>
-                  </div>
-                  <ul className="space-y-1.5 text-xs text-rose-900 font-medium">
-                    {mlSynthesisResult.criticalAreasForImprovement?.map((s: string, i: number) => (
-                      <li key={i} className="flex items-start gap-1.5">
-                        <span className="text-rose-600 font-bold">•</span>
-                        <span>{s}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-
-              {/* Aspect Evaluations Breakdown Matrix */}
-              {mlSynthesisResult.aspectBreakdown && mlSynthesisResult.aspectBreakdown.length > 0 && (
-                <div className="pt-6 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Aspect Evaluation Matrix (Classified via Supplied Corpus)</span>
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-medium">
-                      Scored based on positive vs. negative matches
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {mlSynthesisResult.aspectBreakdown.map((asp: any, i: number) => (
-                      <div key={i} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-900">{asp.aspect}</span>
-                          <span
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                              asp.status === "Strong Performance"
-                                ? "bg-emerald-100 text-emerald-800"
-                                : asp.status === "Satisfactory"
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-rose-100 text-rose-800"
-                            }`}
-                          >
-                            {asp.status}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-600 font-medium">
-                          <span>Health Score:</span>
-                          <span className="font-bold text-slate-800">{Math.round(asp.score * 100)}%</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full ${
-                              asp.score >= 0.75 ? "bg-emerald-500" : asp.score >= 0.5 ? "bg-blue-500" : "bg-rose-500"
-                            }`}
-                            style={{ width: `${Math.round(asp.score * 100)}%` }}
-                          />
-                        </div>
-                        <p className="text-[11px] text-slate-500 italic truncate pt-0.5">
-                          "{asp.representativeSample}"
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Historical Trend Analysis */}
-              <div className="pt-6 space-y-2">
-                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Historical Trajectory (Multi-Year Evolution)
-                </span>
-                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
-                  {mlSynthesisResult.historicalTrendAnalysis}
-                </p>
-              </div>
-
-              {/* Tagalog & Local Sentiment Insights */}
-              <div className="pt-6 space-y-2">
-                <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">
-                  Tagalog & Localized Feedback Findings
-                </span>
-                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
-                  {mlSynthesisResult.tagalogFeedbackTheme}
-                </p>
-              </div>
-
-              {/* Actionable Strategic Roadmap */}
-              <div className="pt-6 space-y-3">
-                <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase tracking-wider">
-                  <Lightbulb className="w-4 h-4" />
-                  <span>Recommended Actionable Next Steps (Derived from Student Suggestions)</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {mlSynthesisResult.institutionalActions?.map((act: string, i: number) => (
-                    <div key={i} className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-800 space-y-1">
-                      <span className="text-[10px] font-extrabold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
-                        Priority {i + 1}
-                      </span>
-                      <p className="font-semibold pt-1">{act}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="p-10 text-center bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-              <BrainCircuit className="w-8 h-8 text-indigo-600 mx-auto" />
-              <p className="text-sm font-bold text-slate-800">Ready to synthesize project summary with ML Model</p>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                {isAdmin
-                  ? `The local bilingual Machine Learning model uses the ${mlDataset.length} administrator-supplied training sentences to analyze and synthesize survey responses without relying on third-party AI.`
-                  : "The local bilingual Machine Learning model analyzes and synthesizes survey responses directly from qualitative student inputs without relying on third-party AI."}
-              </p>
-              <button
-                onClick={handleGenerateMlSynthesis}
-                disabled={isGeneratingMlSynthesis}
-                className="px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors inline-flex items-center gap-1.5 shadow-sm"
-              >
-                <BrainCircuit className="w-4 h-4" />
-                <span>Synthesize Survey Responses Now</span>
-              </button>
             </div>
           )}
         </div>

@@ -18,6 +18,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   increment,
   writeBatch,
   query,
@@ -413,6 +414,25 @@ export const FirestoreResponseService = {
       throw new Error("We could not save your answers. Please check your connection and try again.");
     }
     if (alreadyAnswered) throw new Error("You have already answered this survey. Each person can answer once.");
+  },
+
+  /** Admin: replace a response's sentiment results after a re-run. */
+  async updateAnalysis(
+    responseId: string,
+    update: Pick<SurveyResponse, "answers" | "commentStatus" | "sentimentAnalysis" | "previousSentimentAnalyses">
+  ): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      await updateDoc(doc(firestore, COLLECTIONS.RESPONSES, responseId), {
+        answers: update.answers,
+        commentStatus: update.commentStatus,
+        sentimentAnalysis: update.sentimentAnalysis ?? deleteField(),
+        previousSentimentAnalyses: update.previousSentimentAnalyses ?? [],
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.RESPONSES}/${responseId}`);
+    }
   },
 
   /** The surveys this person has answered, named or anonymous. */

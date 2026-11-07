@@ -276,6 +276,13 @@ export class DatabaseService {
     await FirestoreResponseService.submitWithReceipt(response, respondentEmail);
   }
 
+  static async updateResponseAnalysis(
+    responseId: string,
+    update: Pick<SurveyResponse, "answers" | "commentStatus" | "sentimentAnalysis" | "previousSentimentAnalyses">
+  ): Promise<void> {
+    await FirestoreResponseService.updateAnalysis(responseId, update);
+  }
+
   static async getAnsweredSurveyIds(email: string): Promise<string[]> {
     return await FirestoreResponseService.getAnsweredSurveyIds(email);
   }

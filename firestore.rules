@@ -49,6 +49,44 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(myKey())/receipts/$(string(sid));
     }
 
+    // Is the signed-in person part of a survey's target audience?
+    // Same mapping as the app: "students" = Student or Student Officer.
+    function inAudience(survey) {
+      let target = survey.get('targetAudience', {});
+      let type = target.get('type', 'all');
+      let roles = target.get('filters', {}).get('roles', []);
+      let pos = get(myProfilePath()).data.pos;
+      return type == 'all'
+        || (type == 'students' && pos in ['Student', 'Student Officer'])
+        || (type == 'faculty' && pos == 'Faculty')
+        || (type == 'officers' && pos == 'Student Officer')
+        || (type == 'custom' && (
+              ('students' in roles && pos in ['Student', 'Student Officer'])
+              || ('faculty' in roles && pos == 'Faculty')
+              || ('officers' in roles && pos == 'Student Officer')));
+    }
+
+    // ------------------------------------------------------- academic calendar
+    // One document per school year, id like "2026-2027".
+    // Every active user can read it. Only the admin can write it.
+    match /academic_calendar/{schoolYear} {
+      allow read: if isActive();
+      allow delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && schoolYear.matches('^20[0-9]{2}-20[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['schoolYear', 'sem1Start', 'sem1End',
+                                                 'sem2Start', 'sem2End', 'updatedAt', 'updatedBy'])
+        && request.resource.data.schoolYear == schoolYear
+        && request.resource.data.sem1Start is int
+        && request.resource.data.sem1End is int
+        && request.resource.data.sem2Start is int
+        && request.resource.data.sem2End is int
+        && request.resource.data.sem1Start < request.resource.data.sem1End
+        && request.resource.data.sem1End < request.resource.data.sem2Start
+        && request.resource.data.sem2Start < request.resource.data.sem2End
+        && request.resource.data.updatedBy == myEmail();
+    }
+
     match /topics/{topicId} {
       allow read: if isActive();
       allow write: if isAdmin();
@@ -149,6 +187,8 @@ service cloud.firestore {
         && request.resource.data.surveyId != null
         && exists(surveyPath(request.resource.data.surveyId))
         && get(surveyPath(request.resource.data.surveyId)).data.status in ['published', 'scheduled']
+        // Only people in the survey's target audience may answer.
+        && inAudience(get(surveyPath(request.resource.data.surveyId)).data)
         // One response per person: no earlier record, and the record is saved together with this response.
         && !exists(myReceiptPath(request.resource.data.surveyId))
         && existsAfter(myReceiptPath(request.resource.data.surveyId))

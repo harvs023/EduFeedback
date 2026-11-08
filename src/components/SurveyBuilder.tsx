@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Survey, Question, UserProfile, TargetAudience, Topic } from "../types";
+import { Survey, Question, UserProfile, TargetAudience, Topic, AcademicYearTerms } from "../types";
 import { DEPARTMENTS_DATA } from "../data/initialData";
 import { SurveyCriteriaModal } from "./SurveyCriteriaModal";
 import { schoolYearFor } from "../lib/schoolYear";
@@ -42,6 +42,8 @@ interface SurveyBuilderProps {
   currentUser: UserProfile | null;
   categories: string[];
   topics?: Topic[];
+  /** The admin's academic calendar, for the automatic school year. */
+  academicCalendar?: AcademicYearTerms[];
   /** How many of this user's other surveys are waiting for review. */
   myPendingCount?: number;
   initialSurvey?: Survey | null;
@@ -53,6 +55,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   currentUser,
   categories,
   topics = [],
+  academicCalendar = [],
   myPendingCount = 0,
   initialSurvey,
   onSaveSurvey,
@@ -67,7 +70,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   const [criteriaAcceptedAt, setCriteriaAcceptedAt] = useState<number | null>(initialSurvey?.criteriaAcceptedAt ?? null);
   const [submitErrors, setSubmitErrors] = useState<string[]>([]);
   // Filled in automatically (school year starts in August); an existing survey keeps its own value.
-  const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || schoolYearFor());
+  const [academicYear, setAcademicYear] = useState<string>(initialSurvey?.academicYear || schoolYearFor(Date.now(), academicCalendar));
 
   // Scheduling
   const [scheduleType, setScheduleType] = useState<"immediate" | "scheduled">(
@@ -112,7 +115,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       setDesc(initialSurvey.desc || "");
       setPurpose(initialSurvey.purpose || "");
       setCriteriaAcceptedAt(initialSurvey.criteriaAcceptedAt ?? null);
-      setAcademicYear(initialSurvey.academicYear || schoolYearFor());
+      setAcademicYear(initialSurvey.academicYear || schoolYearFor(Date.now(), academicCalendar));
       setScheduleType(initialSurvey.status === "scheduled" || initialSurvey.openDate ? "scheduled" : "immediate");
       setOpenDate(initialSurvey.openDate || "");
       setCloseDate(initialSurvey.closeDate || "");

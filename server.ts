@@ -4,8 +4,11 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import appletConfig from "./firebase-applet-config.json";
-import { analyzeComment, loadPromptTemplate, PROMPT_VERSION, sentimentModel } from "./server/sentiment";
+import { loadPromptTemplate, PROMPT_VERSION, sentimentModel } from "./server/sentiment";
 import { signingReady, verifyResult } from "./server/signing";
+import { adminError, adminReady } from "./server/firestoreAdmin";
+import { eligibleCountFor } from "./server/eligible";
+import { analyzeAll, processPendingResponse, resumePendingResponses } from "./server/processResponse";
 
 dotenv.config();
 
@@ -124,6 +127,8 @@ app.get("/api/health", (req, res) => {
     promptVersion: PROMPT_VERSION,
     promptReady,
     signingReady: signingReady(),
+    // The server can save results into responses itself (needs the service account key).
+    serverSaveReady: adminReady(),
   });
 });
 
@@ -136,21 +141,36 @@ app.post("/api/sentiment/analyze", async (req, res) => {
   if (!comments || comments.length === 0 || comments.length > MAX_COMMENTS_PER_REQUEST) {
     return res.status(400).json({ error: `Send between 1 and ${MAX_COMMENTS_PER_REQUEST} comments.` });
   }
-  const ai = getGeminiAI();
   // Up to 3 comments at a time: fast enough for a survey with several comment boxes,
   // gentle enough not to burst the Gemini usage limit. Results keep the original order.
-  const results = new Array(comments.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < comments.length) {
-      const i = next++;
-      const text = typeof comments[i]?.text === "string" ? comments[i].text : "";
-      const context = typeof comments[i]?.context === "string" ? comments[i].context : "";
-      results[i] = await analyzeComment(ai, text, context);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(3, comments.length) }, worker));
+  const results = await analyzeAll(
+    getGeminiAI(),
+    comments.map((c: any) => ({
+      text: typeof c?.text === "string" ? c.text : "",
+      context: typeof c?.context === "string" ? c.context : "",
+    }))
+  );
   res.json({ success: true, results });
+});
+
+// Finishes a response saved as "pending" at Submit: the server reads its comments, analyzes them
+// and saves the signed results into the response itself. Body: { responseId }.
+// Who asked is not logged or stored (anonymous responses stay anonymous).
+app.post("/api/sentiment/process", async (req, res) => {
+  const responseId = typeof req.body?.responseId === "string" ? req.body.responseId : "";
+  if (!/^resp_[A-Za-z0-9_]{1,80}$/.test(responseId)) {
+    return res.status(400).json({ error: "Invalid response id." });
+  }
+  try {
+    const outcome = await processPendingResponse(getGeminiAI, responseId);
+    if (outcome === "unavailable") {
+      return res.status(503).json({ error: "The server cannot save results yet (service account key missing)." });
+    }
+    res.json({ success: true, outcome });
+  } catch (err) {
+    console.error("[Sentiment] Could not finish a pending response:", (err as Error)?.message || err);
+    res.status(500).json({ error: "Could not analyze this response now. The admin can re-run it." });
+  }
 });
 
 // Checks result signatures. Done only here, because only the server knows the secret.
@@ -167,6 +187,24 @@ app.post("/api/sentiment/verify", (req, res) => {
       : false
   );
   res.json({ success: true, signingReady: signingReady(), valid });
+});
+
+// How many people a survey is for (for participation). Owner or admin only; returns just the number.
+// Body: { surveyId }.
+app.post("/api/surveys/eligible", async (req, res) => {
+  const surveyId = typeof req.body?.surveyId === "string" ? req.body.surveyId : "";
+  const email = String((req as any).user?.email || "");
+  if (!surveyId || surveyId.length > 200 || surveyId.includes("/") || !email) {
+    return res.status(400).json({ error: "Invalid request." });
+  }
+  try {
+    const result = await eligibleCountFor(surveyId, email);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.json({ success: true, eligible: result.eligible, cutoff: result.cutoff });
+  } catch (err) {
+    console.error("[Eligible] Could not count:", (err as Error)?.message || err);
+    res.status(500).json({ error: "Could not count eligible people now." });
+  }
 });
 
 async function startServer() {
@@ -195,8 +233,17 @@ async function startServer() {
     );
   }
 
+  if (!adminReady()) {
+    console.error(
+      `[Sentiment] Server cannot save results (${adminError()}). New responses stay "pending" until the key is set and the admin re-runs them.`
+    );
+  }
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`EduFeedback server running at http://0.0.0.0:${PORT}`);
+    resumePendingResponses(getGeminiAI).catch((err) =>
+      console.error("[Sentiment] Could not check for waiting responses:", (err as Error)?.message || err)
+    );
   });
 }
 

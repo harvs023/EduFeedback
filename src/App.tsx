@@ -1,20 +1,22 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Survey, SurveyStatus, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem, Topic } from "./types";
+import { Survey, SurveyStatus, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms } from "./types";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
+import { schoolYearFor } from "./lib/schoolYear";
 import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
 import { countEligibleUsers, getSurveyAvailability } from "./lib/surveyReview";
 import {
   analyzeResponse,
+  initialCommentStatus,
   needsReanalysis,
+  requestServerAnalysis,
   resultKey,
-  SUBMIT_ANALYSIS_TIMEOUT_MS,
   trustedResponses,
   verifySavedResults,
 } from "./lib/sentiment";
 import { MASTER_ADMIN_EMAIL, DEFAULT_SURVEY_CATEGORIES } from "./data/initialData";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
-import { HistoricalAnalyticsView } from "./components/HistoricalAnalyticsView";
+import { AnalyticsPage } from "./components/analytics/AnalyticsPage";
 import { SentimentAnalysisView } from "./components/SentimentAnalysisView";
 import { NewsAnnouncementsFeed, MAX_PENDING_NEWS } from "./components/NewsAnnouncementsFeed";
 import { Dashboard } from "./components/Dashboard";
@@ -56,6 +58,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [academicCalendar, setAcademicCalendar] = useState<AcademicYearTerms[]>([]);
 
   // Modals State
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
@@ -141,6 +144,7 @@ export default function App() {
         freshTopics = [];
       }
       setTopics(freshTopics);
+      setAcademicCalendar(await DatabaseService.getAcademicCalendar().catch(() => []));
       setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load data from Firestore.", "info");
@@ -194,6 +198,7 @@ export default function App() {
         setResponses([]);
         setLogs([]);
         setTopics([]);
+        setAcademicCalendar([]);
         setAnsweredSurveyIds([]);
       }
     });
@@ -307,6 +312,7 @@ export default function App() {
         freshTopics = [];
       }
       setTopics(freshTopics);
+      setAcademicCalendar(await DatabaseService.getAcademicCalendar().catch(() => []));
       setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load Firestore data for user.", "info");
@@ -331,6 +337,7 @@ export default function App() {
     setResponses([]);
     setLogs([]);
     setTopics([]);
+    setAcademicCalendar([]);
     setAnsweredSurveyIds([]);
     showToast("Signed out successfully.", "info");
   };
@@ -390,10 +397,9 @@ export default function App() {
   const handleSubmitSurveyResponse = async (answers: any[], isAnonymous: boolean = true) => {
     if (!activeSurveyForTaking) return;
 
-    // Every comment is analyzed; a response without comments is "no_comment", never "Positive".
-    // A slow or unreachable service never blocks the respondent: after SUBMIT_ANALYSIS_TIMEOUT_MS the
-    // answers are saved as "not_analyzed" and the admin re-runs them from the Sentiment Analysis screen.
-    const analysis = await analyzeResponse(activeSurveyForTaking, answers, SUBMIT_ANALYSIS_TIMEOUT_MS);
+    // Saved at once, without waiting for Gemini: comments are "pending" and the server analyzes them
+    // and saves the results itself. A response without comments is "no_comment", never "Positive".
+    const commentStatus = initialCommentStatus(activeSurveyForTaking, answers);
 
     const newResponse: SurveyResponse = {
       id: `resp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
@@ -407,18 +413,20 @@ export default function App() {
       isAnonymous,
       date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       timestamp: Date.now(),
-      academicYear: activeSurveyForTaking.academicYear || "2025-2026",
-      department: currentUser?.department || "College of Computer Studies",
-      program: currentUser?.program || "BS Computer Science",
-      year: currentUser?.year || "3rd Year",
+      // The school year it was answered in (from the academic calendar), not the survey's.
+      academicYear: schoolYearFor(Date.now(), academicCalendar),
+      // Only real profile details; nothing is made up for people who have none (e.g. faculty).
+      ...(currentUser?.department ? { department: currentUser.department } : {}),
+      ...(currentUser?.program ? { program: currentUser.program } : {}),
+      ...(currentUser?.year ? { year: currentUser.year } : {}),
       // Respondents are told only department, program and year level stay with anonymous answers.
-      ...(isAnonymous ? {} : { section: currentUser?.section || "CS-3A" }),
-      answers: analysis.answers,
-      commentStatus: analysis.commentStatus,
-      ...(analysis.sentimentAnalysis ? { sentimentAnalysis: analysis.sentimentAnalysis } : {}),
+      ...(!isAnonymous && currentUser?.section ? { section: currentUser.section } : {}),
+      answers,
+      commentStatus,
     };
 
     await DatabaseService.saveResponse(newResponse, currentUser?.email || "");
+    if (commentStatus === "pending") requestServerAnalysis(newResponse.id);
 
     // The answer window stays open here so it can show the receipt; "Done" closes it.
     setSurveys((prev) =>
@@ -574,7 +582,7 @@ export default function App() {
       cat: surveyData.cat || "General",
       desc: surveyData.desc || "",
       isTrending: surveyData.isTrending || false,
-      academicYear: surveyData.academicYear || "2025-2026",
+      academicYear: surveyData.academicYear || schoolYearFor(now, academicCalendar),
       created: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       createdAtTimestamp: now,
       responses: 0,
@@ -1431,6 +1439,30 @@ export default function App() {
     }
   };
 
+  const handleSaveAcademicYear = async (terms: AcademicYearTerms) => {
+    await DatabaseService.saveAcademicYear(terms);
+    setAcademicCalendar((prev) =>
+      [...prev.filter((y) => y.schoolYear !== terms.schoolYear), terms].sort((a, b) => a.sem1Start - b.sem1Start)
+    );
+    await logActivityAndRefresh({
+      user: currentUser?.name || "Admin",
+      pos: currentUser?.pos || "Admin",
+      action: "Academic Calendar Updated",
+      details: `Saved semester dates for SY ${terms.schoolYear}`,
+    });
+  };
+
+  const handleDeleteAcademicYear = async (schoolYear: string) => {
+    await DatabaseService.deleteAcademicYear(schoolYear);
+    setAcademicCalendar((prev) => prev.filter((y) => y.schoolYear !== schoolYear));
+    await logActivityAndRefresh({
+      user: currentUser?.name || "Admin",
+      pos: currentUser?.pos || "Admin",
+      action: "Academic Calendar Updated",
+      details: `Deleted semester dates for SY ${schoolYear}`,
+    });
+  };
+
   const handleUpdateProfile = async (updated: Partial<UserProfile>) => {
     if (!currentUser) return;
     const modifiedUser = { ...currentUser, ...updated };
@@ -1735,9 +1767,11 @@ export default function App() {
           )}
 
           {currentView === "analytics" && (
-            <HistoricalAnalyticsView
+            <AnalyticsPage
               surveys={surveys}
               responses={trustedResponseList}
+              academicCalendar={academicCalendar}
+              users={users}
               initialSurveyId={analyticsTargetSurveyId}
               isAdmin={isSuperadmin}
               currentUser={currentUser}
@@ -1788,6 +1822,7 @@ export default function App() {
                 currentUser={currentUser}
                 categories={DEFAULT_SURVEY_CATEGORIES}
                 topics={topics}
+                academicCalendar={academicCalendar}
                 myPendingCount={
                   surveys.filter(
                     (s) =>
@@ -1852,6 +1887,9 @@ export default function App() {
               onRestoreBackup={handleRestoreBackup}
               onSaveTopic={handleSaveTopic}
               onDeleteTopic={handleDeleteTopic}
+              academicCalendar={academicCalendar}
+              onSaveAcademicYear={handleSaveAcademicYear}
+              onDeleteAcademicYear={handleDeleteAcademicYear}
               onApproveSurvey={handleApproveSurvey}
               onRejectSurvey={handleRejectSurvey}
               onTakedownSurvey={handleTakedownSurvey}

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useConfirm } from "./ConfirmDialog";
 import { Survey, UserProfile, SurveyResponse } from "../types";
-import { getSurveyAvailability } from "../lib/surveyReview";
+import { getSurveyAvailability, isInAudience } from "../lib/surveyReview";
 import { DEFAULT_SURVEY_CATEGORIES } from "../data/initialData";
 import {
   Flame,
@@ -123,15 +123,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   );
 
   // Target audience eligibility check
-  const isEligible = (survey: Survey) => {
-    if (!currentUser) return true;
-    const target = survey.targetAudience;
-    if (!target || target.type === "all") return true;
-    if (target.type === "faculty") return currentUser.pos === "Faculty";
-    if (target.type === "students") return currentUser.pos === "Student" || currentUser.pos === "Student Officer";
-    if (target.type === "officers") return currentUser.pos === "Student Officer";
-    return true;
-  };
+  const isEligible = (survey: Survey) => !currentUser || isInAudience(survey, currentUser.pos);
 
   const effectiveSearch = (searchQuery || internalSearch).trim().toLowerCase();
 

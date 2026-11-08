@@ -516,9 +516,14 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                       placeholder="Type your candid feedback in Tagalog, Taglish, or English..."
                       className="w-full p-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 font-sans leading-relaxed"
                     />
-                    <span className="text-[10px] text-slate-400 block text-right">
-                      {(currentAnswer || "").length} characters · Filipino & Taglish supported
-                    </span>
+                    <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                      <span className="text-[10px] font-medium text-amber-700">
+                        Please don't write names in your comment.
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {(currentAnswer || "").length} characters · Filipino & Taglish supported
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>

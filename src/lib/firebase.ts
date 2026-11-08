@@ -46,6 +46,7 @@ import {
   ActivityLog,
   NotificationItem,
   Topic,
+  AcademicYearTerms,
 } from "../types";
 import {
   INITIAL_SURVEYS,
@@ -196,6 +197,7 @@ export const COLLECTIONS = {
   LOGS: "logs",
   NOTIFICATIONS: "notifications",
   TOPICS: "topics",
+  ACADEMIC_CALENDAR: "academic_calendar",
 };
 
 /**
@@ -830,6 +832,56 @@ export const INITIAL_TOPICS: Topic[] = [
   { id: "topic_general", name: "General", status: "active", order: 10, createdAt: Date.now() },
   { id: "topic_other", name: "Other", status: "active", order: 11, createdAt: Date.now() },
 ];
+
+/**
+ * Academic calendar: one document per school year, written by the admin only.
+ */
+export const FirestoreAcademicCalendarService = {
+  async getAll(): Promise<AcademicYearTerms[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    try {
+      const snap = await getDocs(collection(firestore, COLLECTIONS.ACADEMIC_CALENDAR));
+      return snap.docs
+        .map((docSnap) => ({ ...docSnap.data(), schoolYear: docSnap.id }) as AcademicYearTerms)
+        .sort((a, b) => a.sem1Start - b.sem1Start);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, COLLECTIONS.ACADEMIC_CALENDAR);
+      throw err;
+    }
+  },
+
+  async save(terms: AcademicYearTerms): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      // Full replace (no merge): the rule only accepts exactly these fields.
+      await setDoc(doc(firestore, COLLECTIONS.ACADEMIC_CALENDAR, terms.schoolYear), {
+        schoolYear: terms.schoolYear,
+        sem1Start: terms.sem1Start,
+        sem1End: terms.sem1End,
+        sem2Start: terms.sem2Start,
+        sem2End: terms.sem2End,
+        updatedAt: terms.updatedAt,
+        updatedBy: terms.updatedBy,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.ACADEMIC_CALENDAR}/${terms.schoolYear}`);
+      throw err;
+    }
+  },
+
+  async delete(schoolYear: string): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      await deleteDoc(doc(firestore, COLLECTIONS.ACADEMIC_CALENDAR, schoolYear));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `${COLLECTIONS.ACADEMIC_CALENDAR}/${schoolYear}`);
+      throw err;
+    }
+  },
+};
 
 /**
  * Firestore Topics Collection Service

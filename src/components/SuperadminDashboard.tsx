@@ -9,10 +9,12 @@ import {
   TagalogMLSample,
   SystemBackupData,
   Topic,
+  AcademicYearTerms,
 } from "../types";
 import { UserManagementView } from "./UserManagementView";
 import { DatabaseBackupView } from "./DatabaseBackupView";
 import { TopicsManager } from "./TopicsManager";
+import { AcademicCalendarManager } from "./AcademicCalendarManager";
 import { SurveyApprovalsPanel } from "./SurveyApprovalsPanel";
 import { NewsApprovalsPanel } from "./NewsApprovalsPanel";
 import {
@@ -48,6 +50,7 @@ import {
   History,
   TrendingUp,
   Tag,
+  CalendarRange,
   Building,
   Newspaper,
 } from "lucide-react";
@@ -74,11 +77,14 @@ interface SuperadminDashboardProps {
   onNavigateToML?: () => void;
   onSaveTopic?: (topic: Topic) => Promise<void> | void;
   onDeleteTopic?: (topicId: string) => Promise<void> | void;
+  academicCalendar?: AcademicYearTerms[];
+  onSaveAcademicYear?: (terms: AcademicYearTerms) => Promise<void>;
+  onDeleteAcademicYear?: (schoolYear: string) => Promise<void>;
   onApproveSurvey?: (surveyId: string | number) => void;
   onRejectSurvey?: (surveyId: string | number, reason: string) => void;
   onTakedownSurvey?: (surveyId: string | number, reason: string) => void;
   onReviewNews?: (id: string, decision: "approve" | "reject", reason?: string) => Promise<void> | void;
-  initialTab?: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news";
+  initialTab?: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news" | "calendar";
   showToast?: (text: string, type?: "success" | "info") => void;
 }
 
@@ -153,6 +159,9 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onNavigateToML,
   onSaveTopic,
   onDeleteTopic,
+  academicCalendar = [],
+  onSaveAcademicYear,
+  onDeleteAcademicYear,
   onApproveSurvey,
   onRejectSurvey,
   onTakedownSurvey,
@@ -162,7 +171,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 }) => {
   const { confirm, confirmDialog } = useConfirm();
   // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics" | "news">(
+  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics" | "news" | "calendar">(
     initialTab || "approvals"
   );
 
@@ -545,6 +554,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                 { id: "logs", label: "Activity Audit Trail", count: logs.length, icon: Activity },
                 { id: "backup", label: "System Backup & Snapshots", icon: Database },
                 { id: "topics", label: "Survey Topics", count: topics.length, icon: Tag },
+                { id: "calendar", label: "Academic Calendar", count: academicCalendar.length, icon: CalendarRange },
               ].map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -1351,6 +1361,15 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           surveys={surveys}
           onSaveTopic={onSaveTopic}
           onDeleteTopic={onDeleteTopic}
+        />
+      )}
+
+      {activeTab === "calendar" && onSaveAcademicYear && onDeleteAcademicYear && (
+        <AcademicCalendarManager
+          calendar={academicCalendar}
+          adminEmail={currentUser?.email || ""}
+          onSave={onSaveAcademicYear}
+          onDelete={onDeleteAcademicYear}
         />
       )}
 

@@ -78,55 +78,67 @@ export function getSurveyAvailability(
 }
 
 /**
- * Number of active users (status === "active"), excluding the survey owner (case-insensitive email),
- * matching targetAudience:
- * all or missing = everyone;
- * students = pos Student or Student Officer;
- * faculty = pos Faculty;
- * officers = pos Student Officer;
- * custom = matches any of filters.roles ("students", "faculty", "officers") using the same mapping.
+ * Is someone with this position part of the survey's target audience? The one check used by
+ * Take a Survey, the eligible count and (mirrored) the Firestore response rule `inAudience`.
+ * all or missing = everyone; students = Student or Student Officer; faculty = Faculty;
+ * officers = Student Officer; custom = any of filters.roles with the same mapping.
  */
-export function countEligibleUsers(survey: Survey, users: UserProfile[]): number {
-  const ownerEmail = (survey.owner || "").trim().toLowerCase();
+export function isInAudience(survey: Pick<Survey, "targetAudience">, pos: string | undefined): boolean {
   const target = survey.targetAudience;
-  const targetType = target?.type || "all";
+  const type = target?.type || "all";
+  const isStudent = pos === "Student" || pos === "Student Officer";
+  if (type === "all") return true;
+  if (type === "students") return isStudent;
+  if (type === "faculty") return pos === "Faculty";
+  if (type === "officers") return pos === "Student Officer";
+  const roles = target?.filters?.roles || [];
+  return (
+    (roles.includes("students") && isStudent) ||
+    (roles.includes("faculty") && pos === "Faculty") ||
+    (roles.includes("officers") && pos === "Student Officer")
+  );
+}
 
-  const isRoleMatching = (role: string, pos: string): boolean => {
-    const r = role.trim().toLowerCase();
-    if (r === "students" || r === "student") {
-      return pos === "Student" || pos === "Student Officer";
+/**
+ * When a survey stopped taking answers: when it was archived, or the end of its closing date if
+ * that has passed. null = still open. Used so participation of a closed survey only counts people
+ * who had an account before it closed.
+ */
+export function eligibilityCutoff(survey: Survey, now: number = Date.now()): number | null {
+  if (typeof survey.archivedAt === "number" && survey.archivedAt > 0) return survey.archivedAt;
+  if (!survey.openEnded && survey.closeDate) {
+    const end = Date.parse(survey.closeDate);
+    if (!Number.isNaN(end)) {
+      const d = new Date(end);
+      const endOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() - 1;
+      if (endOfDay < now) return endOfDay;
     }
-    if (r === "faculty") {
-      return pos === "Faculty";
-    }
-    if (r === "officers" || r === "officer") {
-      return pos === "Student Officer";
-    }
-    return false;
-  };
+  }
+  return null;
+}
 
+/** Accounts made after the cutoff did not exist while the survey was open. No date = counted. */
+function joinedBy(user: Pick<UserProfile, "joined">, cutoff: number | null): boolean {
+  if (cutoff === null || !user.joined) return true;
+  const joined = Date.parse(user.joined);
+  return Number.isNaN(joined) || joined <= cutoff;
+}
+
+/**
+ * Active accounts in the survey's audience (isInAudience), not counting the owner. With a cutoff,
+ * only accounts that joined by then (see eligibilityCutoff).
+ */
+export function countEligibleUsers(
+  survey: Survey,
+  users: Pick<UserProfile, "email" | "status" | "pos" | "joined">[],
+  cutoff: number | null = null
+): number {
+  const ownerEmail = (survey.owner || "").trim().toLowerCase();
   return users.filter((u) => {
     if (u.status !== "active") return false;
+    if (!joinedBy(u, cutoff)) return false;
     if (u.email && u.email.trim().toLowerCase() === ownerEmail) return false;
-
-    if (!target || targetType === "all") {
-      return true;
-    }
-    if (targetType === "students") {
-      return u.pos === "Student" || u.pos === "Student Officer";
-    }
-    if (targetType === "faculty") {
-      return u.pos === "Faculty";
-    }
-    if (targetType === "officers") {
-      return u.pos === "Student Officer";
-    }
-    if (targetType === "custom") {
-      const roles = target.filters?.roles || [];
-      if (roles.length === 0) return false;
-      return roles.some((r) => isRoleMatching(r, u.pos));
-    }
-    return true;
+    return isInAudience(survey, u.pos);
   }).length;
 }
 

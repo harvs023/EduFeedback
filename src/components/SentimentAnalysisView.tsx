@@ -22,6 +22,7 @@ interface ServiceInfo {
   promptVersion: string;
   promptReady: boolean;
   signingReady: boolean;
+  serverSaveReady?: boolean;
 }
 
 const POLARITY_STYLE: Record<string, string> = {
@@ -116,6 +117,7 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
   }, [comments, responses]);
 
   const toRerun = responses.filter(needsReanalysis).length;
+  const waiting = responses.filter((r) => r.commentStatus === "pending").length;
   const failedSignatures = responses.reduce((n, r) => n + r.answers.filter((a) => a.signatureFailed).length, 0);
   const fallbackComments = comments.filter((c) => c.analysis.method === "fallback");
 
@@ -198,6 +200,8 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
                 ? "Prompt file missing"
                 : !info.signingReady
                 ? "Signing secret missing"
+                : !info.serverSaveReady
+                ? "Service account key missing"
                 : "Ready"}
             </div>
           </div>
@@ -258,6 +262,13 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
               Responses analyzed by the fallback word list, not analyzed because the service was down, saved before this
               version, or whose result failed the signature check. Re-running sends them to Gemini again and replaces the old results.
             </p>
+            {waiting > 0 && (
+              <p className="text-xs text-amber-800 mt-1">
+                {waiting} of these {waiting === 1 ? "is" : "are"} still waiting for the server. It normally finishes within a
+                minute; if Gemini is busy it tries again for about 5 minutes. Reload the page first; re-run only the ones
+                that stay waiting longer than that.
+              </p>
+            )}
           </div>
           <button
             type="button"

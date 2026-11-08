@@ -16,6 +16,7 @@ import {
   FirestoreLogsService,
   FirestoreNotificationService,
   FirestoreTopicService,
+  FirestoreAcademicCalendarService,
   INITIAL_TOPICS,
   FirebaseAuthService,
   isFirebaseConfigured,
@@ -34,6 +35,7 @@ import {
   AccountStatus,
   NotificationItem,
   Topic,
+  AcademicYearTerms,
 } from "../types";
 import {
   MASTER_ADMIN_EMAIL,
@@ -406,6 +408,21 @@ export class DatabaseService {
 
   static async deleteTopic(topicId: string): Promise<void> {
     await FirestoreTopicService.delete(topicId);
+  }
+
+  // ==========================================
+  // ACADEMIC CALENDAR
+  // ==========================================
+  static async getAcademicCalendar(): Promise<AcademicYearTerms[]> {
+    return await FirestoreAcademicCalendarService.getAll();
+  }
+
+  static async saveAcademicYear(terms: AcademicYearTerms): Promise<void> {
+    await FirestoreAcademicCalendarService.save(terms);
+  }
+
+  static async deleteAcademicYear(schoolYear: string): Promise<void> {
+    await FirestoreAcademicCalendarService.delete(schoolYear);
   }
 
   /**

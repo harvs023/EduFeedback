@@ -1,11 +1,10 @@
-import { Answer, CommentAnalysis, Polarity, Survey, SurveyResponse } from "../types";
+import { Answer, CommentAnalysis, Survey, SurveyResponse } from "../types";
 import { authFetch } from "./firebase";
+import { applyResults, commentSlots, summarizeComments } from "./commentSlots";
 
-/** What the answer screen saves for an empty Paragraph answer. */
-const EMPTY_PARAGRAPH = "No response";
+export { summarizeComments };
+
 const MAX_PER_REQUEST = 30;
-/** A respondent waits at most this long after Submit; slower analysis is saved as "not_analyzed". */
-export const SUBMIT_ANALYSIS_TIMEOUT_MS = 25000;
 
 export interface CommentToAnalyze {
   text: string;
@@ -45,57 +44,6 @@ export async function requestCommentAnalysis(
   }
 }
 
-/** The Paragraph answers that have text, with the question context sent along. */
-function commentSlots(survey: Survey, answers: Answer[]) {
-  return answers
-    .map((answer, index) => {
-      const question = survey.questions[index];
-      const text = (answer.answer || "").trim();
-      if (!question || question.type !== "paragraph" || !text || text === EMPTY_PARAGRAPH) return null;
-      const block = survey.topicBlocks?.find((b) => b.id === question.blockId);
-      const context = [survey.title, block ? `Section: ${block.title}` : "", `Question: ${question.text}`]
-        .filter(Boolean)
-        .join(" | ");
-      return { index, text, context };
-    })
-    .filter((slot): slot is { index: number; text: string; context: string } => slot !== null);
-}
-
-const mostCommon = <T,>(values: T[]): T | undefined => {
-  const counts = new Map<T, number>();
-  values.forEach((v) => counts.set(v, (counts.get(v) || 0) + 1));
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-};
-
-/**
- * Response-level summary of the analyzable comments: the mean score, turned back into a polarity
- * with the same bands the prompt uses (Positive >= 0.25, Negative <= -0.25). Each comment keeps
- * its own result, which is what the thesis evaluates.
- */
-export function summarizeComments(analyses: CommentAnalysis[]): SurveyResponse["sentimentAnalysis"] | undefined {
-  const usable = analyses.filter((a) => a.analyzable && a.polarity && a.score !== null);
-  if (usable.length === 0) return undefined;
-  const mean = usable.reduce((sum, a) => sum + (a.score as number), 0) / usable.length;
-  const polarity: Polarity = mean >= 0.25 ? "Positive" : mean <= -0.25 ? "Negative" : "Neutral";
-  const suggestionShare = usable.filter((a) => a.isSuggestion).length / usable.length;
-  const confidences = usable.map((a) => a.confidence).filter((c): c is number => c !== null);
-  const strongest = [...usable].sort((a, b) => Math.abs(b.score as number) - Math.abs(a.score as number))[0];
-  return {
-    sentiment: suggestionShare > 0.5 ? "Constructive Suggestion" : polarity,
-    polarity,
-    score: Number(mean.toFixed(2)),
-    language: mostCommon(usable.map((a) => a.language)) || "Other",
-    aspects: [],
-    sarcasmDetected: usable.some((a) => a.sarcasmDetected),
-    confidence: confidences.length ? Number((confidences.reduce((s, c) => s + c, 0) / confidences.length).toFixed(2)) : null,
-    emotion: strongest.emotion,
-    method: usable.some((a) => a.method === "fallback") ? "fallback" : "gemini",
-    model: usable.find((a) => a.method === "gemini")?.model ?? null,
-    promptVersion: usable[0].promptVersion,
-    commentCount: usable.length,
-  };
-}
-
 /**
  * Analyzes every comment in a response. Never throws: if the service is down, the response is
  * still saved and marked "not_analyzed" so the admin can re-run it later.
@@ -113,15 +61,29 @@ export async function analyzeResponse(
     timeoutMs
   );
   if (!results || results.length !== slots.length) return { answers, commentStatus: "not_analyzed" };
+  return applyResults(answers, slots, results);
+}
 
-  const updated = answers.map((a) => ({ ...a }));
-  slots.forEach((slot, i) => {
-    updated[slot.index] = { ...updated[slot.index], analysis: results[i] };
-  });
-  const summary = summarizeComments(results);
-  return summary
-    ? { answers: updated, commentStatus: "analyzed", sentimentAnalysis: summary }
-    : { answers: updated, commentStatus: "not_analyzable" };
+/**
+ * Submit no longer waits for Gemini: the response is saved as "pending" (or "no_comment") and
+ * the server analyzes it and saves the results itself.
+ */
+export function initialCommentStatus(survey: Survey, answers: Answer[]): "pending" | "no_comment" {
+  return commentSlots(survey, answers).length > 0 ? "pending" : "no_comment";
+}
+
+/**
+ * Asks the server to analyze a saved "pending" response. Does not wait for the answer, and keeps
+ * going if the respondent closes the page. If it never arrives, the response stays "pending" and
+ * the admin re-runs it.
+ */
+export function requestServerAnalysis(responseId: string): void {
+  authFetch("/api/sentiment/process", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ responseId }),
+    keepalive: true,
+  }).catch((err) => console.warn("Could not ask the server to analyze the response:", err));
 }
 
 /** One saved result, identified by response, answer position and signature. */
@@ -187,7 +149,7 @@ export function trustedResponses(responses: SurveyResponse[], validKeys: Set<str
  * check (use on the output of trustedResponses).
  */
 export function needsReanalysis(r: SurveyResponse): boolean {
-  if (!r.commentStatus || r.commentStatus === "not_analyzed") return true;
+  if (!r.commentStatus || r.commentStatus === "not_analyzed" || r.commentStatus === "pending") return true;
   if (r.answers.some((a) => a.signatureFailed)) return true;
   return r.answers.some((a) => a.analysis?.method === "fallback");
 }

@@ -70,6 +70,23 @@ export interface Topic {
   createdAt: number;
 }
 
+/**
+ * One school year in the admin's academic calendar (Firestore `academic_calendar/{schoolYear}`).
+ * Dates are timestamps: a start is the first moment of its first day, an end is the last moment
+ * of its last day (in the admin's local time).
+ */
+export interface AcademicYearTerms {
+  schoolYear: string; // e.g. "2026-2027" (also the document id)
+  sem1Start: number;
+  sem1End: number;
+  sem2Start: number;
+  sem2End: number;
+  updatedAt: number;
+  updatedBy: string;
+}
+
+export type TermName = "1st Sem" | "2nd Sem" | "Between terms";
+
 export interface SurveyTopicBlock {
   id: string;
   topicId: string;
@@ -194,8 +211,10 @@ export interface SurveyResponse {
   /**
    * no_comment: no Paragraph answer had text. not_analyzable: comments were empty/joke/nonsense.
    * not_analyzed: the analysis service could not be reached; the admin can re-run it.
+   * pending: saved at Submit, waiting for the server to analyze it (a few seconds). If it stays
+   * pending, the admin re-runs it.
    */
-  commentStatus?: "no_comment" | "analyzed" | "not_analyzable" | "not_analyzed";
+  commentStatus?: "no_comment" | "analyzed" | "not_analyzable" | "not_analyzed" | "pending";
   /** Summary of the analyzable comments in this response. Missing when there were none. */
   sentimentAnalysis?: {
     sentiment: "Positive" | "Negative" | "Neutral" | "Constructive Suggestion";

@@ -153,7 +153,7 @@ export async function modelVersionFor(ai: GoogleGenAI, model: string): Promise<s
 
 /** Gemini's JSON plus the model version reported with the answer. */
 async function askGemini(ai: GoogleGenAI, prompt: string): Promise<{ json: any; modelVersion: string | null } | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < RETRY_WAITS_MS.length + 1; attempt++) {
     try {
       const response = await ai.models.generateContent({
         model: sentimentModel(),
@@ -164,13 +164,27 @@ async function askGemini(ai: GoogleGenAI, prompt: string): Promise<{ json: any; 
       return { json: JSON.parse(cleaned), modelVersion: response.modelVersion || null };
     } catch (err: any) {
       const msg = String(err?.message || err);
-      const temporary = err?.status === 503 || msg.includes("503") || msg.includes("UNAVAILABLE");
       console.warn(`[Sentiment] ${sentimentModel()} attempt ${attempt + 1} failed: ${msg.slice(0, 160)}`);
-      if (!temporary) return null;
-      await new Promise((r) => setTimeout(r, 600));
+      if (!isTemporary(err, msg) || attempt === RETRY_WAITS_MS.length) return null;
+      await new Promise((r) => setTimeout(r, RETRY_WAITS_MS[attempt]));
     }
   }
   return null;
+}
+
+/** Waits between tries for one comment (3 tries in all). */
+const RETRY_WAITS_MS = [2000, 5000];
+
+/**
+ * Errors worth trying again: Gemini busy (503), too many requests (429), server errors (5xx),
+ * network problems, timeouts, or a reply that was not valid JSON. A wrong key (400/401/403) or
+ * unknown model (404) is not retried.
+ */
+function isTemporary(err: any, msg: string): boolean {
+  const status = Number(err?.status ?? err?.code);
+  if (status === 429 || status >= 500) return true;
+  if (err instanceof SyntaxError) return true;
+  return /(429|500|502|503|504)|UNAVAILABLE|RESOURCE_EXHAUSTED|INTERNAL|DEADLINE|timeout|timed out|fetch failed|ECONNRESET|ETIMEDOUT|socket/i.test(msg);
 }
 
 /** Analyzes and signs one comment. Never throws: if Gemini fails, returns a labeled fallback result. */

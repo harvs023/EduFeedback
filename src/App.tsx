@@ -59,6 +59,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [academicCalendar, setAcademicCalendar] = useState<AcademicYearTerms[]>([]);
+  /** When surveys and responses were last loaded from the database (shown on Analytics). */
+  const [dataLoadedAt, setDataLoadedAt] = useState<number | null>(null);
 
   // Modals State
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
@@ -125,6 +127,7 @@ export default function App() {
       ]);
 
       setResponses(cloudResponses);
+      setDataLoadedAt(Date.now());
       setUsers(cloudUsers);
       setNewsList(cloudNews);
       setMlDataset(cloudMl);
@@ -293,6 +296,7 @@ export default function App() {
         isSuperadmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
       ]);
       setResponses(scopedResponses);
+      setDataLoadedAt(Date.now());
       setUsers(scopedUsers);
       setNewsList(freshNews);
       setMlDataset(freshMl);
@@ -1439,6 +1443,21 @@ export default function App() {
     }
   };
 
+  /** Analytics "Refresh": reloads only surveys, responses and (admin) the user list. */
+  const handleRefreshAnalytics = async () => {
+    if (!currentUser) return;
+    const adminViewer = currentUser.role === "superadmin" || currentUser.pos === "Superadmin";
+    const freshSurveys = await DatabaseService.getSurveys(currentUser);
+    const [freshResponses, freshUsers] = await Promise.all([
+      DatabaseService.getResponses(currentUser, freshSurveys),
+      adminViewer ? DatabaseService.getUsers(currentUser) : Promise.resolve(null),
+    ]);
+    setSurveys(freshSurveys);
+    setResponses(freshResponses);
+    if (freshUsers) setUsers(freshUsers);
+    setDataLoadedAt(Date.now());
+  };
+
   const handleSaveAcademicYear = async (terms: AcademicYearTerms) => {
     await DatabaseService.saveAcademicYear(terms);
     setAcademicCalendar((prev) =>
@@ -1772,6 +1791,8 @@ export default function App() {
               responses={trustedResponseList}
               academicCalendar={academicCalendar}
               users={users}
+              dataLoadedAt={dataLoadedAt}
+              onRefresh={handleRefreshAnalytics}
               initialSurveyId={analyticsTargetSurveyId}
               isAdmin={isSuperadmin}
               currentUser={currentUser}

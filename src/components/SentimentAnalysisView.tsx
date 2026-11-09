@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { CommentAnalysis, Survey, SurveyResponse } from "../types";
 import { authFetch } from "../lib/firebase";
 import { useConfirm } from "./ConfirmDialog";
+import { EvaluationPanel } from "./EvaluationPanel";
 import { needsReanalysis, requestCommentAnalysis } from "../lib/sentiment";
 import { AlertTriangle, BrainCircuit, Info, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
@@ -411,10 +412,12 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
       <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-xs text-blue-900 flex items-start gap-2">
         <Info className="w-4 h-4 shrink-0 mt-0.5" />
         <span>
-          Accuracy has not been measured yet. The evaluation (human labels, Cohen's kappa, accuracy, macro-F1 and a
-          confusion matrix) is a later step.
+          Accuracy has not been measured yet. It is measured with the evaluation below (human labels, Cohen's kappa,
+          accuracy, macro-F1 and a confusion matrix).
         </span>
       </div>
+
+      <EvaluationPanel responses={responses} surveys={surveys} />
     </div>
   );
 };

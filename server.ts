@@ -8,6 +8,7 @@ import { loadPromptTemplate, PROMPT_VERSION, sentimentModel } from "./server/sen
 import { signingReady, verifyResult } from "./server/signing";
 import { adminError, adminReady } from "./server/firestoreAdmin";
 import { eligibleCountFor } from "./server/eligible";
+import { cleanFindings, suggestWording, MAX_FINDINGS } from "./server/recommendationWording";
 import { analyzeAll, processPendingResponse, resumePendingResponses } from "./server/processResponse";
 
 dotenv.config();
@@ -204,6 +205,28 @@ app.post("/api/surveys/eligible", async (req, res) => {
   } catch (err) {
     console.error("[Eligible] Could not count:", (err as Error)?.message || err);
     res.status(500).json({ error: "Could not count eligible people now." });
+  }
+});
+
+// Optional "AI-suggested wording" for rule-based recommendations. Body: { surveyTitle, period,
+// findings: [{ label, topic, sentence, evidence, comments[] }] }. Comment text only, never names.
+app.post("/api/recommendations/wording", async (req, res) => {
+  const findings = cleanFindings(req.body?.findings);
+  if (!findings) return res.status(400).json({ error: `Send between 1 and ${MAX_FINDINGS} findings.` });
+  try {
+    const result = await suggestWording(
+      getGeminiAI(),
+      String(req.body?.surveyTitle || ""),
+      String(req.body?.period || ""),
+      findings
+    );
+    if (!result) {
+      return res.status(503).json({ error: "The AI wording service is not available right now. Please try again later." });
+    }
+    res.json({ success: true, generatedAt: Date.now(), ...result });
+  } catch (err) {
+    console.error("[Recommendations] Wording failed:", (err as Error)?.message || err);
+    res.status(500).json({ error: "Could not get AI wording now. The rule-based recommendations are unchanged." });
   }
 });
 

@@ -14,6 +14,7 @@ import {
   periodLabel,
   periodOptions,
   previousPeriod,
+  commentsCsv,
   responsesCsv,
   responsesForSurvey,
   surveyStats,
@@ -21,6 +22,7 @@ import {
 import { endOfDay, startOfDay } from "../../lib/schoolYear";
 import { Change, RatingValue, SampleNotice, SentimentBar, SentimentFootnote, StatCard, fmtPct } from "./AnalyticsParts";
 import { QuestionResults } from "./QuestionResults";
+import { TopicInsights } from "./TopicInsights";
 
 const KINDS: { id: PeriodKind; label: string }[] = [
   { id: "all", label: "All time" },
@@ -170,7 +172,7 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({ surveys, responses, calend
   const [kind, setKind] = useState<PeriodKind>("all");
   const [mainKey, setMainKey] = useState("");
   const [mainCustom, setMainCustom] = useState({ from: "", to: "" });
-  const [compareOn, setCompareOn] = useState(false);
+  const [compareChecked, setCompareOn] = useState(false);
   const [compareKey, setCompareKey] = useState("");
   const [compareCustom, setCompareCustom] = useState({ from: "", to: "" });
 
@@ -181,6 +183,11 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({ surveys, responses, calend
     setMainKey(options[0] ? periodKey(options[0]) : "");
     setCompareKey(options[1] ? periodKey(options[1]) : "");
   }, [kind, surveyId]);
+
+  // The tick only counts where comparing is possible (not All time, and not with a single period),
+  // so switching back to All time never leaves an empty comparison column behind.
+  const canCompare = kind !== "all" && (kind === "custom" || options.length > 1);
+  const compareOn = compareChecked && canCompare;
 
   const mainPeriod: PeriodSpec | null =
     kind === "custom" ? customSpec(mainCustom) : options.find((o) => periodKey(o) === mainKey) || options[0] || null;
@@ -220,16 +227,30 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({ surveys, responses, calend
     survey && p ? surveyStats(survey, surveyResponses.filter((r) => inPeriod(r, p, calendar)), liveEligible) : null;
   const mainStats = statsFor(mainPeriod);
   const compareStats = statsFor(comparePeriod);
-  const canCompare = kind !== "all" && (kind === "custom" || options.length > 1);
 
-  const handleExport = () => {
+  // For the recommendations: responses in the chosen period, and in the period just before it
+  // (same kind) for "getting worse". All time and custom dates have no "before".
+  const mainResponses = useMemo(
+    () => (mainPeriod ? surveyResponses.filter((r) => inPeriod(r, mainPeriod, calendar)) : []),
+    [surveyResponses, mainPeriod && periodKey(mainPeriod), calendar]
+  );
+  const previousForInsights = useMemo(() => {
+    if (!mainPeriod || kind === "all" || kind === "custom") return null;
+    const prev = previousPeriod(mainPeriod, options);
+    return prev
+      ? { label: periodLabel(prev), responses: surveyResponses.filter((r) => inPeriod(r, prev, calendar)) }
+      : null;
+  }, [surveyResponses, mainPeriod && periodKey(mainPeriod), kind, options, calendar]);
+
+  const exportFile = (fileKind: "responses" | "comments") => {
     if (!survey || !mainPeriod) return;
     const rows = surveyResponses.filter((r) => inPeriod(r, mainPeriod, calendar));
-    const blob = new Blob(["﻿" + responsesCsv(survey, rows, calendar)], { type: "text/csv;charset=utf-8" });
+    const text = fileKind === "comments" ? commentsCsv(survey, rows, calendar) : responsesCsv(survey, rows, calendar);
+    const blob = new Blob(["\uFEFF" + text], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${survey.title.replace(/[^a-z0-9]+/gi, "_").slice(0, 50)}_${periodLabel(mainPeriod).replace(/[^a-z0-9]+/gi, "_")}.csv`;
+    a.download = `${survey.title.replace(/[^a-z0-9]+/gi, "_").slice(0, 50)}_${fileKind}_${periodLabel(mainPeriod).replace(/[^a-z0-9]+/gi, "_")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -292,7 +313,7 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({ surveys, responses, calend
         {canCompare && (
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-              <input type="checkbox" checked={compareOn} onChange={(e) => setCompareOn(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+              <input type="checkbox" checked={compareChecked} onChange={(e) => setCompareOn(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
               Compare with another period
             </label>
             {compareOn && (
@@ -332,19 +353,41 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({ surveys, responses, calend
               ))}
           </div>
 
+          {survey && mainStats.level !== "insufficient" && (
+            <TopicInsights
+              survey={survey}
+              responses={mainResponses}
+              periodLabel={periodLabel(mainPeriod)}
+              previous={previousForInsights}
+            />
+          )}
+
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-slate-800">Per question · {periodLabel(mainPeriod)}</h3>
               <div className="flex flex-col items-end gap-1">
-                <button
-                  type="button"
-                  onClick={handleExport}
-                  disabled={mainStats.level === "insufficient"}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
-                >
-                  <Download className="w-4 h-4" />
-                  Export CSV
-                </button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => exportFile("responses")}
+                    disabled={mainStats.level === "insufficient"}
+                    title="One row per response, all answers"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export responses
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportFile("comments")}
+                    disabled={mainStats.level === "insufficient"}
+                    title="One row per comment, no names"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export comments
+                  </button>
+                </div>
                 {mainStats.level === "insufficient" && (
                   <span className="text-[11px] text-slate-500">
                     Available from {MIN_RESPONSES} responses, so no one's answers can be singled out.

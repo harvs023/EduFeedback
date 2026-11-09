@@ -151,8 +151,11 @@ export async function modelVersionFor(ai: GoogleGenAI, model: string): Promise<s
   return versionCache.get(model) ?? null;
 }
 
-/** Gemini's JSON plus the model version reported with the answer. */
-async function askGemini(ai: GoogleGenAI, prompt: string): Promise<{ json: any; modelVersion: string | null } | null> {
+/**
+ * Gemini's JSON plus the model version reported with the answer. Temperature 0, retries on
+ * temporary errors. Also used for the recommendation wording (server/recommendationWording.ts).
+ */
+export async function askGemini(ai: GoogleGenAI, prompt: string): Promise<{ json: any; modelVersion: string | null } | null> {
   for (let attempt = 0; attempt < RETRY_WAITS_MS.length + 1; attempt++) {
     try {
       const response = await ai.models.generateContent({

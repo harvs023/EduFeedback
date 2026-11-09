@@ -305,6 +305,97 @@ export function surveyStats(survey: Survey, responses: SurveyResponse[], liveEli
   };
 }
 
+/** Statistics for some of a survey's questions only (one topic, or a set of matching questions). */
+export function onlyQuestions(survey: Survey, responses: SurveyResponse[], indexes: number[]): SurveyStats {
+  const sub: Survey = { ...survey, eligibleCount: undefined, questions: indexes.map((i) => survey.questions[i]) };
+  const subResponses = responses.map((r) => ({ ...r, answers: indexes.map((i) => r.answers[i]) }));
+  return surveyStats(sub, subResponses);
+}
+
+// ---------------------------------------------------------------- comparing two surveys
+
+export interface ComparedRow {
+  label: string;
+  a: { average: number | null; n: number };
+  b: { average: number | null; n: number };
+}
+
+/** Same wording, ignoring capitals, extra spaces and a final "?" or ".". */
+const normalizeText = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ").replace(/[?.!]+$/, "");
+
+/** Averages are used only from MIN_RESPONSES ratings, like everywhere else. */
+function side(stats: SurveyStats) {
+  return {
+    average: stats.ratingRespondents >= MIN_RESPONSES ? stats.averageRating : null,
+    n: stats.ratingRespondents,
+  };
+}
+
+/**
+ * Topics both surveys use (same admin topic, even if the block titles differ). A survey may have
+ * several blocks with the same topic; they are counted together.
+ */
+export function sharedTopics(
+  a: Survey,
+  aResponses: SurveyResponse[],
+  b: Survey,
+  bResponses: SurveyResponse[]
+): ComparedRow[] {
+  const byTopic = (s: Survey) => {
+    const map = new Map<string, { titles: string[]; indexes: number[] }>();
+    for (const block of s.topicBlocks || []) {
+      if (!block.topicId) continue;
+      const entry = map.get(block.topicId) || { titles: [], indexes: [] };
+      entry.titles.push(block.title);
+      s.questions.forEach((q, i) => {
+        if (q.blockId === block.id && q.type === "rating") entry.indexes.push(i);
+      });
+      map.set(block.topicId, entry);
+    }
+    return map;
+  };
+  const ta = byTopic(a);
+  const tb = byTopic(b);
+  const rows: ComparedRow[] = [];
+  ta.forEach((ea, topicId) => {
+    const eb = tb.get(topicId);
+    if (!eb || ea.indexes.length === 0 || eb.indexes.length === 0) return;
+    const titleA = ea.titles.join(" / ");
+    const titleB = eb.titles.join(" / ");
+    rows.push({
+      label: titleA === titleB ? titleA : `${titleA} (B: ${titleB})`,
+      a: side(onlyQuestions(a, aResponses, ea.indexes)),
+      b: side(onlyQuestions(b, bResponses, eb.indexes)),
+    });
+  });
+  return rows;
+}
+
+/** Rating questions worded the same in both surveys (for example a copied survey). */
+export function sameQuestions(
+  a: Survey,
+  aResponses: SurveyResponse[],
+  b: Survey,
+  bResponses: SurveyResponse[]
+): ComparedRow[] {
+  const used = new Set<number>();
+  const rows: ComparedRow[] = [];
+  a.questions.forEach((qa, ia) => {
+    if (qa.type !== "rating") return;
+    const ib = b.questions.findIndex(
+      (qb, j) => !used.has(j) && qb.type === "rating" && normalizeText(qb.text) === normalizeText(qa.text)
+    );
+    if (ib < 0) return;
+    used.add(ib);
+    rows.push({
+      label: qa.text,
+      a: side(onlyQuestions(a, aResponses, [ia])),
+      b: side(onlyQuestions(b, bResponses, [ib])),
+    });
+  });
+  return rows;
+}
+
 export function percent(part: number, whole: number): number {
   return whole > 0 ? (part / whole) * 100 : 0;
 }
@@ -365,5 +456,37 @@ export function responsesCsv(survey: Survey, responses: SurveyResponse[], calend
     });
     return row;
   });
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+}
+
+/**
+ * One row per comment, with no names at all (also not for named responses), so the file can be
+ * shared for reading or labeling. The label comes only from confirmed results.
+ */
+export function commentsCsv(survey: Survey, responses: SurveyResponse[], calendar: AcademicYearTerms[]): string {
+  const header = ["Submitted", "School year", "Semester", "Section", "Question", "Comment", "Sentiment", "Labeled by"];
+  const rows: unknown[][] = [];
+  const sorted = [...responses].sort((a, b) => (responseTime(a) ?? 0) - (responseTime(b) ?? 0));
+  for (const r of sorted) {
+    const t = responseTime(r);
+    const info = t !== null ? termFor(t, calendar) : null;
+    survey.questions.forEach((q, i) => {
+      if (q.type !== "paragraph") return;
+      const a = r.answers[i];
+      const text = (a?.answer || "").trim();
+      if (!a || EMPTY_ANSWERS.has(text)) return;
+      const an = a.analysis;
+      rows.push([
+        t !== null ? new Date(t).toLocaleString("en-US") : r.date,
+        info?.schoolYear || "",
+        info?.term || "Not in calendar",
+        survey.topicBlocks?.find((b) => b.id === q.blockId)?.title || "",
+        q.text,
+        text,
+        !an ? "Not analyzed" : !an.analyzable || !an.polarity ? "Not analyzable" : an.polarity,
+        !an ? "" : an.method === "fallback" ? "Fallback word list" : `Gemini ${an.modelVersion || an.model || ""}`.trim(),
+      ]);
+    });
+  }
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
 }

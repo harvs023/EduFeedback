@@ -3,8 +3,13 @@ import { CommentAnalysis, Survey, SurveyResponse } from "../types";
 import { authFetch } from "../lib/firebase";
 import { useConfirm } from "./ConfirmDialog";
 import { EvaluationPanel } from "./EvaluationPanel";
+import { EvaluationAgreement } from "./EvaluationAgreement";
+import { EvaluationResults } from "./EvaluationResults";
+import { MeasuredAccuracy } from "./MeasuredAccuracy";
+import { DatabaseService } from "../lib/databaseService";
+import { EvaluationRun } from "../types";
 import { needsReanalysis, requestCommentAnalysis } from "../lib/sentiment";
-import { AlertTriangle, BrainCircuit, Info, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { AlertTriangle, BrainCircuit, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
 const LOW_CONFIDENCE = 0.6;
 
@@ -24,6 +29,7 @@ interface ServiceInfo {
   promptReady: boolean;
   signingReady: boolean;
   serverSaveReady?: boolean;
+  geminiQuota?: { paused: boolean; since: number | null; retryAt: number | null };
 }
 
 const POLARITY_STYLE: Record<string, string> = {
@@ -68,6 +74,36 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
   onReanalyze,
 }) => {
   const { confirm, confirmDialog } = useConfirm();
+
+  // Saved evaluation results (admin only): the only source of an accuracy number.
+  const [runs, setRuns] = useState<EvaluationRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(true);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  useEffect(() => {
+    DatabaseService.getEvaluationRuns()
+      .then(setRuns)
+      .catch(() => setRunsError("Could not load saved evaluation results. If you just added the evaluation_runs rule, paste it into the Firebase Console."))
+      .finally(() => setRunsLoading(false));
+  }, []);
+  const saveRun = async (run: EvaluationRun) => {
+    await DatabaseService.saveEvaluationRun(run);
+    setRuns((prev) => [run, ...prev]);
+  };
+  const deleteRun = async (run: EvaluationRun) => {
+    const ok = await confirm({
+      title: "Delete this saved result?",
+      message: "The saved numbers are removed. Your files are not affected, so you can upload them and save again.",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await DatabaseService.deleteEvaluationRun(run.id);
+      setRuns((prev) => prev.filter((r) => r.id !== run.id));
+    } catch {
+      setRunsError("Could not delete the saved result. Please try again.");
+    }
+  };
   const [info, setInfo] = useState<ServiceInfo | null>(null);
   const [tryText, setTryText] = useState("");
   const [tryContext, setTryContext] = useState("");
@@ -192,7 +228,11 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
           </div>
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
             <div className="text-slate-500">Service</div>
-            <div className={`font-bold ${info?.geminiConfigured && info?.promptReady ? "text-emerald-700" : "text-rose-700"}`}>
+            <div
+              className={`font-bold ${
+                info?.geminiQuota?.paused ? "text-amber-700" : info?.geminiConfigured && info?.promptReady ? "text-emerald-700" : "text-rose-700"
+              }`}
+            >
               {!info
                 ? "Checking..."
                 : !info.geminiConfigured
@@ -203,11 +243,27 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
                 ? "Signing secret missing"
                 : !info.serverSaveReady
                 ? "Service account key missing"
+                : info.geminiQuota?.paused
+                ? "Daily limit reached"
                 : "Ready"}
             </div>
           </div>
         </div>
       </div>
+
+      {info?.geminiQuota?.paused && (
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-sm text-amber-900 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            <strong>Gemini's daily limit is used up.</strong> New comments are saved and wait as "pending"; they are
+            analyzed automatically once the limit resets (the server checks again every 30 minutes
+            {info.geminiQuota.retryAt
+              ? `; next check after ${new Date(info.geminiQuota.retryAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+              : ""}
+            ). Respondents are not affected. Re-running and the evaluation upload also wait until then.
+          </span>
+        </div>
+      )}
 
       {/* Overview */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-4">
@@ -266,7 +322,8 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
             {waiting > 0 && (
               <p className="text-xs text-amber-800 mt-1">
                 {waiting} of these {waiting === 1 ? "is" : "are"} still waiting for the server. It normally finishes within a
-                minute; if Gemini is busy it tries again for about 5 minutes. Reload the page first; re-run only the ones
+                minute; if Gemini is busy it tries again for about 5 minutes, and if Gemini's daily limit is used up it
+                waits until the limit resets. Reload the page first; re-run only the ones
                 that stay waiting longer than that.
               </p>
             )}
@@ -409,15 +466,11 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
         )}
       </div>
 
-      <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-xs text-blue-900 flex items-start gap-2">
-        <Info className="w-4 h-4 shrink-0 mt-0.5" />
-        <span>
-          Accuracy has not been measured yet. It is measured with the evaluation below (human labels, Cohen's kappa,
-          accuracy, macro-F1 and a confusion matrix).
-        </span>
-      </div>
+      <MeasuredAccuracy runs={runs} loading={runsLoading} error={runsError} onDelete={deleteRun} />
 
       <EvaluationPanel responses={responses} surveys={surveys} />
+      <EvaluationAgreement />
+      <EvaluationResults onSave={saveRun} />
     </div>
   );
 };

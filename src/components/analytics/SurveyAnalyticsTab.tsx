@@ -23,6 +23,9 @@ import { endOfDay, startOfDay } from "../../lib/schoolYear";
 import { Change, RatingValue, SampleNotice, SentimentBar, SentimentFootnote, StatCard, fmtPct } from "./AnalyticsParts";
 import { QuestionResults } from "./QuestionResults";
 import { TopicInsights } from "./TopicInsights";
+import { ResponseChecks } from "./ResponseChecks";
+import { FlagResponseDialog } from "./FlagResponseDialog";
+import { checkResponse } from "../../lib/responseChecks";
 
 const KINDS: { id: PeriodKind; label: string }[] = [
   { id: "all", label: "All time" },
@@ -40,6 +43,10 @@ interface Props {
   onSelectSurvey: (id: string) => void;
   /** Admin only (the rules let only the admin read the user list): for a live eligible count. */
   users?: UserProfile[];
+  /** Responses the admin excluded (never counted; shown in "Responses to check" only). */
+  excludedResponses?: SurveyResponse[];
+  /** Flag a response for the admin (survey owner or admin). */
+  onFlagResponse?: (responseId: string, reasons: string[], note: string) => Promise<void>;
 }
 
 /** A period picker for one kind: a list of choices, or two dates for "custom". */
@@ -165,7 +172,17 @@ function PeriodSummary({
   );
 }
 
-export const SurveyAnalyticsTab: React.FC<Props> = ({ surveys, responses, calendar, surveyId, onSelectSurvey, users = [] }) => {
+export const SurveyAnalyticsTab: React.FC<Props> = ({
+  surveys,
+  responses,
+  calendar,
+  surveyId,
+  onSelectSurvey,
+  users = [],
+  excludedResponses = [],
+  onFlagResponse,
+}) => {
+  const [flagTarget, setFlagTarget] = useState<{ responseId: string; suggested: string[] } | null>(null);
   const survey = surveys.find((s) => String(s.id) === surveyId) || null;
   const surveyResponses = useMemo(() => (survey ? responsesForSurvey(responses, survey) : []), [responses, survey]);
 
@@ -362,6 +379,15 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({ surveys, responses, calend
             />
           )}
 
+          {survey && mainStats.level !== "insufficient" && (
+            <ResponseChecks
+              survey={survey}
+              responses={mainResponses}
+              excluded={responsesForSurvey(excludedResponses, survey).filter((r) => inPeriod(r, mainPeriod, calendar))}
+              onFlag={onFlagResponse ? (r, suggested) => setFlagTarget({ responseId: r.id, suggested }) : undefined}
+            />
+          )}
+
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-slate-800">Per question · {periodLabel(mainPeriod)}</h3>
@@ -396,10 +422,32 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({ surveys, responses, calend
               </div>
             </div>
             {mainStats.level !== "insufficient" && (
-              <QuestionResults results={mainStats.questions} sectionTitle={(r) => sectionTitle(r.index)} />
+              <QuestionResults
+                results={mainStats.questions}
+                sectionTitle={(r) => sectionTitle(r.index)}
+                isFlagged={(id) => !!surveyResponses.find((r) => r.id === id)?.review}
+                onFlagComment={
+                  onFlagResponse && survey
+                    ? (id) => {
+                        const r = surveyResponses.find((x) => x.id === id);
+                        if (r) setFlagTarget({ responseId: id, suggested: checkResponse(survey, r) });
+                      }
+                    : undefined
+                }
+              />
             )}
           </div>
         </>
+      )}
+      {flagTarget && onFlagResponse && (
+        <FlagResponseDialog
+          suggested={flagTarget.suggested}
+          onCancel={() => setFlagTarget(null)}
+          onSubmit={async (reasons, note) => {
+            await onFlagResponse(flagTarget.responseId, reasons, note);
+            setFlagTarget(null);
+          }}
+        />
       )}
     </div>
   );

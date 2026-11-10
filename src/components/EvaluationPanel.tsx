@@ -285,7 +285,11 @@ export const EvaluationPanel: React.FC<Props> = ({ responses, surveys }) => {
         <button
           type="button"
           disabled={!ready}
-          onClick={() => download(`answer-key_seed-${seed}.csv`, answerKeyCsv(sample, seed), "text/csv;charset=utf-8")}
+          onClick={() => download(`answer-key_seed-${seed}.csv`, answerKeyCsv(sample, seed, {
+                fallback: pool.fallback,
+                unconfirmed: pool.unconfirmed,
+                source: source === "edufeedback" ? "EduFeedback comments" : `Uploaded file ${fileName}`,
+              }), "text/csv;charset=utf-8")}
           className={secondaryButton}
         >
           <FileKey className="w-4 h-4" />

@@ -156,6 +156,8 @@ export async function modelVersionFor(ai: GoogleGenAI, model: string): Promise<s
  * temporary errors. Also used for the recommendation wording (server/recommendationWording.ts).
  */
 export async function askGemini(ai: GoogleGenAI, prompt: string): Promise<{ json: any; modelVersion: string | null } | null> {
+  // Daily limit used up: do not call Gemini at all until the pause is over.
+  if (Date.now() < quotaPausedUntil) return null;
   for (let attempt = 0; attempt < RETRY_WAITS_MS.length + 1; attempt++) {
     try {
       const response = await ai.models.generateContent({
@@ -164,9 +166,23 @@ export async function askGemini(ai: GoogleGenAI, prompt: string): Promise<{ json
         config: { responseMimeType: "application/json", temperature: 0 },
       });
       const cleaned = (response.text || "").replace(/```json/gi, "").replace(/```/g, "").trim();
-      return { json: JSON.parse(cleaned), modelVersion: response.modelVersion || null };
+      const json = JSON.parse(cleaned);
+      if (quotaHitAt) {
+        console.log("[Sentiment] Gemini answers again; the daily limit has reset.");
+        quotaHitAt = 0;
+      }
+      return { json, modelVersion: response.modelVersion || null };
     } catch (err: any) {
       const msg = String(err?.message || err);
+      if (isDailyLimit(err, msg)) {
+        // Keep the first time it was hit while the limit stays used up across pauses.
+        if (!quotaHitAt) {
+          quotaHitAt = Date.now();
+          console.warn(`[Sentiment] Gemini's daily limit is used up. Pausing for ${QUOTA_PAUSE_MS / 60000} minutes; new comments stay pending.`);
+        }
+        quotaPausedUntil = Date.now() + QUOTA_PAUSE_MS;
+        return null;
+      }
       console.warn(`[Sentiment] ${sentimentModel()} attempt ${attempt + 1} failed: ${msg.slice(0, 160)}`);
       if (!isTemporary(err, msg) || attempt === RETRY_WAITS_MS.length) return null;
       await new Promise((r) => setTimeout(r, RETRY_WAITS_MS[attempt]));
@@ -179,6 +195,27 @@ export async function askGemini(ai: GoogleGenAI, prompt: string): Promise<{ json
 const RETRY_WAITS_MS = [2000, 5000];
 
 /**
+ * Gemini's free daily limit. When it is used up, retrying is pointless, so the server stops
+ * calling Gemini for QUOTA_PAUSE_MS, leaves new comments "pending" (no fallback labels) and
+ * tries again after the pause (see the sweep in server.ts).
+ */
+export const QUOTA_PAUSE_MS = 30 * 60 * 1000;
+let quotaPausedUntil = 0;
+let quotaHitAt = 0;
+
+export function geminiQuotaStatus(): { paused: boolean; since: number | null; retryAt: number | null } {
+  const paused = Date.now() < quotaPausedUntil;
+  return { paused, since: paused ? quotaHitAt : null, retryAt: paused ? quotaPausedUntil : null };
+}
+
+/** "Too many requests" that names a per-day quota (not the per-minute one, which passes quickly). */
+function isDailyLimit(err: any, msg: string): boolean {
+  const status = Number(err?.status ?? err?.code);
+  const tooMany = status === 429 || /RESOURCE_EXHAUSTED|429/.test(msg);
+  return tooMany && /per ?day|PerDay|daily/i.test(msg);
+}
+
+/**
  * Errors worth trying again: Gemini busy (503), too many requests (429), server errors (5xx),
  * network problems, timeouts, or a reply that was not valid JSON. A wrong key (400/401/403) or
  * unknown model (404) is not retried.
@@ -187,7 +224,7 @@ function isTemporary(err: any, msg: string): boolean {
   const status = Number(err?.status ?? err?.code);
   if (status === 429 || status >= 500) return true;
   if (err instanceof SyntaxError) return true;
-  return /(429|500|502|503|504)|UNAVAILABLE|RESOURCE_EXHAUSTED|INTERNAL|DEADLINE|timeout|timed out|fetch failed|ECONNRESET|ETIMEDOUT|socket/i.test(msg);
+  return /\b(429|500|502|503|504)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|INTERNAL|DEADLINE|timeout|timed out|fetch failed|ECONNRESET|ETIMEDOUT|socket/i.test(msg);
 }
 
 /** Analyzes and signs one comment. Never throws: if Gemini fails, returns a labeled fallback result. */

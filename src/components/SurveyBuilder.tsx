@@ -42,6 +42,8 @@ interface SurveyBuilderProps {
   currentUser: UserProfile | null;
   categories: string[];
   topics?: Topic[];
+  /** Admin switch: false = only the admin may create surveys or send them for review. */
+  creationOpen?: boolean;
   /** The admin's academic calendar, for the automatic school year. */
   academicCalendar?: AcademicYearTerms[];
   /** How many of this user's other surveys are waiting for review. */
@@ -55,6 +57,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   currentUser,
   categories,
   topics = [],
+  creationOpen = true,
   academicCalendar = [],
   myPendingCount = 0,
   initialSurvey,
@@ -89,6 +92,8 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   // Mandatory / Required Survey (Admin Only Feature)
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
   const isRestricted = !isSuperadmin && currentUser?.canCreateSurveys === false;
+  // Survey creation switched off by the admin: no new surveys, existing drafts can still be saved.
+  const creationClosed = !isSuperadmin && !creationOpen;
   const [isRequired, setIsRequired] = useState<boolean>(initialSurvey?.isRequired || false);
   const [requiredAudience, setRequiredAudience] = useState<"all" | "students" | "faculty" | "officers">(
     initialSurvey?.requiredAudience || "students"
@@ -139,6 +144,9 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
 
     const errors: string[] = [];
     if (!title.trim()) errors.push("Enter a survey title.");
+    if (creationClosed && finalStatus !== "draft") {
+      errors.push("Survey creation is turned off by the admin right now. You can save this as a draft and send it for review later.");
+    }
 
     if (finalStatus === "pending" && myPendingCount >= MAX_PENDING_SURVEYS) {
       errors.push(
@@ -236,6 +244,27 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
     onSaveSurvey(surveyPayload, finalStatus);
   };
 
+  if (creationClosed && !isEditing) {
+    return (
+      <div className="max-w-lg mx-auto mt-12 bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-xs space-y-4">
+        <h3 className="font-serif text-lg font-bold text-slate-900">Survey creation is turned off for now</h3>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          The administrator has paused new surveys. Your drafts are safe: you can still open and save them from My Surveys,
+          and send them for review once creation is turned back on.
+        </p>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+          >
+            Go back
+          </button>
+        )}
+      </div>
+    );
+  }
+
   if (isRestricted) {
     return (
       <div className="max-w-lg mx-auto mt-12 bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-xs space-y-4">
@@ -261,6 +290,12 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-12">
+      {creationClosed && (
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-sm text-amber-900">
+          <strong>Survey creation is turned off by the admin right now.</strong> You can keep editing and save this as a
+          draft; sending it for review is possible again once creation is turned back on.
+        </div>
+      )}
       {!isSuperadmin && !criteriaAcceptedAt && (
         <SurveyCriteriaModal
           onAccept={(ts) => setCriteriaAcceptedAt(ts)}

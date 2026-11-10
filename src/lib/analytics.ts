@@ -179,7 +179,7 @@ export type QuestionResult =
       type: "paragraph";
       question: Question;
       index: number;
-      comments: { text: string; analysis: CommentAnalysis | null; time: number | null }[];
+      comments: { text: string; analysis: CommentAnalysis | null; time: number | null; responseId: string }[];
       sentiment: SentimentCounts;
     };
 
@@ -267,12 +267,12 @@ export function surveyStats(survey: Survey, responses: SurveyResponse[], liveEli
       return { type: "choice", question, index, answered, multi: question.type === "checkbox", counts };
     }
     const own = emptyCounts();
-    const comments: { text: string; analysis: CommentAnalysis | null; time: number | null }[] = [];
+    const comments: { text: string; analysis: CommentAnalysis | null; time: number | null; responseId: string }[] = [];
     for (const r of responses) {
       const a = r.answers[index];
       const text = (a?.answer || "").trim();
       if (!a || EMPTY_ANSWERS.has(text)) continue;
-      comments.push({ text, analysis: a.analysis || null, time: responseTime(r) });
+      comments.push({ text, analysis: a.analysis || null, time: responseTime(r), responseId: r.id });
       addComment(own, a.analysis);
       addComment(sentiment, a.analysis);
     }

@@ -20,6 +20,8 @@ export interface UserProfile {
   canCreateSurveys?: boolean;
   canPostNews?: boolean;
   restrictionReason?: string;
+  /** Last time this person had the app open (heartbeat every 5 minutes); admin sees "active now". */
+  lastSeenAt?: number;
 }
 
 export type SurveyStatus = "draft" | "pending" | "rejected" | "scheduled" | "published" | "archived";
@@ -86,6 +88,51 @@ export interface AcademicYearTerms {
 }
 
 export type TermName = "1st Sem" | "2nd Sem" | "Between terms";
+
+/** Admin switches (Firestore `settings/app`; active users read, admin writes). */
+export interface AppSettings {
+  /** false = nobody but the admin can create surveys or send them for review. Missing = open. */
+  surveyCreationOpen: boolean;
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
+/**
+ * A saved result of the thesis sentiment evaluation (Firestore `evaluation_runs`, admin only,
+ * never edited). Firestore cannot store lists inside lists, so the confusion matrix is stored
+ * as one row per human label.
+ */
+export interface EvaluationRun {
+  id: string;
+  savedAt: number;
+  savedBy: string;
+  set: "test" | "tuning" | "all";
+  n: number;
+  correct: number;
+  accuracy: number | null;
+  macroF1: number | null;
+  perClass: { label: string; support: number; precision: number | null; recall: number | null; f1: number | null }[];
+  /** confusionRows["Negative"][j] = humans said Negative, Gemini said the j-th of Positive / Neutral / Negative / Not analyzable. */
+  confusionRows: Record<string, number[]>;
+  humanNotAnalyzable: { n: number; geminiAgreed: number };
+  sarcasm: {
+    n: number;
+    humanYes: number;
+    geminiYes: number;
+    bothYes: number;
+    accuracy: number | null;
+    precision: number | null;
+    recall: number | null;
+    f1: number | null;
+  };
+  modelVersions: string[];
+  promptVersions: string[];
+  seed: string;
+  source: string;
+  leftOutFallback: string;
+  leftOutNoResult: string;
+  files: { answerKey: string; finalSheet: string };
+}
 
 export interface SurveyTopicBlock {
   id: string;
@@ -232,6 +279,24 @@ export interface SurveyResponse {
   };
   /** Earlier response summaries replaced by a re-run, oldest first. */
   previousSentimentAnalyses?: Array<NonNullable<SurveyResponse["sentimentAnalysis"]>>;
+  /** Set when the survey owner (or admin) flags the response; the admin decides (step 8). */
+  review?: ResponseReview;
+}
+
+/**
+ * A flag on a response and the admin's decision. "flagged" responses still count (the owner
+ * cannot remove answers alone); "excluded" ones are never counted in Analytics; "kept" closes it.
+ */
+export interface ResponseReview {
+  status: "flagged" | "kept" | "excluded";
+  /** Plain-language reasons, e.g. "Same rating on every question". */
+  reasons: string[];
+  note: string;
+  flaggedBy: string;
+  flaggedAt: number;
+  decidedBy?: string;
+  decidedAt?: number;
+  decisionNote?: string;
 }
 
 export interface NotificationItem {

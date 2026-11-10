@@ -49,6 +49,13 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(myKey())/receipts/$(string(sid));
     }
 
+    // Admin switch: is survey creation open? Open unless the admin has turned it off
+    // (a missing settings document counts as open, so nothing breaks before it is set).
+    function creationOpen() {
+      let path = /databases/$(database)/documents/settings/app;
+      return !exists(path) || get(path).data.get('surveyCreationOpen', true) == true;
+    }
+
     // Is the signed-in person part of a survey's target audience?
     // Same mapping as the app: "students" = Student or Student Officer.
     function inAudience(survey) {
@@ -85,6 +92,21 @@ service cloud.firestore {
         && request.resource.data.sem1End < request.resource.data.sem2Start
         && request.resource.data.sem2Start < request.resource.data.sem2End
         && request.resource.data.updatedBy == myEmail();
+    }
+
+    // ------------------------------------------------------- app settings
+    // One document "app" with switches the admin controls (e.g. surveyCreationOpen).
+    // Every active user can read it; only the admin can change it.
+    match /settings/{settingId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
+    // ------------------------------------------------------- evaluation results
+    // Saved results of the thesis sentiment evaluation (accuracy, macro-F1, ...).
+    // Only the admin can read, add or delete them. They can never be edited.
+    match /evaluation_runs/{runId} {
+      allow read, create, delete: if isAdmin();
     }
 
     match /topics/{topicId} {
@@ -148,7 +170,8 @@ service cloud.firestore {
         && request.resource.data.owner == myEmail()
         && request.resource.data.status in ['draft', 'pending']
         && request.resource.data.get('responses', 0) == 0
-        && get(myProfilePath()).data.get('canCreateSurveys', true) == true;
+        && get(myProfilePath()).data.get('canCreateSurveys', true) == true
+        && creationOpen();
       allow create: if isAdmin();
 
       allow update: if isActive()
@@ -158,7 +181,9 @@ service cloud.firestore {
           (resource.data.status in ['draft', 'rejected']
             && request.resource.data.status in ['draft', 'pending']
             && request.resource.data.get('responses', 0) == resource.data.get('responses', 0)
-            && get(myProfilePath()).data.get('canCreateSurveys', true) == true)
+            && get(myProfilePath()).data.get('canCreateSurveys', true) == true
+            // While creation is off, drafts can still be saved but not sent for review.
+            && (request.resource.data.status == 'draft' || creationOpen()))
           ||
           (resource.data.status == 'pending'
             && request.resource.data.status == 'draft')
@@ -208,6 +233,18 @@ service cloud.firestore {
             && resource.data.userEmail.lower() == myEmail());
 
       allow update, delete: if isAdmin();
+
+      // The survey's owner may flag a response in their own survey for the admin to review.
+      // Only the "review" part changes; answers and results stay untouched. Only a response
+      // that was never flagged can be flagged, and only as "flagged" (the admin decides).
+      allow update: if isActive()
+        && exists(surveyPath(resource.data.surveyId))
+        && get(surveyPath(resource.data.surveyId)).data.owner.lower() == myEmail()
+        && onlyChanges(['review'])
+        && !('review' in resource.data)
+        && request.resource.data.review.keys().hasOnly(['status', 'reasons', 'note', 'flaggedBy', 'flaggedAt'])
+        && request.resource.data.review.status == 'flagged'
+        && request.resource.data.review.flaggedBy == myEmail();
     }
 
     // ----------------------------------------------------------------- news

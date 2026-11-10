@@ -101,6 +101,15 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
     return surveys.filter((s) => s.owner?.toLowerCase() === currentUser.email?.toLowerCase());
   }, [surveys, currentUser, isAdmin]);
 
+  // Responses the admin excluded after review, per survey (still saved, not counted in Analytics).
+  const excludedBySurvey = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const r of userResponses || []) {
+      if (r.review?.status === "excluded") map[String(r.surveyId)] = (map[String(r.surveyId)] || 0) + 1;
+    }
+    return map;
+  }, [userResponses]);
+
   // Aggregate statistics
   const stats = useMemo(() => {
     const total = visibleSurveys.length;
@@ -709,6 +718,14 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                       <Users className="w-3.5 h-3.5 text-indigo-500" />
                       <span className="font-semibold text-slate-800">{survey.responses || 0}</span>
                       <span>Submissions</span>
+                      {(excludedBySurvey[String(survey.id)] || 0) > 0 && (
+                        <span
+                          className="text-red-700"
+                          title="Excluded by the admin after review: still saved, not counted in Analytics"
+                        >
+                          ({excludedBySurvey[String(survey.id)]} excluded)
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Layers className="w-3.5 h-3.5 text-indigo-500" />

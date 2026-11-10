@@ -17,6 +17,9 @@ import { TopicsManager } from "./TopicsManager";
 import { AcademicCalendarManager } from "./AcademicCalendarManager";
 import { SurveyApprovalsPanel } from "./SurveyApprovalsPanel";
 import { NewsApprovalsPanel } from "./NewsApprovalsPanel";
+import { FlaggedResponsesPanel, FlagDecision } from "./FlaggedResponsesPanel";
+import { ActiveUsersCard } from "./ActiveUsersCard";
+import { SurveyCreationSwitch } from "./SurveyCreationSwitch";
 import {
   ShieldAlert,
   Users,
@@ -84,7 +87,13 @@ interface SuperadminDashboardProps {
   onRejectSurvey?: (surveyId: string | number, reason: string) => void;
   onTakedownSurvey?: (surveyId: string | number, reason: string) => void;
   onReviewNews?: (id: string, decision: "approve" | "reject", reason?: string) => Promise<void> | void;
-  initialTab?: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news" | "calendar";
+  onDecideFlag?: (responseId: string, decision: FlagDecision, note: string) => Promise<void>;
+  /** Reload the user list (for the Active users counter). */
+  onRefreshUsers?: () => Promise<void>;
+  /** Admin switch: survey creation open for everyone (the admin can always create). */
+  surveyCreationOpen?: boolean;
+  onSetSurveyCreation?: (open: boolean) => Promise<void>;
+  initialTab?: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses";
   showToast?: (text: string, type?: "success" | "info") => void;
 }
 
@@ -166,12 +175,16 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onRejectSurvey,
   onTakedownSurvey,
   onReviewNews,
+  onDecideFlag,
+  onRefreshUsers,
+  surveyCreationOpen = true,
+  onSetSurveyCreation,
   initialTab = "approvals",
   showToast,
 }) => {
   const { confirm, confirmDialog } = useConfirm();
   // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics" | "news" | "calendar">(
+  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics" | "news" | "calendar" | "flagged-responses">(
     initialTab || "approvals"
   );
 
@@ -487,14 +500,33 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl flex items-center gap-2 border border-slate-700 transition-all cursor-pointer"
               >
                 <BrainCircuit className="w-4 h-4 text-emerald-400" />
-                <span>Tagalog ML Studio</span>
+                <span>Sentiment Analysis</span>
               </button>
             )}
           </div>
         </div>
 
         {/* Global Institutional Metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
+          <ActiveUsersCard users={users} onRefresh={onRefreshUsers} />
+          {onSetSurveyCreation && (
+            <SurveyCreationSwitch
+              open={surveyCreationOpen}
+              onChange={async (open) => {
+                if (!open) {
+                  const ok = await confirm({
+                    title: "Turn survey creation off?",
+                    message:
+                      "Faculty and officers will not be able to create new surveys or send drafts for review until you turn it back on. Their drafts stay safe and live surveys keep running. You can still create surveys.",
+                    confirmLabel: "Turn off",
+                  });
+                  if (!ok) return;
+                }
+                await onSetSurveyCreation(open);
+              }}
+            />
+          )}
+
           <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/80">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
               Total Surveys Authored
@@ -548,6 +580,12 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
               {[
                 { id: "approvals", label: "Survey Approvals", count: pendingSurveys.length, icon: CheckCircle2 },
                 { id: "news", label: "News Approvals", count: pendingNewsCount, icon: Newspaper },
+                {
+                  id: "flagged-responses",
+                  label: "Flagged Responses",
+                  count: responses.filter((r) => r.review?.status === "flagged").length,
+                  icon: Flag,
+                },
                 { id: "surveys", label: "Creation Timeframe Directory", count: surveys.length, icon: CalendarDays },
                 { id: "flagged", label: "Flagged Surveys Queue", count: flaggedSurveys.length, icon: Flag },
                 { id: "users", label: "User & Role Directory", count: users.length, icon: Users },
@@ -1351,6 +1389,10 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
       )}
 
       {/* TAB 6: SURVEY TOPICS */}
+      {activeTab === "flagged-responses" && onDecideFlag && (
+        <FlaggedResponsesPanel responses={responses} surveys={surveys} onDecide={onDecideFlag} />
+      )}
+
       {activeTab === "news" && (
         <NewsApprovalsPanel newsList={newsList || []} onReview={onReviewNews || (() => {})} />
       )}

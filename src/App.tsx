@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Survey, SurveyStatus, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms } from "./types";
+import { Survey, SurveyStatus, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings } from "./types";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
 import { schoolYearFor } from "./lib/schoolYear";
 import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
@@ -59,6 +59,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [academicCalendar, setAcademicCalendar] = useState<AcademicYearTerms[]>([]);
+  /** Admin switches (survey creation open/closed). Defaults to open until loaded. */
+  const [appSettings, setAppSettings] = useState<AppSettings>({ surveyCreationOpen: true });
   /** When surveys and responses were last loaded from the database (shown on Analytics). */
   const [dataLoadedAt, setDataLoadedAt] = useState<number | null>(null);
 
@@ -148,11 +150,33 @@ export default function App() {
       }
       setTopics(freshTopics);
       setAcademicCalendar(await DatabaseService.getAcademicCalendar().catch(() => []));
+      setAppSettings(await DatabaseService.getSettings().catch(() => ({ surveyCreationOpen: true })));
       setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load data from Firestore.", "info");
     }
   }, []);
+
+  // "Last seen" heartbeat for the admin's Active users counter: while the app is open and the tab
+  // is visible, at most one tiny write to the person's own profile every 5 minutes.
+  useEffect(() => {
+    const email = currentUser?.email;
+    if (!email || currentUser?.status !== "active") return;
+    const HEARTBEAT_MS = 5 * 60 * 1000;
+    let lastSent = 0;
+    const beat = () => {
+      if (document.visibilityState !== "visible" || Date.now() - lastSent < HEARTBEAT_MS) return;
+      lastSent = Date.now();
+      DatabaseService.touchLastSeen(email).catch((err) => console.warn("Could not record last seen:", err));
+    };
+    beat();
+    const timer = setInterval(beat, 60 * 1000);
+    document.addEventListener("visibilitychange", beat);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", beat);
+    };
+  }, [currentUser?.email, currentUser?.status]);
 
   // Firebase Auth State Listener & Profile Synchronization
   useEffect(() => {
@@ -317,6 +341,7 @@ export default function App() {
       }
       setTopics(freshTopics);
       setAcademicCalendar(await DatabaseService.getAcademicCalendar().catch(() => []));
+      setAppSettings(await DatabaseService.getSettings().catch(() => ({ surveyCreationOpen: true })));
       setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load Firestore data for user.", "info");
@@ -1202,6 +1227,10 @@ export default function App() {
   };
 
   const handleDuplicateSurvey = async (survey: Survey) => {
+    if (!appSettings.surveyCreationOpen && currentUser?.role !== "superadmin") {
+      showToast("Survey creation is turned off by the admin right now, so copies cannot be made.", "info");
+      return;
+    }
     const newId = `srv_${Date.now()}`;
     // A copy is a new, independent survey: same questions and blocks, no link to the original,
     // and none of the original's review / archive / flag details.
@@ -1441,6 +1470,115 @@ export default function App() {
       showToast(err.message || "Failed to delete topic.", "info");
       throw err;
     }
+  };
+
+  /**
+   * Survey owner (or admin) flags a response for the admin to review. It keeps counting until the
+   * admin excludes it. Nothing about the respondent goes into the log or the notification.
+   */
+  const handleFlagResponse = async (responseId: string, reasons: string[], note: string) => {
+    if (!currentUser) return;
+    const target = responses.find((r) => r.id === responseId);
+    if (!target) throw new Error("This response is no longer loaded. Press Refresh and try again.");
+    const me = currentUser.email.trim().toLowerCase();
+    const review: ResponseReview = { status: "flagged", reasons, note, flaggedBy: me, flaggedAt: Date.now() };
+    await DatabaseService.flagResponse(responseId, review);
+    setResponses((prev) => prev.map((r) => (r.id === responseId ? { ...r, review } : r)));
+    const surveyTitle = surveys.find((s) => String(s.id) === String(target.surveyId))?.title || target.surveyTitle || "a survey";
+    if (me !== MASTER_ADMIN_EMAIL.toLowerCase()) {
+      try {
+        await DatabaseService.addNotification({
+          to: MASTER_ADMIN_EMAIL.toLowerCase(),
+          title: "🚩 Response flagged for review",
+          message: `${currentUser.name || "A survey owner"} flagged a response in "${surveyTitle}": ${reasons.join(", ")}.`,
+          icon: "🚩",
+          type: "response",
+          data: { surveyId: target.surveyId },
+        });
+      } catch (err) {
+        console.warn("Could not notify the admin about the flag:", err);
+      }
+    }
+    try {
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: "Response Flagged",
+        details: `Flagged a response in "${surveyTitle}" for admin review (${reasons.join(", ")})`,
+      });
+    } catch {}
+    showToast("Flagged. The admin will review it; it keeps counting until then.", "success");
+  };
+
+  /** Admin decides on a flagged response: kept (counted) or excluded (never counted). */
+  const handleDecideFlag = async (responseId: string, decision: "kept" | "excluded", note: string) => {
+    if (!currentUser) return;
+    const target = responses.find((r) => r.id === responseId);
+    if (!target?.review) throw new Error("This flag is no longer loaded. Please reload the page.");
+    const review: ResponseReview = {
+      ...target.review,
+      status: decision,
+      decidedBy: currentUser.email.trim().toLowerCase(),
+      decidedAt: Date.now(),
+      decisionNote: note,
+    };
+    await DatabaseService.decideResponseFlag(responseId, review);
+    setResponses((prev) => prev.map((r) => (r.id === responseId ? { ...r, review } : r)));
+    const surveyTitle = surveys.find((s) => String(s.id) === String(target.surveyId))?.title || target.surveyTitle || "a survey";
+    const flagger = target.review.flaggedBy.trim().toLowerCase();
+    if (flagger && flagger !== currentUser.email.trim().toLowerCase()) {
+      try {
+        await DatabaseService.addNotification({
+          to: flagger,
+          title: decision === "excluded" ? "🚫 Flagged response excluded" : "✅ Flagged response kept",
+          message:
+            decision === "excluded"
+              ? `The admin excluded the response you flagged in "${surveyTitle}". It is no longer counted.${note ? ` Reason: ${note}` : ""}`
+              : `The admin kept the response you flagged in "${surveyTitle}". It stays counted.${note ? ` Note: ${note}` : ""}`,
+          icon: decision === "excluded" ? "🚫" : "✅",
+          type: "response",
+          data: { surveyId: target.surveyId },
+        });
+      } catch (err) {
+        console.warn("Could not notify the survey owner about the decision:", err);
+      }
+    }
+    try {
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: decision === "excluded" ? "Response Excluded" : "Flagged Response Kept",
+        details: `${decision === "excluded" ? "Excluded" : "Kept"} a flagged response in "${surveyTitle}"${note ? ` (${note})` : ""}`,
+      });
+    } catch {}
+    showToast(decision === "excluded" ? "Excluded: it is no longer counted in Analytics." : "Kept: it stays counted.", "success");
+  };
+
+  /** Admin: open or close survey creation for everyone except the admin. */
+  const handleSetSurveyCreation = async (open: boolean) => {
+    if (!currentUser) return;
+    const next: AppSettings = {
+      surveyCreationOpen: open,
+      updatedAt: Date.now(),
+      updatedBy: currentUser.email.trim().toLowerCase(),
+    };
+    await DatabaseService.saveSettings(next);
+    setAppSettings(next);
+    try {
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: open ? "Survey Creation Opened" : "Survey Creation Closed",
+        details: open ? "Turned survey creation on for everyone" : "Turned survey creation off for everyone except the admin",
+      });
+    } catch {}
+    showToast(open ? "Survey creation is open again." : "Survey creation is now off (admin excepted).", "success");
+  };
+
+  /** Admin: reload only the user list (for the "Active users" counter). */
+  const handleRefreshUsers = async () => {
+    if (!currentUser) return;
+    setUsers(await DatabaseService.getUsers(currentUser));
   };
 
   /** Analytics "Refresh": reloads only surveys, responses and (admin) the user list. */
@@ -1793,6 +1931,7 @@ export default function App() {
               users={users}
               dataLoadedAt={dataLoadedAt}
               onRefresh={handleRefreshAnalytics}
+              onFlagResponse={handleFlagResponse}
               initialSurveyId={analyticsTargetSurveyId}
               isAdmin={isSuperadmin}
               currentUser={currentUser}
@@ -1841,6 +1980,7 @@ export default function App() {
             canCreateSurvey ? (
               <SurveyBuilder
                 currentUser={currentUser}
+                creationOpen={appSettings.surveyCreationOpen}
                 categories={DEFAULT_SURVEY_CATEGORIES}
                 topics={topics}
                 academicCalendar={academicCalendar}
@@ -1905,6 +2045,10 @@ export default function App() {
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
               onReviewNews={handleReviewNews}
+              onDecideFlag={handleDecideFlag}
+              onRefreshUsers={handleRefreshUsers}
+              surveyCreationOpen={appSettings.surveyCreationOpen}
+              onSetSurveyCreation={handleSetSurveyCreation}
               onRestoreBackup={handleRestoreBackup}
               onSaveTopic={handleSaveTopic}
               onDeleteTopic={handleDeleteTopic}

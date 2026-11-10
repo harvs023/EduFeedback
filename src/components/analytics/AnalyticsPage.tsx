@@ -20,6 +20,8 @@ interface AnalyticsPageProps {
   /** When the data was last loaded, and how to load it again (the page is not live). */
   dataLoadedAt?: number | null;
   onRefresh?: () => Promise<void>;
+  /** Flag a response for the admin (survey owner or admin). */
+  onFlagResponse?: (responseId: string, reasons: string[], note: string) => Promise<void>;
   onCreateSurvey?: () => void;
 }
 
@@ -27,7 +29,7 @@ type Tab = "overview" | "survey" | "compare";
 
 export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   surveys,
-  responses,
+  responses: allResponses,
   academicCalendar,
   initialSurveyId,
   isAdmin,
@@ -35,8 +37,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   users = [],
   dataLoadedAt = null,
   onRefresh,
+  onFlagResponse,
   onCreateSurvey,
 }) => {
+  // Responses the admin excluded are never counted anywhere in Analytics.
+  const counted = useMemo(() => allResponses.filter((r) => r.review?.status !== "excluded"), [allResponses]);
+  const excluded = useMemo(() => allResponses.filter((r) => r.review?.status === "excluded"), [allResponses]);
+  const responses = counted;
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const refresh = async () => {
@@ -167,6 +174,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               surveyId={surveyId}
               onSelectSurvey={setSurveyId}
               users={isAdmin ? users : []}
+              excludedResponses={excluded}
+              onFlagResponse={onFlagResponse}
             />
           )}
         </>

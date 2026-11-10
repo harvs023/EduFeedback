@@ -47,6 +47,9 @@ import {
   NotificationItem,
   Topic,
   AcademicYearTerms,
+  EvaluationRun,
+  ResponseReview,
+  AppSettings,
 } from "../types";
 import {
   INITIAL_SURVEYS,
@@ -198,6 +201,8 @@ export const COLLECTIONS = {
   NOTIFICATIONS: "notifications",
   TOPICS: "topics",
   ACADEMIC_CALENDAR: "academic_calendar",
+  EVALUATION_RUNS: "evaluation_runs",
+  SETTINGS: "settings",
 };
 
 /**
@@ -418,6 +423,18 @@ export const FirestoreResponseService = {
     if (alreadyAnswered) throw new Error("You have already answered this survey. Each person can answer once.");
   },
 
+  /** Survey owner or admin: flag a response for the admin to review (only the "review" field). */
+  async flagResponse(responseId: string, review: ResponseReview): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      await updateDoc(doc(firestore, COLLECTIONS.RESPONSES, responseId), { review });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.RESPONSES}/${responseId}`);
+      throw err;
+    }
+  },
+
   /** Admin: replace a response's sentiment results after a re-run. */
   async updateAnalysis(
     responseId: string,
@@ -488,6 +505,14 @@ export const FirestoreResponseService = {
  * Firestore Users Collection Service
  */
 export const FirestoreUserService = {
+  /** Records "last seen now" on the signed-in person's own profile (allowed by the rules). */
+  async touchLastSeen(email: string): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return;
+    const userKey = email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    await updateDoc(doc(firestore, COLLECTIONS.USERS, userKey), { lastSeenAt: Date.now() });
+  },
+
   async getAll(): Promise<UserProfile[]> {
     const firestore = getFirebaseDb();
     if (!firestore) return [];
@@ -836,6 +861,68 @@ export const INITIAL_TOPICS: Topic[] = [
 /**
  * Academic calendar: one document per school year, written by the admin only.
  */
+/** Admin switches in `settings/app`. A missing document means the defaults (creation open). */
+export const FirestoreSettingsService = {
+  async get(): Promise<AppSettings> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return { surveyCreationOpen: true };
+    const snap = await getDoc(doc(firestore, COLLECTIONS.SETTINGS, "app"));
+    const data = snap.exists() ? (snap.data() as Partial<AppSettings>) : {};
+    return { ...data, surveyCreationOpen: data.surveyCreationOpen !== false };
+  },
+
+  async save(settings: AppSettings): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      await setDoc(doc(firestore, COLLECTIONS.SETTINGS, "app"), settings, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.SETTINGS}/app`);
+      throw err;
+    }
+  },
+};
+
+/** Saved evaluation results (admin only; never edited, only added or deleted). */
+export const FirestoreEvaluationService = {
+  async getAll(): Promise<EvaluationRun[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    try {
+      const snap = await getDocs(collection(firestore, COLLECTIONS.EVALUATION_RUNS));
+      return snap.docs
+        .map((d) => ({ ...(d.data() as EvaluationRun), id: d.id }))
+        .sort((a, b) => b.savedAt - a.savedAt);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, COLLECTIONS.EVALUATION_RUNS);
+      throw err;
+    }
+  },
+
+  async save(run: EvaluationRun): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      const { id, ...data } = run;
+      await setDoc(doc(firestore, COLLECTIONS.EVALUATION_RUNS, id), data);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.EVALUATION_RUNS}/${run.id}`);
+      throw err;
+    }
+  },
+
+  async delete(id: string): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      await deleteDoc(doc(firestore, COLLECTIONS.EVALUATION_RUNS, id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `${COLLECTIONS.EVALUATION_RUNS}/${id}`);
+      throw err;
+    }
+  },
+};
+
 export const FirestoreAcademicCalendarService = {
   async getAll(): Promise<AcademicYearTerms[]> {
     const firestore = getFirebaseDb();

@@ -17,6 +17,8 @@ import {
   FirestoreNotificationService,
   FirestoreTopicService,
   FirestoreAcademicCalendarService,
+  FirestoreEvaluationService,
+  FirestoreSettingsService,
   INITIAL_TOPICS,
   FirebaseAuthService,
   isFirebaseConfigured,
@@ -36,6 +38,9 @@ import {
   NotificationItem,
   Topic,
   AcademicYearTerms,
+  EvaluationRun,
+  ResponseReview,
+  AppSettings,
 } from "../types";
 import {
   MASTER_ADMIN_EMAIL,
@@ -278,6 +283,15 @@ export class DatabaseService {
     await FirestoreResponseService.submitWithReceipt(response, respondentEmail);
   }
 
+  static async flagResponse(responseId: string, review: ResponseReview): Promise<void> {
+    await FirestoreResponseService.flagResponse(responseId, review);
+  }
+
+  /** Admin only (the rules allow only the admin to set kept / excluded). */
+  static async decideResponseFlag(responseId: string, review: ResponseReview): Promise<void> {
+    await FirestoreResponseService.flagResponse(responseId, review);
+  }
+
   static async updateResponseAnalysis(
     responseId: string,
     update: Pick<SurveyResponse, "answers" | "commentStatus" | "sentimentAnalysis" | "previousSentimentAnalyses">
@@ -292,6 +306,18 @@ export class DatabaseService {
   // ==========================================
   // USERS
   // ==========================================
+  static async getSettings(): Promise<AppSettings> {
+    return await FirestoreSettingsService.get();
+  }
+
+  static async saveSettings(settings: AppSettings): Promise<void> {
+    await FirestoreSettingsService.save(settings);
+  }
+
+  static async touchLastSeen(email: string): Promise<void> {
+    await FirestoreUserService.touchLastSeen(email);
+  }
+
   static async getUsers(currentUser?: UserProfile | null): Promise<UserProfile[]> {
     if (!currentUser || (currentUser.role !== "superadmin" && currentUser.pos !== "Superadmin")) {
       return [];
@@ -423,6 +449,21 @@ export class DatabaseService {
 
   static async deleteAcademicYear(schoolYear: string): Promise<void> {
     await FirestoreAcademicCalendarService.delete(schoolYear);
+  }
+
+  // ==========================================
+  // EVALUATION RESULTS (admin only)
+  // ==========================================
+  static async getEvaluationRuns(): Promise<EvaluationRun[]> {
+    return await FirestoreEvaluationService.getAll();
+  }
+
+  static async saveEvaluationRun(run: EvaluationRun): Promise<void> {
+    await FirestoreEvaluationService.save(run);
+  }
+
+  static async deleteEvaluationRun(id: string): Promise<void> {
+    await FirestoreEvaluationService.delete(id);
   }
 
   /**

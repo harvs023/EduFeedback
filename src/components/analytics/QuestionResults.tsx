@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Flag } from "lucide-react";
 import { QuestionResult, interpretRating } from "../../lib/analytics";
 import { CountBar, SENTIMENT_COLORS, SentimentBar, SentimentFootnote } from "./AnalyticsParts";
 import { CommentAnalysis } from "../../types";
@@ -23,7 +23,14 @@ function CommentLabel({ analysis }: { analysis: CommentAnalysis | null }) {
   );
 }
 
-function CommentList({ result }: { result: Extract<QuestionResult, { type: "paragraph" }> }) {
+interface FlagProps {
+  /** Whether the response holding a comment is already flagged or decided. */
+  isFlagged?: (responseId: string) => boolean;
+  /** Flag the response a comment belongs to (survey owner or admin). */
+  onFlagComment?: (responseId: string) => void;
+}
+
+function CommentList({ result, isFlagged, onFlagComment }: { result: Extract<QuestionResult, { type: "paragraph" }> } & FlagProps) {
   const [shown, setShown] = useState(COMMENTS_PER_PAGE);
   if (result.comments.length === 0) return <p className="text-sm text-slate-500">No comments in this period.</p>;
   return (
@@ -34,8 +41,22 @@ function CommentList({ result }: { result: Extract<QuestionResult, { type: "para
         {result.comments.slice(0, shown).map((c, i) => (
           <li key={i} className="px-3 py-2.5 flex flex-col sm:flex-row sm:items-start gap-2 sm:justify-between">
             <p className="text-sm text-slate-800 whitespace-pre-wrap break-words min-w-0">{c.text}</p>
-            <div className="shrink-0">
+            <div className="shrink-0 flex items-center gap-2">
               <CommentLabel analysis={c.analysis} />
+              {onFlagComment &&
+                (isFlagged?.(c.responseId) ? (
+                  <span className="text-[10px] font-bold uppercase text-amber-700">flagged</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onFlagComment(c.responseId)}
+                    title="Flag this response for admin review"
+                    aria-label="Flag this response for admin review"
+                    className="p-1 rounded-md text-slate-400 hover:text-amber-700 hover:bg-amber-50 cursor-pointer"
+                  >
+                    <Flag className="w-3.5 h-3.5" />
+                  </button>
+                ))}
             </div>
           </li>
         ))}
@@ -65,7 +86,12 @@ function summaryLine(result: QuestionResult): string {
 
 const TYPE_NAMES = { rating: "Rating", choice: "Choice", paragraph: "Comment" };
 
-export function QuestionResults({ results, sectionTitle }: { results: QuestionResult[]; sectionTitle: (r: QuestionResult) => string | null }) {
+export function QuestionResults({
+  results,
+  sectionTitle,
+  isFlagged,
+  onFlagComment,
+}: { results: QuestionResult[]; sectionTitle: (r: QuestionResult) => string | null } & FlagProps) {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const toggle = (i: number) =>
     setOpen((prev) => {
@@ -119,7 +145,7 @@ export function QuestionResults({ results, sectionTitle }: { results: QuestionRe
                     {r.multi && <p className="text-xs text-slate-500">People could pick more than one, so these can add up to more than 100%.</p>}
                   </>
                 )}
-                {r.type === "paragraph" && <CommentList result={r} />}
+                {r.type === "paragraph" && <CommentList result={r} isFlagged={isFlagged} onFlagComment={onFlagComment} />}
               </div>
             )}
           </li>

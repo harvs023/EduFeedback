@@ -1,7 +1,7 @@
 import type { GoogleGenAI } from "@google/genai";
 import type { Answer, CommentAnalysis, Survey, SurveyResponse } from "../src/types";
 import { applyResults, commentSlots } from "../src/lib/commentSlots";
-import { analyzeComment } from "./sentiment";
+import { analyzeComment, geminiQuotaStatus } from "./sentiment";
 import { adminDb } from "./firestoreAdmin";
 
 /** Up to 3 comments at a time; results keep the original order. */
@@ -28,7 +28,14 @@ export async function analyzeAll(
  */
 export const REQUEUE_WAITS_MS = [60_000, 120_000, 120_000];
 
-export type ProcessOutcome = "done" | "queued" | "not_pending" | "not_found" | "survey_missing" | "unavailable";
+export type ProcessOutcome =
+  | "done"
+  | "queued"
+  | "quota_paused"
+  | "not_pending"
+  | "not_found"
+  | "survey_missing"
+  | "unavailable";
 
 /** Kept in memory between tries: the Gemini results already obtained, so they are not asked again. */
 const partialResults = new Map<string, CommentAnalysis[]>();
@@ -63,6 +70,8 @@ export async function processPendingResponse(
 
     const answers: Answer[] = Array.isArray(response.answers) ? response.answers : [];
     const slots = commentSlots(survey, answers);
+    // Gemini's daily limit is used up: leave it pending; the sweep finishes it after the pause.
+    if (slots.length > 0 && geminiQuotaStatus().paused) return "quota_paused";
 
     let update: Pick<SurveyResponse, "answers" | "commentStatus" | "sentimentAnalysis">;
     if (slots.length === 0) {
@@ -81,6 +90,8 @@ export async function processPendingResponse(
       todo.forEach(({ i }, k) => (results[i] = fresh[k]));
 
       const someFailed = results.some((r) => r.method === "fallback");
+      // The daily limit ran out during this try: no fallback labels; the sweep retries later.
+      if (someFailed && geminiQuotaStatus().paused) return "quota_paused";
       if (someFailed && attempt < REQUEUE_WAITS_MS.length) {
         partialResults.set(responseId, results);
         keepBusy = true;
@@ -118,18 +129,19 @@ export async function processPendingResponse(
 }
 
 /**
- * At server start: finish responses left "pending" (e.g. the server restarted during a retry).
- * One at a time, so Gemini is not flooded.
+ * Finishes responses left "pending": at server start (e.g. it restarted during a retry) and by
+ * the sweep every few minutes (e.g. after Gemini's daily limit reset). One at a time, so Gemini
+ * is not flooded. Does nothing while the daily-limit pause is on.
  */
-export async function resumePendingResponses(getAI: () => GoogleGenAI | null): Promise<void> {
+export async function resumePendingResponses(getAI: () => GoogleGenAI | null, quiet = false): Promise<void> {
   const db = adminDb();
-  if (!db) return;
+  if (!db || geminiQuotaStatus().paused) return;
   const snap = await db.collection("responses").where("commentStatus", "==", "pending").get();
   if (snap.empty) return;
-  console.log(`[Sentiment] Finishing ${snap.size} response(s) still waiting for analysis.`);
+  if (!quiet) console.log(`[Sentiment] Finishing ${snap.size} response(s) still waiting for analysis.`);
   for (const d of snap.docs) {
     try {
-      await processPendingResponse(getAI, d.id);
+      if ((await processPendingResponse(getAI, d.id)) === "quota_paused") break;
     } catch (err) {
       console.error("[Sentiment] Could not finish a pending response:", (err as Error)?.message || err);
     }

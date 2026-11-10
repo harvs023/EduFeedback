@@ -4,7 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import appletConfig from "./firebase-applet-config.json";
-import { loadPromptTemplate, PROMPT_VERSION, sentimentModel } from "./server/sentiment";
+import { geminiQuotaStatus, loadPromptTemplate, PROMPT_VERSION, sentimentModel } from "./server/sentiment";
 import { signingReady, verifyResult } from "./server/signing";
 import { adminError, adminReady } from "./server/firestoreAdmin";
 import { eligibleCountFor } from "./server/eligible";
@@ -130,6 +130,8 @@ app.get("/api/health", (req, res) => {
     signingReady: signingReady(),
     // The server can save results into responses itself (needs the service account key).
     serverSaveReady: adminReady(),
+    // Gemini's daily limit: when used up, new comments wait as "pending" until it resets.
+    geminiQuota: geminiQuotaStatus(),
   });
 });
 
@@ -141,6 +143,9 @@ app.post("/api/sentiment/analyze", async (req, res) => {
   const comments = Array.isArray(req.body?.comments) ? req.body.comments : null;
   if (!comments || comments.length === 0 || comments.length > MAX_COMMENTS_PER_REQUEST) {
     return res.status(400).json({ error: `Send between 1 and ${MAX_COMMENTS_PER_REQUEST} comments.` });
+  }
+  if (geminiQuotaStatus().paused) {
+    return res.status(503).json({ error: "Gemini's daily limit is used up. Please try again later." });
   }
   // Up to 3 comments at a time: fast enough for a survey with several comment boxes,
   // gentle enough not to burst the Gemini usage limit. Results keep the original order.
@@ -230,6 +235,8 @@ app.post("/api/recommendations/wording", async (req, res) => {
   }
 });
 
+const PENDING_SWEEP_MS = 10 * 60 * 1000;
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -267,6 +274,13 @@ async function startServer() {
     resumePendingResponses(getGeminiAI).catch((err) =>
       console.error("[Sentiment] Could not check for waiting responses:", (err as Error)?.message || err)
     );
+    // Every 10 minutes: finish anything still pending (does nothing while the daily-limit pause
+    // is on, so after a pause ends the waiting comments are done within about 10 minutes).
+    setInterval(() => {
+      resumePendingResponses(getGeminiAI, true).catch((err) =>
+        console.error("[Sentiment] Sweep failed:", (err as Error)?.message || err)
+      );
+    }, PENDING_SWEEP_MS);
   });
 }
 

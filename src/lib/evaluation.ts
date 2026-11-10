@@ -118,9 +118,16 @@ export const geminiLabel = (a: CommentAnalysis): HumanLabel =>
   a.analyzable && a.polarity ? a.polarity : "Not analyzable";
 
 /** For the researchers only: the frozen sample with Gemini's labels. Never give it to labelers. */
-export function answerKeyCsv(sample: SampledItem[], seed: number): string {
+export function answerKeyCsv(
+  sample: SampledItem[],
+  seed: number,
+  leftOut: { fallback: number; unconfirmed: number; source: string }
+): string {
   return toCsv([
-    ["Item ID", "Set", "Gemini polarity", "Gemini sarcastic", "Model", "Model version", "Prompt version", "Analyzed at", "Seed", "Comment"],
+    [
+      "Item ID", "Set", "Gemini polarity", "Gemini sarcastic", "Model", "Model version", "Prompt version",
+      "Analyzed at", "Seed", "Source", "Left out (fallback)", "Left out (no result)", "Comment",
+    ],
     ...sample.map((s) => [
       s.id,
       s.set,
@@ -131,6 +138,9 @@ export function answerKeyCsv(sample: SampledItem[], seed: number): string {
       s.analysis.promptVersion,
       new Date(s.analysis.analyzedAt).toISOString(),
       seed,
+      leftOut.source,
+      leftOut.fallback,
+      leftOut.unconfirmed,
       s.text,
     ]),
   ]);

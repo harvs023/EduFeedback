@@ -14,7 +14,8 @@ import { analyzeAll, processPendingResponse, resumePendingResponses } from "./se
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+// Hosting services (e.g. Render) choose the port; on your computer it is 3000.
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: "10mb" }));
 

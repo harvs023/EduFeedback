@@ -148,7 +148,7 @@ When every revision is done, give the owner this list in plain words before step
 - Re-run any fallback / not-analyzed comments before sampling for the evaluation (Sentiment Analysis > Needs a re-run).
 - Evaluation: write down the seed; keep the answer key, both labelers' sheets and the final-label sheet as thesis records; blank names ([NAME]) before sharing; use the **test set** numbers; report kappa, accuracy, macro-F1, confusion matrix, model version, prompt version, n, date, and how many fallback comments were left out.
 - Paper limitations to state: zero-shot Gemini (not trained); comments are sent to Gemini as typed; labelers were the researchers; server briefly sees who asked to process a response; Firestore hidden creation times; comparisons are descriptive (no significance test); 40/60% and 0.5 thresholds set by the researcher.
-- Hosting: set `GEMINI_API_KEY`, `RESULT_SIGNING_SECRET` (same value everywhere), `FIREBASE_SERVICE_ACCOUNT_JSON`; deploy the `docs/` folder with the server (prompt files).
+- Hosting (Render): build `npm install --include=dev && npm run build`, start `npm start` (sets NODE_ENV=production; do not set NODE_ENV on Render), server uses `process.env.PORT`; env `GEMINI_API_KEY`, `RESULT_SIGNING_SECRET` (same value everywhere), `FIREBASE_SERVICE_ACCOUNT_JSON` (no surrounding quotes on Render); add the Render domain to Firebase Authentication > Authorized domains; `docs/` must deploy with the server (prompt files, it is in the repo). `bun.lock` was removed (Render used Bun because of it); npm + package-lock.json only. Free plan sleeps after ~15 min idle (pending comments resume on wake).
 - Admin setup on the clean system: departments/programs/sections, categories, topics, academic calendar.
 
 ## Cleanup reminders for me

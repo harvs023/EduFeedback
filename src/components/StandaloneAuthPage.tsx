@@ -185,16 +185,12 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Academic Survey Intelligence & Tagalog Sentiment NLP Platform
+                Academic Survey & Feedback Platform with Comment Sentiment Analysis
               </p>
             </div>
           </div>
 
           <div className="hidden sm:flex items-center gap-3 text-xs text-slate-400">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/80 border border-slate-800">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="text-slate-300 font-medium">Tagalog NLP v3 Active</span>
-            </div>
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/80 border border-slate-800">
               <Database className="w-3.5 h-3.5 text-indigo-400" />
               <span>{isFirebaseConfigured() ? "Firebase Cloud Mode" : "Local & Prisma DB Ready"}</span>

@@ -96,7 +96,6 @@ async function main() {
   console.log(`  - Surveys: ${data.surveys?.length || 0}`);
   console.log(`  - Survey Responses: ${data.responses?.length || 0}`);
   console.log(`  - Campus News: ${data.news?.length || 0}`);
-  console.log(`  - Tagalog ML Dataset: ${data.mlDataset?.length || 0}`);
   console.log(`  - Activity Logs: ${data.logs?.length || 0}\n`);
 
   console.log("🚀 Writing documents to Cloud Firestore...");
@@ -132,14 +131,6 @@ async function main() {
       await setDoc(doc(db, "news", String(item.id)), item, { merge: true });
     }
     console.log(`  ✅ Successfully seeded ${data.news.length} announcements into 'news' collection`);
-  }
-
-  // Import Tagalog ML Dataset
-  if (data.mlDataset && Array.isArray(data.mlDataset)) {
-    for (const item of data.mlDataset) {
-      await setDoc(doc(db, "ml_dataset", String(item.id)), item, { merge: true });
-    }
-    console.log(`  ✅ Successfully seeded ${data.mlDataset.length} ML samples into 'ml_dataset' collection`);
   }
 
   // Import Logs

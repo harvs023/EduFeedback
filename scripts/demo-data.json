@@ -372,44 +372,6 @@
       "tags": ["Library", "Academics", "Student Support"]
     }
   ],
-  "mlDataset": [
-    {
-      "id": "ml_1",
-      "text": "Napakagaling magpaliwanag ng prof, malinaw ang bawat formula sa pisara.",
-      "sentiment": "Positive",
-      "aspect": "Pagtuturo / Teaching Quality",
-      "language": "Tagalog",
-      "emotion": "Masaya / Satisfied",
-      "confidence": 0.96
-    },
-    {
-      "id": "ml_2",
-      "text": "Mabagal ang internet sa laboratory rooms at laging nag-didisconnect sa online quiz.",
-      "sentiment": "Negative",
-      "aspect": "Internet / Wi-Fi",
-      "language": "Tagalog",
-      "emotion": "Dismayado / Frustrated",
-      "confidence": 0.94
-    },
-    {
-      "id": "ml_3",
-      "text": "Sana maglagay ng water refilling stations at maayos na upuan sa library 2nd floor.",
-      "sentiment": "Constructive Suggestion",
-      "aspect": "Pasilidad / Facilities",
-      "language": "Taglish",
-      "emotion": "Umaasa / Hopeful",
-      "confidence": 0.91
-    },
-    {
-      "id": "ml_4",
-      "text": "Accommodating at mabilis asikasuhin ang documents sa registrar window.",
-      "sentiment": "Positive",
-      "aspect": "Administrasyon",
-      "language": "Taglish",
-      "emotion": "Masaya / Satisfied",
-      "confidence": 0.93
-    }
-  ],
   "logs": [
     {
       "id": "log_1",

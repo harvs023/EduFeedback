@@ -511,7 +511,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 Create Survey
               </h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Build an evaluation instrument with multiple choice, Likert rating scales, Tagalog NLP sentiment support, and scheduling.
+                Build an evaluation instrument with multiple choice, Likert rating scales, comment sentiment analysis, and scheduling.
               </p>
             </div>
             <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-emerald-600">
@@ -555,7 +555,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 Analytics
               </h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Inspect cross-departmental sentiment, Tagalog/English aspect classifications, score distributions, and executive summaries.
+                See average ratings, comment sentiment, per-question results, and recommendations for your surveys.
               </p>
             </div>
             <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-purple-600">

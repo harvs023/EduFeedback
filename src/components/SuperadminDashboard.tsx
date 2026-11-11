@@ -6,7 +6,6 @@ import {
   UserProfile,
   ActivityLog,
   NewsAnnouncement,
-  TagalogMLSample,
   SystemBackupData,
   Topic,
   AcademicYearTerms,
@@ -64,7 +63,6 @@ interface SuperadminDashboardProps {
   logs: ActivityLog[];
   responses?: SurveyResponse[];
   newsList?: NewsAnnouncement[];
-  mlDataset?: TagalogMLSample[];
   topics?: Topic[];
   currentUser?: UserProfile | null;
   onClearFlag: (surveyId: string | number) => void;
@@ -152,7 +150,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   logs,
   responses = [],
   newsList = [],
-  mlDataset = [],
   topics = [],
   currentUser = null,
   onClearFlag,
@@ -1423,7 +1420,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           users={users}
           logs={logs}
           newsList={newsList}
-          mlDataset={mlDataset}
           currentUser={currentUser}
           onRestoreBackup={onRestoreBackup || (() => {})}
           showToast={showToast || (() => {})}

@@ -42,7 +42,6 @@ import {
   SurveyResponse,
   UserProfile,
   NewsAnnouncement,
-  TagalogMLSample,
   ActivityLog,
   NotificationItem,
   Topic,
@@ -56,7 +55,6 @@ import {
   INITIAL_RESPONSES,
   DEFAULT_USERS,
   INITIAL_NEWS,
-  INITIAL_TAGALOG_ML_DATASET,
   INITIAL_LOGS,
 } from "../data/initialData";
 import appletConfig from "../../firebase-applet-config.json";
@@ -664,46 +662,6 @@ export const FirestoreNewsService = {
 };
 
 /**
- * Firestore Tagalog ML Dataset Service
- */
-export const FirestoreMLService = {
-  async getAll(): Promise<TagalogMLSample[]> {
-    const firestore = getFirebaseDb();
-    if (!firestore) return [];
-    try {
-      const snap = await getDocs(collection(firestore, COLLECTIONS.ML_DATASET));
-      return snap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      })) as TagalogMLSample[];
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, COLLECTIONS.ML_DATASET);
-      return [];
-    }
-  },
-
-  async add(sample: TagalogMLSample): Promise<void> {
-    const firestore = getFirebaseDb();
-    if (!firestore) return;
-    try {
-      await setDoc(doc(firestore, COLLECTIONS.ML_DATASET, sample.id), sample);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `${COLLECTIONS.ML_DATASET}/${sample.id}`);
-    }
-  },
-
-  async delete(id: string): Promise<void> {
-    const firestore = getFirebaseDb();
-    if (!firestore) return;
-    try {
-      await deleteDoc(doc(firestore, COLLECTIONS.ML_DATASET, id));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `${COLLECTIONS.ML_DATASET}/${id}`);
-    }
-  },
-};
-
-/**
  * Firestore Audit Logs Service
  */
 export const FirestoreLogsService = {
@@ -1023,7 +981,6 @@ export async function seedFirestoreWithInitialDemoData(): Promise<{ success: boo
       responses: INITIAL_RESPONSES,
       users: DEFAULT_USERS,
       news: INITIAL_NEWS,
-      mlDataset: INITIAL_TAGALOG_ML_DATASET,
       logs: INITIAL_LOGS,
     });
   } catch (err: any) {
@@ -1039,7 +996,6 @@ export async function seedFirestoreWithData(data: {
   responses: SurveyResponse[];
   users: UserProfile[];
   news: NewsAnnouncement[];
-  mlDataset: TagalogMLSample[];
   logs: ActivityLog[];
 }): Promise<{ success: boolean; message: string }> {
   let currentCollection = "";
@@ -1096,12 +1052,6 @@ export async function seedFirestoreWithData(data: {
     for (const news of data.news) {
       currentDocId = news.id;
       await setDoc(doc(firestore, COLLECTIONS.NEWS, currentDocId), news);
-    }
-
-    currentCollection = COLLECTIONS.ML_DATASET;
-    for (const ml of data.mlDataset) {
-      currentDocId = ml.id;
-      await setDoc(doc(firestore, COLLECTIONS.ML_DATASET, currentDocId), ml);
     }
 
     currentCollection = COLLECTIONS.LOGS;

@@ -291,50 +291,6 @@
       },
       "required": ["id", "title", "content", "category", "author", "date"]
     },
-    "TagalogMLSample": {
-      "title": "TagalogMLSample",
-      "description": "Bilingual Filipino/Tagalog NLP sentiment analysis labeled sample",
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^[a-zA-Z0-9_\\-]+$",
-          "maxLength": 128,
-          "description": "Sample identifier"
-        },
-        "text": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 2000,
-          "description": "Feedback sentence in Tagalog or Taglish"
-        },
-        "sentiment": {
-          "type": "string",
-          "enum": ["Positive", "Negative", "Neutral", "Constructive Suggestion"],
-          "description": "Supervised sentiment label"
-        },
-        "aspect": {
-          "type": "string",
-          "maxLength": 100,
-          "description": "Evaluated campus aspect"
-        },
-        "language": {
-          "type": "string",
-          "maxLength": 50,
-          "description": "Detected language (Tagalog, Taglish, English)"
-        },
-        "emotion": {
-          "type": "string",
-          "maxLength": 100,
-          "description": "Emotional nuance"
-        },
-        "confidence": {
-          "type": "number",
-          "description": "Validation confidence score"
-        }
-      },
-      "required": ["id", "text", "sentiment", "aspect"]
-    },
     "ActivityLog": {
       "title": "ActivityLog",
       "description": "Institutional audit trail entry",
@@ -391,10 +347,6 @@
     "/news/{newsId}": {
       "schema": "NewsAnnouncement",
       "description": "Campus news items and public announcements"
-    },
-    "/ml_dataset/{sampleId}": {
-      "schema": "TagalogMLSample",
-      "description": "Machine learning labeled training dataset for Tagalog sentiment analysis"
     },
     "/logs/{logId}": {
       "schema": "ActivityLog",

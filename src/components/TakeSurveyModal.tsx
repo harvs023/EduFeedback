@@ -594,8 +594,8 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                   <span className="font-bold text-slate-900">{survey.questions.length} Questions</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">NLP Engine:</span>
-                  <span className="font-bold text-blue-700">Tagalog/Taglish Sentiment Analysis</span>
+                  <span className="text-slate-500">Comment analysis:</span>
+                  <span className="font-bold text-blue-700">Sentiment (Google Gemini)</span>
                 </div>
               </div>
 

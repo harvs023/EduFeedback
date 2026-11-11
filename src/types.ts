@@ -363,27 +363,6 @@ export interface NewsAnnouncement {
   rejectionReason?: string;
 }
 
-export interface TagalogMLSample {
-  id: string;
-  text: string;
-  sentiment: "Positive" | "Negative" | "Neutral" | "Constructive Suggestion";
-  aspect: string;
-  language: "Tagalog" | "Taglish" | "English";
-  verified: boolean;
-  confidence?: number;
-}
-
-export interface TagalogMLMetrics {
-  accuracy: number;
-  f1Score: number;
-  finalLoss: number;
-  epochs: number;
-  totalSamples: number;
-  tagalogSamples: number;
-  modelStatus: string;
-  version: string;
-}
-
 export type TimeframeFilter = "all" | "past-month" | "past-quarter" | "past-year" | string;
 
 export interface SystemBackupData {
@@ -396,7 +375,6 @@ export interface SystemBackupData {
     surveysCount: number;
     responsesCount: number;
     usersCount: number;
-    mlSamplesCount: number;
     logsCount: number;
     newsCount: number;
   };
@@ -404,7 +382,6 @@ export interface SystemBackupData {
     surveys: Survey[];
     responses: SurveyResponse[];
     users: UserProfile[];
-    mlDataset: TagalogMLSample[];
     logs: ActivityLog[];
     news: NewsAnnouncement[];
     categories?: string[];
@@ -421,7 +398,6 @@ export interface DatabaseSnapshot {
     surveysCount: number;
     responsesCount: number;
     usersCount: number;
-    mlSamplesCount: number;
     logsCount: number;
     newsCount: number;
   };

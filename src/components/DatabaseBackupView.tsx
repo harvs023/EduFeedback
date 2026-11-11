@@ -6,7 +6,6 @@ import {
   UserProfile,
   ActivityLog,
   NewsAnnouncement,
-  TagalogMLSample,
   SystemBackupData,
   DatabaseSnapshot,
 } from "../types";
@@ -25,7 +24,6 @@ import {
   Users,
   ClipboardList,
   MessageSquareText,
-  BrainCircuit,
   Activity,
   CheckCircle2,
   X,
@@ -46,7 +44,6 @@ interface DatabaseBackupViewProps {
   users: UserProfile[];
   logs: ActivityLog[];
   newsList: NewsAnnouncement[];
-  mlDataset: TagalogMLSample[];
   currentUser: UserProfile | null;
   onRestoreBackup: (backupData: SystemBackupData, mode: "overwrite" | "merge") => void;
   showToast: (text: string, type?: "success" | "info") => void;
@@ -58,7 +55,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
   users,
   logs,
   newsList,
-  mlDataset,
   currentUser,
   onRestoreBackup,
   showToast,
@@ -79,7 +75,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
 
   // Storage footprint calculation
   const storageMetrics = useMemo(() => {
-    const rawData = { surveys, responses, users, logs, newsList, mlDataset };
+    const rawData = { surveys, responses, users, logs, newsList };
     const rawJson = JSON.stringify(rawData);
     const sizeBytes = new Blob([rawJson]).size;
     const sizeKb = Number((sizeBytes / 1024).toFixed(2));
@@ -90,14 +86,13 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
       usersCount: users.length,
       logsCount: logs.length,
       newsCount: newsList.length,
-      mlDatasetCount: mlDataset.length,
-      totalRecords: surveys.length + responses.length + users.length + logs.length + newsList.length + mlDataset.length,
+      totalRecords: surveys.length + responses.length + users.length + logs.length + newsList.length,
       sizeBytes,
       sizeKb,
       sizeMb,
       formattedSize: sizeKb > 1024 ? `${sizeMb} MB` : `${sizeKb} KB`,
     };
-  }, [surveys, responses, users, logs, newsList, mlDataset]);
+  }, [surveys, responses, users, logs, newsList]);
 
   // Handle Export Full Database
   const handleExportDatabase = () => {
@@ -112,7 +107,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
           surveysCount: surveys.length,
           responsesCount: responses.length,
           usersCount: users.length,
-          mlSamplesCount: mlDataset.length,
           logsCount: logs.length,
           newsCount: newsList.length,
         },
@@ -120,7 +114,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
           surveys,
           responses,
           users,
-          mlDataset,
           logs,
           news: newsList,
         },
@@ -152,7 +145,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
           surveysCount: surveys.length,
           responsesCount: responses.length,
           usersCount: users.length,
-          mlSamplesCount: mlDataset.length,
           logsCount: logs.length,
           newsCount: newsList.length,
         },
@@ -160,7 +152,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
           surveys,
           responses,
           users,
-          mlDataset,
           logs,
           news: newsList,
         },
@@ -189,7 +180,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
           surveysCount: surveys.length,
           responsesCount: responses.length,
           usersCount: users.length,
-          mlSamplesCount: mlDataset.length,
           logsCount: logs.length,
           newsCount: newsList.length,
         },
@@ -197,7 +187,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
           surveys,
           responses,
           users,
-          mlDataset,
           logs,
           news: newsList,
         },
@@ -377,15 +366,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
           </div>
 
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-1.5 text-purple-600 mb-1">
-              <BrainCircuit className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Old Sample Phrases</span>
-            </div>
-            <div className="font-serif text-2xl font-black text-purple-700">{mlDataset.length}</div>
-            <span className="text-[11px] text-purple-600">Tagalog sentences</span>
-          </div>
-
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
             <div className="flex items-center gap-1.5 text-amber-600 mb-1">
               <Activity className="w-3.5 h-3.5" />
               <span className="text-[10px] font-bold uppercase tracking-wider">Audit Logs</span>
@@ -434,7 +414,6 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
                 <li>All Survey Questionnaires, Options, and Form Settings ({surveys.length})</li>
                 <li>All Student Feedback Entries & Sentiment Ratings ({responses.length})</li>
                 <li>All User Profiles, Roles, and Departmental Assignments ({users.length})</li>
-                <li>Old sentiment sample phrases, no longer used ({mlDataset.length})</li>
                 <li>Institutional Activity & Audit Security Logs ({logs.length})</li>
                 <li>Campus News & Survey Result Announcements ({newsList.length})</li>
               </ul>
@@ -790,7 +769,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-[11px] space-y-1">
                 <div className="font-bold text-slate-800">Snapshot Contents:</div>
-                <div>{surveys.length} Surveys · {responses.length} Responses · {users.length} Users · {mlDataset.length} ML Sentences</div>
+                <div>{surveys.length} Surveys · {responses.length} Responses · {users.length} Users</div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

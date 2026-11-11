@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Survey, SurveyStatus, SurveyResponse, UserProfile, TagalogMLSample, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings } from "./types";
+import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings } from "./types";
 import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
 import { schoolYearFor } from "./lib/schoolYear";
 import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
@@ -51,7 +51,6 @@ export default function App() {
   // Core Data State
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [responses, setResponses] = useState<SurveyResponse[]>([]);
-  const [mlDataset, setMlDataset] = useState<TagalogMLSample[]>([]);
   const [newsList, setNewsList] = useState<NewsAnnouncement[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -118,13 +117,11 @@ export default function App() {
 
       const isAdmin = user?.role === "superadmin" || user?.pos === "Superadmin";
       const isSuperadmin = user?.role === "superadmin";
-      const isAuthor = isAdmin || user?.role === "faculty" || user?.role === "officer";
 
-      const [cloudResponses, cloudUsers, cloudNews, cloudMl, cloudLogs] = await Promise.all([
+      const [cloudResponses, cloudUsers, cloudNews, cloudLogs] = await Promise.all([
         DatabaseService.getResponses(user, cloudSurveys).catch(() => []),
         isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
         DatabaseService.getNews(user).catch(() => []),
-        isAuthor ? DatabaseService.getMLDataset(user).catch(() => []) : Promise.resolve([]),
         isSuperadmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
       ]);
 
@@ -132,7 +129,6 @@ export default function App() {
       setDataLoadedAt(Date.now());
       setUsers(cloudUsers);
       setNewsList(cloudNews);
-      setMlDataset(cloudMl);
       setLogs(isSuperadmin ? cloudLogs : []);
 
       let freshTopics: Topic[] = [];
@@ -291,7 +287,6 @@ export default function App() {
     setCurrentView("dashboard");
     const isAdmin = user.role === "superadmin" || user.pos === "Superadmin";
     const isSuperadmin = user.role === "superadmin";
-    const isAuthor = isAdmin || user.role === "faculty" || user.role === "officer";
 
     try {
       await DatabaseService.addLog({
@@ -312,18 +307,16 @@ export default function App() {
 
       const activeSurveys = await DatabaseService.getSurveys(user);
       setSurveys(activeSurveys);
-      const [scopedResponses, scopedUsers, freshNews, freshMl, freshLogs] = await Promise.all([
+      const [scopedResponses, scopedUsers, freshNews, freshLogs] = await Promise.all([
         DatabaseService.getResponses(user, activeSurveys).catch(() => []),
         isAdmin ? DatabaseService.getUsers(user).catch(() => []) : Promise.resolve([]),
         DatabaseService.getNews(user).catch(() => []),
-        isAuthor ? DatabaseService.getMLDataset(user).catch(() => []) : Promise.resolve([]),
         isSuperadmin ? DatabaseService.getLogs(user).catch(() => []) : Promise.resolve([]),
       ]);
       setResponses(scopedResponses);
       setDataLoadedAt(Date.now());
       setUsers(scopedUsers);
       setNewsList(freshNews);
-      setMlDataset(freshMl);
       setLogs(isSuperadmin ? freshLogs : []);
 
       let freshTopics: Topic[] = [];
@@ -2033,7 +2026,6 @@ export default function App() {
               logs={logs}
               responses={responses}
               newsList={newsList}
-              mlDataset={mlDataset}
               topics={topics}
               currentUser={currentUser}
               onClearFlag={handleClearFlag}

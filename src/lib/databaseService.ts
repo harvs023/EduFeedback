@@ -12,7 +12,6 @@ import {
   FirestoreResponseService,
   FirestoreUserService,
   FirestoreNewsService,
-  FirestoreMLService,
   FirestoreLogsService,
   FirestoreNotificationService,
   FirestoreTopicService,
@@ -32,7 +31,6 @@ import {
   SurveyResponse,
   UserProfile,
   NewsAnnouncement,
-  TagalogMLSample,
   ActivityLog,
   AccountStatus,
   NotificationItem,
@@ -359,21 +357,6 @@ export class DatabaseService {
   }
 
   // ==========================================
-  // MACHINE LEARNING DATASET SAMPLES
-  // ==========================================
-  static async getMLDataset(currentUser?: UserProfile | null): Promise<TagalogMLSample[]> {
-    return await FirestoreMLService.getAll();
-  }
-
-  static async addMLSample(sample: TagalogMLSample): Promise<void> {
-    await FirestoreMLService.add(sample);
-  }
-
-  static async deleteMLSample(id: string): Promise<void> {
-    await FirestoreMLService.delete(id);
-  }
-
-  // ==========================================
   // ACTIVITY LOGS
   // ==========================================
   static async getLogs(currentUser?: UserProfile | null): Promise<ActivityLog[]> {
@@ -474,7 +457,6 @@ export class DatabaseService {
     responses: SurveyResponse[];
     users: UserProfile[];
     news: NewsAnnouncement[];
-    mlDataset: TagalogMLSample[];
     logs: ActivityLog[];
   }) {
     return seedFirestoreWithData(data);

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useConfirm } from "./ConfirmDialog";
-import { Survey, SurveyStatus, UserProfile, SurveyResponse } from "../types";
+import { Survey, UserProfile, SurveyResponse } from "../types";
 import { getSurveyAvailability } from "../lib/surveyReview";
 import {
   PlusCircle,
@@ -12,27 +12,20 @@ import {
   Layers,
   Search,
   Eye,
-  CheckCircle,
   Clock,
   CopyPlus,
-  AlertCircle,
   AlertTriangle,
   ExternalLink,
-  Filter,
-  ShieldCheck,
   ShieldAlert,
   Flag,
   SlidersHorizontal,
   Download,
   Check,
-  Sparkles,
   RefreshCw,
   FolderKanban,
-  Tag,
   User,
   CheckSquare,
   X,
-  FileSpreadsheet,
   Lock,
   Archive,
 } from "lucide-react";
@@ -51,8 +44,6 @@ interface MySurveysScreenProps {
   onFlagSurvey?: (surveyId: string | number, reason: string) => void;
   onClearFlag?: (surveyId: string | number) => void;
   onDuplicateSurvey?: (survey: Survey) => void;
-  onApproveSurvey?: (surveyId: string | number) => void;
-  onRejectSurvey?: (surveyId: string | number, reason: string) => void;
   onTakedownSurvey?: (surveyId: string | number, reason: string) => void;
 }
 
@@ -70,8 +61,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
   onFlagSurvey,
   onClearFlag,
   onDuplicateSurvey,
-  onApproveSurvey,
-  onRejectSurvey,
   onTakedownSurvey,
 }) => {
   const { confirm, confirmDialog } = useConfirm();

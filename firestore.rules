@@ -49,6 +49,14 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(myKey())/receipts/$(string(sid));
     }
 
+    function newsPath(nid) {
+      return /databases/$(database)/documents/news/$(nid);
+    }
+
+    function myNewsLikePath(nid) {
+      return /databases/$(database)/documents/users/$(myKey())/newsLikes/$(nid);
+    }
+
     // Admin switch: is survey creation open? Open unless the admin has turned it off
     // (a missing settings document counts as open, so nothing breaks before it is set).
     function creationOpen() {
@@ -159,6 +167,22 @@ service cloud.firestore {
         && get(surveyPath(surveyId)).data.status in ['published', 'scheduled'];
     }
 
+    // One like per person per news post. Holds only the post id. Only its owner can read it.
+    // It is created / deleted together with the post's like count going up / down by 1,
+    // so the count cannot be pushed up by deleting and re-adding the record.
+    match /users/{userId}/newsLikes/{newsId} {
+      allow read: if isActive() && userId == myKey();
+      allow create: if isActive()
+        && userId == myKey()
+        && request.resource.data.keys().hasOnly(['newsId'])
+        && request.resource.data.newsId == newsId
+        && get(newsPath(newsId)).data.status == 'published'
+        && getAfter(newsPath(newsId)).data.likesCount == get(newsPath(newsId)).data.likesCount + 1;
+      allow delete: if isActive()
+        && userId == myKey()
+        && getAfter(newsPath(newsId)).data.likesCount == get(newsPath(newsId)).data.likesCount - 1;
+    }
+
     // -------------------------------------------------------------- surveys
      match /surveys/{surveyId} {
 
@@ -266,11 +290,16 @@ service cloud.firestore {
 
       allow write: if isAdmin();
 
+      // Like / un-like: the count moves by 1 only together with this person's own like record.
       allow update: if isActive()
         && resource.data.status == 'published'
         && onlyChanges(['likesCount'])
-        && (request.resource.data.likesCount == resource.data.likesCount + 1
-            || request.resource.data.likesCount == resource.data.likesCount - 1);
+        && ((request.resource.data.likesCount == resource.data.likesCount + 1
+              && !exists(myNewsLikePath(newsId))
+              && existsAfter(myNewsLikePath(newsId)))
+          || (request.resource.data.likesCount == resource.data.likesCount - 1
+              && exists(myNewsLikePath(newsId))
+              && !existsAfter(myNewsLikePath(newsId))));
     }
 
     // ----------------------------------------------------------- ml_dataset

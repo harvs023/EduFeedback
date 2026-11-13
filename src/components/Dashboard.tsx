@@ -19,10 +19,6 @@ import {
   AlertTriangle,
   ArrowRight,
   PlusCircle,
-  TrendingUp,
-  FileText,
-  Clock,
-  Sparkles,
   Inbox,
   X,
 } from "lucide-react";
@@ -37,6 +33,7 @@ interface DashboardProps {
   answeredSurveyIds?: string[];
   onNavigate: (view: string) => void;
   onLikeNews: (id: string) => void;
+  likedNewsIds?: string[];
   onDeleteNews?: (id: string) => Promise<void> | void;
   onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => Promise<boolean>;
   onMarkNotificationRead?: (id: string) => void;
@@ -53,6 +50,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   answeredSurveyIds = [],
   onNavigate,
   onLikeNews,
+  likedNewsIds = [],
   onDeleteNews,
   onAddNews,
   onMarkNotificationRead,
@@ -63,7 +61,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const userEmail = (currentUser?.email || "").trim().toLowerCase();
   const isSuperadmin =
     currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
-  const now = Date.now();
 
   // Answered survey IDs set
   const answeredSurveyIdSet = new Set([
@@ -120,6 +117,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           currentUser={currentUser}
           onAddNews={onAddNews}
           onLikeNews={onLikeNews}
+          likedNewsIds={likedNewsIds}
           onDeleteNews={onDeleteNews}
           limit={5}
         />

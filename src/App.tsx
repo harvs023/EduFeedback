@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings } from "./types";
-import { DatabaseService, USE_FIREBASE } from "./lib/databaseService";
+import { DatabaseService } from "./lib/databaseService";
 import { schoolYearFor } from "./lib/schoolYear";
-import { authFetch, getFirebaseAuth, isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
+import { isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
 import { countEligibleUsers, getSurveyAvailability } from "./lib/surveyReview";
 import {
   analyzeResponse,
@@ -18,7 +18,7 @@ import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
 import { AnalyticsPage } from "./components/analytics/AnalyticsPage";
 import { SentimentAnalysisView } from "./components/SentimentAnalysisView";
-import { NewsAnnouncementsFeed, MAX_PENDING_NEWS } from "./components/NewsAnnouncementsFeed";
+import { MAX_PENDING_NEWS } from "./components/NewsAnnouncementsFeed";
 import { Dashboard } from "./components/Dashboard";
 import { SurveyBuilder } from "./components/SurveyBuilder";
 import { MySurveysScreen } from "./components/MySurveysScreen";
@@ -32,7 +32,6 @@ import {
   ClipboardList,
   BarChart3,
   BrainCircuit,
-  Newspaper,
   PlusCircle,
   ShieldAlert,
   Sparkles,
@@ -67,6 +66,7 @@ export default function App() {
   const [activeSurveyForTaking, setActiveSurveyForTaking] = useState<Survey | null>(null);
   const [previewSurvey, setPreviewSurvey] = useState<Survey | null>(null);
   const [answeredSurveyIds, setAnsweredSurveyIds] = useState<string[]>([]);
+  const [likedNewsIds, setLikedNewsIds] = useState<string[]>([]);
   // Saved sentiment results confirmed by the server's signature check (see lib/sentiment.ts).
   const [validResultKeys, setValidResultKeys] = useState<Set<string>>(new Set());
   const [signatureCheck, setSignatureCheck] = useState<"checking" | "done" | "unavailable">("done");
@@ -148,6 +148,7 @@ export default function App() {
       setAcademicCalendar(await DatabaseService.getAcademicCalendar().catch(() => []));
       setAppSettings(await DatabaseService.getSettings().catch(() => ({ surveyCreationOpen: true })));
       setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
+      setLikedNewsIds(user?.email ? await DatabaseService.getLikedNewsIds(user.email) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load data from Firestore.", "info");
     }
@@ -189,7 +190,7 @@ export default function App() {
             await FirebaseAuthService.signOut();
             setCurrentUser(null);
             setNotifications([]);
-            showToast("User profile record not found in Firestore. Signed out.", "info");
+            showToast("Your profile was not found. If you signed up recently, please register again with the same email and password. If that does not work, contact the system administrator.", "info");
             return;
           }
           if (profile.status !== "active") {
@@ -223,6 +224,7 @@ export default function App() {
         setTopics([]);
         setAcademicCalendar([]);
         setAnsweredSurveyIds([]);
+        setLikedNewsIds([]);
       }
     });
 
@@ -336,6 +338,7 @@ export default function App() {
       setAcademicCalendar(await DatabaseService.getAcademicCalendar().catch(() => []));
       setAppSettings(await DatabaseService.getSettings().catch(() => ({ surveyCreationOpen: true })));
       setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
+      setLikedNewsIds(user?.email ? await DatabaseService.getLikedNewsIds(user.email) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load Firestore data for user.", "info");
     }
@@ -361,6 +364,7 @@ export default function App() {
     setTopics([]);
     setAcademicCalendar([]);
     setAnsweredSurveyIds([]);
+    setLikedNewsIds([]);
     showToast("Signed out successfully.", "info");
   };
 
@@ -851,12 +855,18 @@ export default function App() {
     });
   };
 
+  // Like or un-like: each person can like a post once; clicking again removes the like.
   const handleLikeNews = async (id: string) => {
+    if (!currentUser?.email) return;
+    const liked = !likedNewsIds.includes(id);
     try {
-      await DatabaseService.likeNews(id);
-      setNewsList((prev) => prev.map((n) => (n.id === id ? { ...n, likesCount: n.likesCount + 1 } : n)));
+      await DatabaseService.setNewsLiked(id, currentUser.email, liked);
+      setLikedNewsIds((prev) => (liked ? [...prev, id] : prev.filter((x) => x !== id)));
+      setNewsList((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, likesCount: Math.max(0, (n.likesCount || 0) + (liked ? 1 : -1)) } : n))
+      );
     } catch (err: any) {
-      showToast(err.message || "Failed to like announcement.", "info");
+      showToast(err.message || "Could not save your like.", "info");
     }
   };
 
@@ -1392,39 +1402,6 @@ export default function App() {
     }
   };
 
-  const handleRestoreBackup = async (backupData: any, mode: "overwrite" | "merge") => {
-    try {
-      if (backupData?.data) {
-        if (backupData.data.surveys) {
-          for (const s of backupData.data.surveys) {
-            await DatabaseService.saveSurvey(s);
-          }
-          setSurveys(backupData.data.surveys);
-        }
-        if (backupData.data.users) {
-          for (const u of backupData.data.users) {
-            await DatabaseService.saveUser(u);
-          }
-          setUsers(backupData.data.users);
-        }
-        if (backupData.data.newsList) {
-          for (const n of backupData.data.newsList) {
-            await DatabaseService.saveNews(n);
-          }
-          setNewsList(backupData.data.newsList);
-        }
-      }
-      showToast(
-        mode === "overwrite"
-          ? "Database successfully restored from snapshot!"
-          : "Database records successfully merged with snapshot!",
-        "success"
-      );
-    } catch (err: any) {
-      showToast(err.message || "Failed to restore database backup.", "info");
-    }
-  };
-
   const handleSaveTopic = async (topic: Topic) => {
     try {
       await DatabaseService.saveTopic(topic);
@@ -1778,7 +1755,6 @@ export default function App() {
           currentView={currentView}
           onNavigate={handleNavigate}
           currentUser={currentUser}
-          onSwitchUser={handleLogin}
           onSignOut={handleSignOut}
           onOpenProfile={() => setShowProfileModal(true)}
           onOpenAuth={() => {
@@ -1795,7 +1771,6 @@ export default function App() {
           onCategoryChange={setSelectedCategory}
           notifications={notifications}
           unreadNotifsCount={notifications.filter((n) => !n.read).length}
-          unreadNewsCount={newsList.filter((n) => n.status === "published" || !n.status).length}
           flaggedSurveysCount={flaggedCount}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onMarkNotificationRead={handleMarkNotificationRead}
@@ -1815,6 +1790,7 @@ export default function App() {
               answeredSurveyIds={answeredSurveyIds}
               onNavigate={handleNavigate}
               onLikeNews={handleLikeNews}
+              likedNewsIds={likedNewsIds}
               onDeleteNews={handleDeleteNews}
               onAddNews={handleAddNews}
               onMarkNotificationRead={handleMarkNotificationRead}
@@ -1910,8 +1886,6 @@ export default function App() {
               onFlagSurvey={handleFlagSurvey}
               onClearFlag={handleClearFlag}
               onDuplicateSurvey={handleDuplicateSurvey}
-              onApproveSurvey={handleApproveSurvey}
-              onRejectSurvey={handleRejectSurvey}
               onTakedownSurvey={handleTakedownSurvey}
             />
           )}
@@ -1957,16 +1931,6 @@ export default function App() {
                 </button>
               </div>
             )
-          )}
-
-          {currentView === "news" && (
-            <NewsAnnouncementsFeed
-              newsList={newsList}
-              currentUser={currentUser}
-              onAddNews={handleAddNews}
-              onLikeNews={handleLikeNews}
-              onDeleteNews={handleDeleteNews}
-            />
           )}
 
           {currentView === "create" && (
@@ -2041,7 +2005,6 @@ export default function App() {
               onRefreshUsers={handleRefreshUsers}
               surveyCreationOpen={appSettings.surveyCreationOpen}
               onSetSurveyCreation={handleSetSurveyCreation}
-              onRestoreBackup={handleRestoreBackup}
               onSaveTopic={handleSaveTopic}
               onDeleteTopic={handleDeleteTopic}
               academicCalendar={academicCalendar}
@@ -2049,7 +2012,6 @@ export default function App() {
               onDeleteAcademicYear={handleDeleteAcademicYear}
               onApproveSurvey={handleApproveSurvey}
               onRejectSurvey={handleRejectSurvey}
-              onTakedownSurvey={handleTakedownSurvey}
               showToast={showToast}
               onNavigateToAnalytics={(surveyId) => {
                 setAnalyticsTargetSurveyId(surveyId || "all");

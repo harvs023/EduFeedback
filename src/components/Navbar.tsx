@@ -5,7 +5,6 @@ import {
   ClipboardList,
   BarChart3,
   BrainCircuit,
-  Newspaper,
   PlusCircle,
   ShieldAlert,
   Search,
@@ -16,8 +15,6 @@ import {
   Menu,
   X,
   Sparkles,
-  ShieldCheck,
-  CheckCircle2,
   UserCheck,
   MessageSquare,
   Flag,
@@ -28,7 +25,6 @@ interface NavbarProps {
   currentView: string;
   onNavigate: (view: string) => void;
   currentUser: UserProfile | null;
-  onSwitchUser: (user: UserProfile) => void;
   onSignOut?: () => void;
   onOpenProfile: () => void;
   onOpenAuth: () => void;
@@ -39,7 +35,6 @@ interface NavbarProps {
   onCategoryChange?: (cat: string) => void;
   notifications?: NotificationItem[];
   unreadNotifsCount?: number;
-  unreadNewsCount?: number;
   flaggedSurveysCount?: number;
   onMarkAllNotificationsRead?: () => void;
   onMarkNotificationRead?: (id: string) => void;
@@ -50,7 +45,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentView,
   onNavigate,
   currentUser,
-  onSwitchUser,
   onSignOut,
   onOpenProfile,
   onOpenAuth,
@@ -59,7 +53,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSearchChange,
   notifications = [],
   unreadNotifsCount = 0,
-  unreadNewsCount = 0,
   flaggedSurveysCount = 0,
   onMarkAllNotificationsRead,
   onMarkNotificationRead,

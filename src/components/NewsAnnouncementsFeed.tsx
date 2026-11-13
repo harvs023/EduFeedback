@@ -3,15 +3,11 @@ import { useConfirm } from "./ConfirmDialog";
 import { NewsAnnouncement, UserProfile } from "../types";
 import {
   Newspaper,
-  Sparkles,
   Pin,
   Heart,
   PlusCircle,
-  Calendar,
   User,
-  Tag,
   CheckCircle2,
-  Share2,
   X,
   ChevronDown,
   Clock,
@@ -27,6 +23,8 @@ interface NewsAnnouncementsFeedProps {
   /** Resolves to true when the post was saved. */
   onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => Promise<boolean>;
   onLikeNews: (id: string) => void;
+  /** Posts the signed-in person has liked (filled heart; clicking again un-likes). */
+  likedNewsIds?: string[];
   onDeleteNews?: (id: string) => Promise<void> | void;
   limit?: number;
 }
@@ -36,6 +34,7 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
   currentUser,
   onAddNews,
   onLikeNews,
+  likedNewsIds = [],
   onDeleteNews,
   limit,
 }) => {
@@ -289,9 +288,11 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => onLikeNews(item.id)}
+                  aria-pressed={likedNewsIds.includes(item.id)}
+                  title={likedNewsIds.includes(item.id) ? "You liked this. Click to remove your like." : "Like"}
                   className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 transition-colors cursor-pointer"
                 >
-                  <Heart className="w-3.5 h-3.5 fill-rose-500" />
+                  <Heart className={`w-3.5 h-3.5 ${likedNewsIds.includes(item.id) ? "fill-rose-500" : ""}`} />
                   <span>{item.likesCount}</span>
                 </button>
                 <button
@@ -374,10 +375,14 @@ export const NewsAnnouncementsFeed: React.FC<NewsAnnouncementsFeedProps> = ({
             <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
               <button
                 onClick={() => onLikeNews(activeArticle.id)}
+                aria-pressed={likedNewsIds.includes(activeArticle.id)}
+                title={likedNewsIds.includes(activeArticle.id) ? "You liked this. Click to remove your like." : "Like"}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 rounded-xl text-xs font-bold hover:bg-rose-100"
               >
-                <Heart className="w-4 h-4 fill-rose-500" />
-                <span>{activeArticle.likesCount} Helpful Reactions</span>
+                <Heart className={`w-4 h-4 ${likedNewsIds.includes(activeArticle.id) ? "fill-rose-500" : ""}`} />
+                <span>
+                  {newsList.find((n) => n.id === activeArticle.id)?.likesCount ?? activeArticle.likesCount} Helpful Reactions
+                </span>
               </button>
 
               <div className="flex items-center gap-2">

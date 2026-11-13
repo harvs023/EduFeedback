@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight, Flag } from "lucide-react";
 import { QuestionResult, interpretRating } from "../../lib/analytics";
 import { CountBar, SENTIMENT_COLORS, SentimentBar, SentimentFootnote } from "./AnalyticsParts";

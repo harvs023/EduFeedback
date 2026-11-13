@@ -18,11 +18,8 @@ import {
   FirestoreAcademicCalendarService,
   FirestoreEvaluationService,
   FirestoreSettingsService,
-  INITIAL_TOPICS,
   FirebaseAuthService,
   isFirebaseConfigured,
-  getFirebaseAuth,
-  firebaseConfig,
   seedFirestoreWithData,
   wipeFirestoreCloudData,
 } from "./firebase";
@@ -120,7 +117,7 @@ export class DatabaseService {
         await FirebaseAuthService.signOut();
         return {
           success: false,
-          error: "User profile record was not found in Firestore. Please contact your system administrator.",
+          error: "Your profile was not found. If you signed up recently, please register again with the same email and password. If that does not work, contact the system administrator.",
         };
       }
     }
@@ -352,8 +349,12 @@ export class DatabaseService {
     await FirestoreNewsService.save(newsItem);
   }
 
-  static async likeNews(id: string): Promise<void> {
-    await FirestoreNewsService.incrementLike(id);
+  static async setNewsLiked(id: string, email: string, liked: boolean): Promise<void> {
+    await FirestoreNewsService.setLiked(id, email, liked);
+  }
+
+  static async getLikedNewsIds(email: string): Promise<string[]> {
+    return await FirestoreNewsService.getLikedNewsIds(email);
   }
 
   // ==========================================

@@ -17,17 +17,11 @@ import {
   Eye,
   EyeOff,
   Building,
-  GraduationCap,
-  Briefcase,
   AlertCircle,
   CheckCircle2,
-  Copy,
-  Check,
   ArrowRight,
-  KeyRound,
   Users,
   Database,
-  CheckCircle,
   HelpCircle,
 } from "lucide-react";
 

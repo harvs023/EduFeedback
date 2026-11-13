@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { UserProfile } from "../types";
 import { DEPARTMENTS_DATA, PROGRAMS_BY_DEPARTMENT } from "../data/initialData";
-import { X, User, Lock, Building, BookOpen, Layers, CheckCircle2, Shield } from "lucide-react";
+import { X, CheckCircle2, Shield } from "lucide-react";
 
 interface UserProfileModalProps {
   currentUser: UserProfile;

@@ -6,7 +6,6 @@ import {
   UserProfile,
   ActivityLog,
   NewsAnnouncement,
-  SystemBackupData,
   Topic,
   AcademicYearTerms,
 } from "../types";
@@ -22,38 +21,26 @@ import { SurveyCreationSwitch } from "./SurveyCreationSwitch";
 import {
   ShieldAlert,
   Users,
-  ClipboardList,
   Activity,
   Database,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
   Download,
   Trash2,
-  UserCheck,
-  UserX,
   Search,
   Eye,
   RotateCcw,
   Calendar,
   Clock,
-  Filter,
-  Layers,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
-  ExternalLink,
   Flag,
   BarChart3,
   BrainCircuit,
   CalendarDays,
   ListFilter,
-  ArrowUpDown,
-  History,
-  TrendingUp,
   Tag,
   CalendarRange,
-  Building,
   Newspaper,
 } from "lucide-react";
 
@@ -73,7 +60,6 @@ interface SuperadminDashboardProps {
   onAddUser?: (user: UserProfile) => void;
   onUpdateUser?: (email: string, changes: Partial<UserProfile>) => void;
   onDeleteUser?: (email: string) => void;
-  onRestoreBackup?: (backupData: SystemBackupData, mode: "overwrite" | "merge") => void;
   onNavigateToAnalytics?: (surveyId?: string | number | "all") => void;
   onNavigateToML?: () => void;
   onSaveTopic?: (topic: Topic) => Promise<void> | void;
@@ -83,7 +69,6 @@ interface SuperadminDashboardProps {
   onDeleteAcademicYear?: (schoolYear: string) => Promise<void>;
   onApproveSurvey?: (surveyId: string | number) => void;
   onRejectSurvey?: (surveyId: string | number, reason: string) => void;
-  onTakedownSurvey?: (surveyId: string | number, reason: string) => void;
   onReviewNews?: (id: string, decision: "approve" | "reject", reason?: string) => Promise<void> | void;
   onDecideFlag?: (responseId: string, decision: FlagDecision, note: string) => Promise<void>;
   /** Reload the user list (for the Active users counter). */
@@ -160,7 +145,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onAddUser,
   onUpdateUser,
   onDeleteUser,
-  onRestoreBackup,
   onNavigateToAnalytics,
   onNavigateToML,
   onSaveTopic,
@@ -170,7 +154,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onDeleteAcademicYear,
   onApproveSurvey,
   onRejectSurvey,
-  onTakedownSurvey,
   onReviewNews,
   onDecideFlag,
   onRefreshUsers,
@@ -181,7 +164,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 }) => {
   const { confirm, confirmDialog } = useConfirm();
   // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics" | "news" | "calendar" | "flagged-responses">(
+  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses">(
     initialTab || "approvals"
   );
 
@@ -189,7 +172,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   const tabsContainerRef = useRef<HTMLDivElement>(null);
 
   const handleTabClick = (
-    tabId: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "ml-status" | "topics" | "news",
+    tabId: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news",
     e?: React.MouseEvent<HTMLButtonElement>
   ) => {
     setActiveTab(tabId);
@@ -242,18 +225,12 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterCreator, setFilterCreator] = useState<string>("all");
 
-  // User Management search
-  const [searchUser, setSearchUser] = useState<string>("");
-
   // Inspect Survey Modal State
   const [selectedSurveyForPreview, setSelectedSurveyForPreview] = useState<Survey | null>(null);
 
   // Flag Reason Modal State
   const [flagReasonModal, setFlagReasonModal] = useState<{ surveyId: string | number; title: string } | null>(null);
   const [flagReasonInput, setFlagReasonInput] = useState<string>("");
-
-  // Backup State
-  const [backupGenerated, setBackupGenerated] = useState<string | null>(null);
 
   const pendingSurveys = useMemo(() => surveys.filter((s) => s.status === "pending"), [surveys]);
   const pendingNewsCount = (newsList || []).filter((n) => n.status === "pending").length;
@@ -450,18 +427,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
     document.body.removeChild(link);
   };
 
-  const handleGenerateBackup = () => {
-    const timestamp = new Date().toLocaleString();
-    setBackupGenerated(timestamp);
-  };
-
-  const filteredUsers = users.filter(
-    (u) =>
-      u.name.toLowerCase().includes(searchUser.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchUser.toLowerCase()) ||
-      u.pos.toLowerCase().includes(searchUser.toLowerCase())
-  );
-
   return (
     <div className="space-y-6 pb-12">
       {confirmDialog}
@@ -587,7 +552,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                 { id: "flagged", label: "Flagged Surveys Queue", count: flaggedSurveys.length, icon: Flag },
                 { id: "users", label: "User & Role Directory", count: users.length, icon: Users },
                 { id: "logs", label: "Activity Audit Trail", count: logs.length, icon: Activity },
-                { id: "backup", label: "System Backup & Snapshots", icon: Database },
+                { id: "backup", label: "Backup & Restore", icon: Database },
                 { id: "topics", label: "Survey Topics", count: topics.length, icon: Tag },
                 { id: "calendar", label: "Academic Calendar", count: academicCalendar.length, icon: CalendarRange },
               ].map((tab) => {
@@ -1414,16 +1379,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 
       {/* TAB 5: BACKUP & DATA SNAPSHOTS */}
       {activeTab === "backup" && (
-        <DatabaseBackupView
-          surveys={surveys}
-          responses={responses}
-          users={users}
-          logs={logs}
-          newsList={newsList}
-          currentUser={currentUser}
-          onRestoreBackup={onRestoreBackup || (() => {})}
-          showToast={showToast || (() => {})}
-        />
+        <DatabaseBackupView showToast={showToast || (() => {})} />
       )}
 
       {/* INSPECT SURVEY QUESTIONS MODAL */}

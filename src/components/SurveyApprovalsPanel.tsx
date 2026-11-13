@@ -15,8 +15,6 @@ import {
   Clock,
   Calendar,
   Users,
-  User,
-  ShieldAlert,
   ShieldCheck,
   FileText,
   Tag,
@@ -24,8 +22,6 @@ import {
   Check,
   Ban,
   Unlock,
-  HelpCircle,
-  Sparkles,
 } from "lucide-react";
 
 interface SurveyApprovalsPanelProps {

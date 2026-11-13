@@ -5,15 +5,11 @@ import {
   Users,
   UserPlus,
   Search,
-  Filter,
   Download,
   Edit2,
   Trash2,
   KeyRound,
-  ShieldCheck,
   ShieldAlert,
-  GraduationCap,
-  Briefcase,
   UserCheck,
   UserX,
   X,
@@ -21,10 +17,7 @@ import {
   Copy,
   CheckCircle2,
   AlertTriangle,
-  Building,
   Mail,
-  Hash,
-  Sparkles,
 } from "lucide-react";
 
 interface UserManagementViewProps {

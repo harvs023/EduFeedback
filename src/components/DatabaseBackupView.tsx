@@ -1,851 +1,443 @@
-import React, { useState, useMemo, useRef } from "react";
-import { useConfirm } from "./ConfirmDialog";
+import React, { useRef, useState } from "react";
 import {
-  Survey,
-  SurveyResponse,
-  UserProfile,
-  ActivityLog,
-  NewsAnnouncement,
-  SystemBackupData,
-  DatabaseSnapshot,
-} from "../types";
-import {
+  AlertTriangle,
+  CheckCircle2,
   Database,
   Download,
-  UploadCloud,
-  FileCheck,
-  RefreshCw,
-  Clock,
-  ShieldCheck,
-  AlertTriangle,
-  FileText,
-  Trash2,
-  HardDrive,
-  Users,
-  ClipboardList,
-  MessageSquareText,
-  Activity,
-  CheckCircle2,
-  X,
   FileJson,
-  Layers,
-  Sparkles,
-  Flame,
-  Code,
-  ChevronDown,
-  ChevronUp,
+  Loader2,
+  Lock,
+  RefreshCw,
+  ShieldAlert,
+  Upload,
 } from "lucide-react";
-import { isFirebaseConfigured } from "../lib/firebase";
-import { USE_FIREBASE } from "../lib/databaseService";
+import { authFetch } from "../lib/firebase";
+import {
+  BACKUP_GROUPS,
+  BACKUP_GROUP_LABELS,
+  checkBackup,
+  type BackupCheck,
+  type BackupFile,
+} from "../lib/backupFormat";
+import appletConfig from "../../firebase-applet-config.json";
 
 interface DatabaseBackupViewProps {
-  surveys: Survey[];
-  responses: SurveyResponse[];
-  users: UserProfile[];
-  logs: ActivityLog[];
-  newsList: NewsAnnouncement[];
-  currentUser: UserProfile | null;
-  onRestoreBackup: (backupData: SystemBackupData, mode: "overwrite" | "merge") => void;
   showToast: (text: string, type?: "success" | "info") => void;
 }
 
-export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({
-  surveys,
-  responses,
-  users,
-  logs,
-  newsList,
-  currentUser,
-  onRestoreBackup,
-  showToast,
-}) => {
-  const { confirm, confirmDialog } = useConfirm();
-  // Snapshots State
-  const [snapshots, setSnapshots] = useState<DatabaseSnapshot[]>([]);
-  const [isCreatingSnapshot, setIsCreatingSnapshot] = useState(false);
-  const [snapshotCustomName, setSnapshotCustomName] = useState("");
+const CONFIRM_WORD = "RESTORE";
 
-  // File Upload / Restore State
-  const [importedBackup, setImportedBackup] = useState<SystemBackupData | null>(null);
-  const [importFileName, setImportFileName] = useState<string>("");
-  const [restoreMode, setRestoreMode] = useState<"overwrite" | "merge">("overwrite");
-  const [isConfirmingRestore, setIsConfirmingRestore] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+function fileStamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 16);
+}
+
+function saveJson(data: unknown, fileName: string) {
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+async function errorText(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json();
+    return typeof body?.error === "string" ? body.error : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Downloads a full backup made by the server. Returns the backup's item count, or null. */
+async function downloadBackup(fileName: string): Promise<{ total: number } | { error: string }> {
+  try {
+    const res = await authFetch("/api/admin/backup", { method: "POST" });
+    if (!res.ok) return { error: await errorText(res, "Could not make the backup now.") };
+    const backup = await res.json();
+    const check = checkBackup(backup);
+    if (!check.ok) return { error: `The server's backup did not pass the check: ${check.error}` };
+    saveJson(backup, fileName);
+    return { total: check.total };
+  } catch {
+    return { error: "Could not reach the server. Please check your connection and try again." };
+  }
+}
+
+const CountsTable: React.FC<{ counts: Record<string, number> }> = ({ counts }) => (
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs">
+    {BACKUP_GROUPS.map((g) => (
+      <div key={g} className="flex justify-between border-b border-slate-100 py-1">
+        <span className="text-slate-600">{BACKUP_GROUP_LABELS[g]}</span>
+        <span className="font-bold text-slate-900">{(counts[g] ?? 0).toLocaleString()}</span>
+      </div>
+    ))}
+  </div>
+);
+
+export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({ showToast }) => {
+  // Download
+  const [downloading, setDownloading] = useState(false);
+  const [lastDownload, setLastDownload] = useState<string | null>(null);
+
+  // Restore
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState("");
+  const [fileCheck, setFileCheck] = useState<BackupCheck | null>(null);
+  const [reading, setReading] = useState(false);
+  const [safetyStatus, setSafetyStatus] = useState<"none" | "working" | "done">("none");
+  const [understood, setUnderstood] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreResult, setRestoreResult] = useState<{ written: number; deleted: number; failed: number } | null>(null);
 
-  // Storage footprint calculation
-  const storageMetrics = useMemo(() => {
-    const rawData = { surveys, responses, users, logs, newsList };
-    const rawJson = JSON.stringify(rawData);
-    const sizeBytes = new Blob([rawJson]).size;
-    const sizeKb = Number((sizeBytes / 1024).toFixed(2));
-    const sizeMb = Number((sizeBytes / (1024 * 1024)).toFixed(3));
-    return {
-      surveysCount: surveys.length,
-      responsesCount: responses.length,
-      usersCount: users.length,
-      logsCount: logs.length,
-      newsCount: newsList.length,
-      totalRecords: surveys.length + responses.length + users.length + logs.length + newsList.length,
-      sizeBytes,
-      sizeKb,
-      sizeMb,
-      formattedSize: sizeKb > 1024 ? `${sizeMb} MB` : `${sizeKb} KB`,
-    };
-  }, [surveys, responses, users, logs, newsList]);
-
-  // Handle Export Full Database
-  const handleExportDatabase = () => {
-    try {
-      const backup: SystemBackupData = {
-        app: "EduFeedback Institutional Evaluation Platform",
-        version: "2.5.0-production",
-        exportedAt: new Date().toLocaleString(),
-        exportTimestamp: Date.now(),
-        exportedBy: currentUser?.email || "admin@edufeedback.edu",
-        stats: {
-          surveysCount: surveys.length,
-          responsesCount: responses.length,
-          usersCount: users.length,
-          logsCount: logs.length,
-          newsCount: newsList.length,
-        },
-        data: {
-          surveys,
-          responses,
-          users,
-          logs,
-          news: newsList,
-        },
-      };
-      const jsonString = JSON.stringify(backup, null, 2);
-      const blob = new Blob([jsonString], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-
-      const timestampStr = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const fileName = `EduFeedback_DB_Backup_${timestampStr}.json`;
-
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      // Also create an in-memory snapshot record
-      const newSnap: DatabaseSnapshot = {
-        id: `snap_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        name: `Exported Archive (${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`,
-        createdAt: new Date().toLocaleString(),
-        timestamp: Date.now(),
-        createdBy: currentUser?.email || "admin@edufeedback.edu",
-        sizeBytes: storageMetrics.sizeBytes,
-        stats: {
-          surveysCount: surveys.length,
-          responsesCount: responses.length,
-          usersCount: users.length,
-          logsCount: logs.length,
-          newsCount: newsList.length,
-        },
-        data: {
-          surveys,
-          responses,
-          users,
-          logs,
-          news: newsList,
-        },
-      };
-      setSnapshots((prev) => [newSnap, ...prev]);
-
-      showToast("System database backup successfully downloaded as JSON!", "success");
-    } catch (err: any) {
-      showToast(`Backup failed: ${err.message}`, "info");
-    }
-  };
-
-  // Handle Create Instant Snapshot
-  const handleCreateSnapshotSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const name = snapshotCustomName.trim() || `Snapshot ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-      const newSnap: DatabaseSnapshot = {
-        id: `snap_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        name,
-        createdAt: new Date().toLocaleString(),
-        timestamp: Date.now(),
-        createdBy: currentUser?.email || "admin@edufeedback.edu",
-        sizeBytes: storageMetrics.sizeBytes,
-        stats: {
-          surveysCount: surveys.length,
-          responsesCount: responses.length,
-          usersCount: users.length,
-          logsCount: logs.length,
-          newsCount: newsList.length,
-        },
-        data: {
-          surveys,
-          responses,
-          users,
-          logs,
-          news: newsList,
-        },
-      };
-      setSnapshots((prev) => [newSnap, ...prev]);
-      setIsCreatingSnapshot(false);
-      setSnapshotCustomName("");
-      showToast(`Snapshot "${name}" saved to local recovery points.`, "success");
-    } catch (err: any) {
-      showToast(`Snapshot failed: ${err.message}`, "info");
-    }
-  };
-
-  // Handle File Selected for Restore
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setUploadError(null);
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.name.endsWith(".json")) {
-      setUploadError("Invalid file type. Please select a .json database backup file.");
+  const handleDownload = async () => {
+    setDownloading(true);
+    const result = await downloadBackup(`EduFeedback_Backup_${fileStamp()}.json`);
+    setDownloading(false);
+    if ("error" in result) {
+      showToast(result.error, "info");
       return;
     }
-
-    setImportFileName(file.name);
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string;
-        const parsed = JSON.parse(text);
-
-        // Validate basic schema
-        if (!parsed.data || typeof parsed.data !== "object") {
-          throw new Error("Missing required root 'data' object in backup.");
-        }
-        if (!Array.isArray(parsed.data.surveys) && !Array.isArray(parsed.data.responses)) {
-          throw new Error("File does not contain valid EduFeedback surveys or response collections.");
-        }
-
-        setImportedBackup(parsed);
-      } catch (err: any) {
-        setUploadError(`Failed to parse backup JSON: ${err.message}`);
-        setImportedBackup(null);
-      }
-    };
-    reader.onerror = () => {
-      setUploadError("Error reading the selected file.");
-    };
-    reader.readAsText(file);
+    setLastDownload(`${result.total.toLocaleString()} items, ${new Date().toLocaleString()}`);
+    showToast("Backup downloaded. Keep the file somewhere safe and private.", "success");
   };
 
-  // Execute Restore
-  const handleExecuteRestore = () => {
-    if (!importedBackup) return;
+  const resetRestore = () => {
+    setFileName("");
+    setFileCheck(null);
+    setSafetyStatus("none");
+    setUnderstood(false);
+    setTyped("");
+    setRestoreError(null);
+    setRestoreResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    resetRestore();
+    if (!file) return;
+    setFileName(file.name);
+    setReading(true);
     try {
-      onRestoreBackup(importedBackup, restoreMode);
-      setIsConfirmingRestore(false);
-      setImportedBackup(null);
-      setImportFileName("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      showToast(
-        `Database successfully restored in ${restoreMode === "overwrite" ? "Full Overwrite" : "Smart Merge"} mode!`,
-        "success"
+      const parsed = JSON.parse(await file.text());
+      setFileCheck(checkBackup(parsed));
+    } catch {
+      setFileCheck({ ok: false, error: "This file could not be read. It is not a valid backup file." });
+    } finally {
+      setReading(false);
+    }
+  };
+
+  const handleSafetyBackup = async () => {
+    setSafetyStatus("working");
+    const result = await downloadBackup(`EduFeedback_SafetyBackup_before_restore_${fileStamp()}.json`);
+    if ("error" in result) {
+      setSafetyStatus("none");
+      showToast(result.error, "info");
+      return;
+    }
+    setSafetyStatus("done");
+    showToast("Safety backup of the current data downloaded.", "success");
+  };
+
+  const backup: BackupFile | null = fileCheck?.ok ? fileCheck.backup : null;
+  const otherProject = backup !== null && backup.projectId !== appletConfig.projectId;
+  const canRestore =
+    backup !== null && safetyStatus === "done" && understood && typed.trim() === CONFIRM_WORD && !restoring && !restoreResult;
+
+  const handleRestore = async () => {
+    if (!backup || !canRestore) return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      const res = await authFetch("/api/admin/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backup }),
+      });
+      if (!res.ok) {
+        setRestoreError(await errorText(res, "The restore failed. Nothing may have changed, or some data may be mixed."));
+        return;
+      }
+      const body = await res.json();
+      setRestoreResult({ written: body.written ?? 0, deleted: body.deleted ?? 0, failed: body.failed ?? 0 });
+    } catch {
+      setRestoreError(
+        "Lost contact with the server during the restore. Wait a minute, reload the app and check the data; if it looks wrong, restore your safety backup."
       );
-    } catch (err: any) {
-      showToast(`Restore failed: ${err.message}`, "info");
+    } finally {
+      setRestoring(false);
     }
   };
-
-  // Quick Restore to Snapshot
-  const handleRestoreSnapshot = async (snapshot: DatabaseSnapshot) => {
-    const ok = await confirm({
-      title: "Restore this snapshot?",
-      message: `The system will be restored to "${snapshot.name}" (${snapshot.createdAt}). Current data will be overwritten.`,
-      confirmLabel: "Restore",
-      danger: true,
-    });
-    if (ok) {
-      const backupData: SystemBackupData = {
-        app: "EduFeedback Institutional Evaluation Platform",
-        version: "2.5.0-production",
-        exportedAt: snapshot.createdAt,
-        exportTimestamp: snapshot.timestamp,
-        exportedBy: snapshot.createdBy,
-        stats: snapshot.stats,
-        data: snapshot.data,
-      };
-      onRestoreBackup(backupData, "overwrite");
-      showToast(`Restored system state from snapshot "${snapshot.name}"`, "success");
-    }
-  };
-
-  // Delete Snapshot
-  const handleDeleteSnapshot = async (id: string, name: string) => {
-    const ok = await confirm({
-      title: "Delete this snapshot?",
-      message: `The snapshot "${name}" will be deleted.`,
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (ok) {
-      setSnapshots((prev) => prev.filter((s) => s.id !== id));
-      showToast("Snapshot deleted.", "info");
-    }
-  };
-
-  // Firebase Readiness Guide Toggle
-  const [showFirebaseGuide, setShowFirebaseGuide] = useState(true);
 
   return (
-    <div className="space-y-8 pb-12">
-      {confirmDialog}
-      {/* Header & Quick Action Bar */}
+    <div className="space-y-6 pb-12">
+      {/* Header */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold uppercase tracking-wider mb-2 border border-indigo-200">
-              <Database className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Disaster Recovery & Institutional Data Persistence</span>
-            </div>
-            <h1 className="font-serif text-2xl sm:text-3xl font-extrabold text-slate-900">
-              System Database Backup & Snapshots
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Create full archival snapshots of campus surveys, sentiment classification models, user accounts, and activity audit trails.
-            </p>
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold uppercase tracking-wider mb-2 border border-indigo-200">
+          <Database className="w-3.5 h-3.5 text-indigo-600" />
+          <span>Backup &amp; Restore</span>
+        </div>
+        <h1 className="font-serif text-2xl sm:text-3xl font-extrabold text-slate-900">Database Backup &amp; Restore</h1>
+        <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-3xl">
+          Download a complete copy of the database, or replace the database with a backup you downloaded earlier.
+          Both are done by the server, so nothing is left out.
+        </p>
+      </div>
+
+      {/* Download */}
+      <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 shrink-0 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+            <Download className="w-6 h-6" />
           </div>
-
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <button
-              onClick={() => setIsCreatingSnapshot(true)}
-              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer border border-slate-200"
-            >
-              <Clock className="w-4 h-4 text-slate-500" />
-              <span>Create Local Snapshot</span>
-            </button>
-
-            <button
-              onClick={handleExportDatabase}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download Full Backup (JSON)</span>
-            </button>
+          <div className="space-y-1">
+            <h2 className="font-serif text-xl font-bold text-slate-900">Download a full backup</h2>
+            <p className="text-xs text-slate-600">
+              Includes user profiles, surveys, responses with their sentiment results, "already answered" records, news and
+              likes, topics, notifications, the activity log, the academic calendar, app settings and saved evaluation results.
+              Login passwords are not included (they stay in Firebase Authentication).
+            </p>
           </div>
         </div>
 
-        {/* Database Health & Statistics Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-100">
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-1.5 text-slate-500 mb-1">
-              <ClipboardList className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Surveys</span>
-            </div>
-            <div className="font-serif text-2xl font-black text-slate-900">{surveys.length}</div>
-            <span className="text-[11px] text-slate-500">authored forms</span>
-          </div>
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-700">
+          <Lock className="w-4 h-4 shrink-0 text-slate-500 mt-0.5" />
+          <span>
+            The file holds names, emails, every answer and which surveys each person answered. Keep it private (for example
+            in a folder only the researchers can open). Never post or share it.
+          </span>
+        </div>
 
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-1.5 text-emerald-600 mb-1">
-              <MessageSquareText className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Responses</span>
-            </div>
-            <div className="font-serif text-2xl font-black text-emerald-700">{responses.length}</div>
-            <span className="text-[11px] text-emerald-600">student entries</span>
-          </div>
-
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-1.5 text-blue-600 mb-1">
-              <Users className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Users</span>
-            </div>
-            <div className="font-serif text-2xl font-black text-blue-700">{users.length}</div>
-            <span className="text-[11px] text-blue-600">registered accounts</span>
-          </div>
-
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-1.5 text-amber-600 mb-1">
-              <Activity className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Audit Logs</span>
-            </div>
-            <div className="font-serif text-2xl font-black text-amber-700">{logs.length}</div>
-            <span className="text-[11px] text-amber-600">recorded events</span>
-          </div>
-
-          <div className="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-200">
-            <div className="flex items-center gap-1.5 text-indigo-700 mb-1">
-              <HardDrive className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Storage Footprint</span>
-            </div>
-            <div className="font-serif text-2xl font-black text-indigo-700">
-              {storageMetrics.formattedSize}
-            </div>
-            <span className="text-[11px] text-indigo-600">active storage</span>
-          </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50"
+          >
+            {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            <span>{downloading ? "Making the backup..." : "Download full backup"}</span>
+          </button>
+          {lastDownload && (
+            <span className="text-xs text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-4 h-4" /> Downloaded: {lastDownload}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Main Grid: Backup Export & Restore Modules */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Module 1: Export Database Archive */}
-        <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6 flex flex-col justify-between">
-          <div className="space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
-              <Download className="w-6 h-6" />
-            </div>
-
-            <div>
-              <h2 className="font-serif text-xl font-bold text-slate-900">
-                Institutional Database Export
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Generates a complete, structured JSON archive containing every database table and relation in the platform.
-              </p>
-            </div>
-
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-2.5 text-xs text-slate-700">
-              <div className="font-bold text-slate-900 flex items-center gap-2">
-                <FileCheck className="w-4 h-4 text-emerald-600" />
-                <span>Archive Includes:</span>
-              </div>
-              <ul className="space-y-1.5 text-slate-600 pl-6 list-disc text-[11px]">
-                <li>All Survey Questionnaires, Options, and Form Settings ({surveys.length})</li>
-                <li>All Student Feedback Entries & Sentiment Ratings ({responses.length})</li>
-                <li>All User Profiles, Roles, and Departmental Assignments ({users.length})</li>
-                <li>Institutional Activity & Audit Security Logs ({logs.length})</li>
-                <li>Campus News & Survey Result Announcements ({newsList.length})</li>
-              </ul>
-            </div>
+      {/* Restore */}
+      <div className="bg-white p-6 sm:p-8 rounded-3xl border border-rose-200 shadow-xs space-y-5">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 shrink-0 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
+            <Upload className="w-6 h-6" />
           </div>
-
-          <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-            <div className="text-xs text-slate-400">
-              Format: Standard <code className="font-mono text-indigo-600 font-bold">.json</code> (v2.5.0)
-            </div>
-            <button
-              onClick={handleExportDatabase}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-xs cursor-pointer transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              <span>Generate Backup File</span>
-            </button>
+          <div className="space-y-1">
+            <h2 className="font-serif text-xl font-bold text-slate-900">Restore from a backup (wipe and restore)</h2>
+            <p className="text-xs text-slate-600">Use this only if the data was lost or damaged.</p>
           </div>
         </div>
 
-        {/* Module 2: Restore Database from File */}
-        <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6 flex flex-col justify-between">
-          <div className="space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
-              <UploadCloud className="w-6 h-6" />
-            </div>
+        {/* How restore works */}
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-950 space-y-2">
+          <div className="font-bold flex items-center gap-2 text-rose-800">
+            <ShieldAlert className="w-4 h-4" /> How restore works. Please read before you continue.
+          </div>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>
+              Restore <strong>replaces everything</strong> in the database with the contents of the backup file. It does not
+              mix old and new data.
+            </li>
+            <li>
+              Anything created or changed <strong>after the backup was made is permanently removed</strong>: new surveys,
+              responses, accounts, news, flags, decisions and settings.
+            </li>
+            <li>Your own admin account is kept as it is now, so you cannot be locked out.</li>
+            <li>
+              Login passwords are not in the backup and are not changed. People who signed up after the backup was made can
+              still sign in, but their profile is gone: they must register again with the same email and password.
+            </li>
+            <li>
+              Do it when <strong>nobody else is using the system</strong>. Anything people do during the restore may be lost.
+            </li>
+            <li>
+              Sentiment results stay valid only if the server's signing secret (<code>RESULT_SIGNING_SECRET</code>) is the
+              same as when the backup was made. Otherwise they show as "needs a re-run".
+            </li>
+            <li>
+              It <strong>cannot be undone</strong>, except by restoring the safety backup you download in step 2.
+            </li>
+          </ul>
+        </div>
 
-            <div>
-              <h2 className="font-serif text-xl font-bold text-slate-900">
-                Restore Database from Archive
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Upload a verified <code className="font-mono text-indigo-600">.json</code> snapshot to restore institutional surveys and responses.
-              </p>
-            </div>
-
-            {/* File Dropzone */}
+        {restoreResult ? (
+          <div className="space-y-3">
             <div
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/20 rounded-2xl p-6 text-center cursor-pointer transition-all"
+              className={`p-4 rounded-2xl border text-xs space-y-1 ${
+                restoreResult.failed > 0 ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-emerald-50 border-emerald-200 text-emerald-900"
+              }`}
             >
+              <div className="font-bold flex items-center gap-2">
+                {restoreResult.failed > 0 ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                {restoreResult.failed > 0 ? "Restore finished with problems" : "Restore finished"}
+              </div>
+              <div>
+                {restoreResult.written.toLocaleString()} items written from the backup,{" "}
+                {restoreResult.deleted.toLocaleString()} items that were not in the backup removed.
+              </div>
+              {restoreResult.failed > 0 && (
+                <div>
+                  {restoreResult.failed.toLocaleString()} items could not be saved. Try the restore again with the same file;
+                  if it keeps failing, restore your safety backup.
+                </div>
+              )}
+              <div>Reload the app now so every screen shows the restored data.</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" /> Reload the app
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {/* Step 1: choose file */}
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-slate-900">Step 1. Choose the backup file to restore</div>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept=".json,application/json"
-                onChange={handleFileSelect}
-                className="hidden"
+                onChange={handleFile}
+                disabled={restoring}
+                className="block w-full text-xs text-slate-600 file:mr-3 file:px-4 file:py-2 file:rounded-xl file:border-0 file:bg-slate-100 file:font-bold file:text-slate-700 hover:file:bg-slate-200 file:cursor-pointer"
               />
-              <FileJson className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-              <div className="text-xs font-bold text-slate-700">
-                {importFileName ? (
-                  <span className="text-indigo-600">{importFileName}</span>
-                ) : (
-                  <span>Click to browse or drop backup .json file</span>
+              {reading && (
+                <div className="text-xs text-slate-500 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Checking the file...
+                </div>
+              )}
+              {fileCheck && !fileCheck.ok && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>{fileName}</strong> cannot be restored. {fileCheck.error}
+                  </span>
+                </div>
+              )}
+              {backup && fileCheck?.ok && (
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
+                    <FileJson className="w-4 h-4 text-indigo-600" /> {fileName}
+                  </div>
+                  <div className="text-xs text-slate-600">
+                    Made on <strong>{new Date(backup.createdAt).toLocaleString()}</strong> by {backup.createdBy}.{" "}
+                    {fileCheck.total.toLocaleString()} items. After the restore, the database will contain exactly this:
+                  </div>
+                  <CountsTable counts={fileCheck.counts} />
+                  {otherProject && (
+                    <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+                      This backup was made from a different Firebase project ("{backup.projectId}"). That is fine when moving
+                      to a new project, but check that this is the file you mean.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Step 2: safety backup */}
+            <div className={`space-y-2 ${backup ? "" : "opacity-50 pointer-events-none"}`}>
+              <div className="text-xs font-bold text-slate-900">Step 2. Download a safety backup of the current data</div>
+              <p className="text-xs text-slate-600">
+                This is your only way back if the restore was a mistake. Keep this file until you have checked the restored
+                data.
+              </p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSafetyBackup}
+                  disabled={!backup || safetyStatus === "working" || restoring}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {safetyStatus === "working" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  <span>Download safety backup</span>
+                </button>
+                {safetyStatus === "done" && (
+                  <span className="text-xs text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4" /> Downloaded
+                  </span>
                 )}
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Accepts official EduFeedback exported JSON files
-              </p>
             </div>
 
-            {uploadError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{uploadError}</span>
+            {/* Step 3: confirm */}
+            <div className={`space-y-3 ${backup && safetyStatus === "done" ? "" : "opacity-50 pointer-events-none"}`}>
+              <div className="text-xs font-bold text-slate-900">Step 3. Confirm and restore</div>
+              <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={understood}
+                  onChange={(e) => setUnderstood(e.target.checked)}
+                  disabled={restoring}
+                  className="mt-0.5"
+                />
+                <span>
+                  I understand that everything in the database will be replaced with this backup, and that anything added after{" "}
+                  {backup ? new Date(backup.createdAt).toLocaleString() : "the backup date"} will be permanently removed.
+                </span>
+              </label>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-700" htmlFor="restore-confirm">
+                  Type <strong>{CONFIRM_WORD}</strong> to confirm:
+                </label>
+                <input
+                  id="restore-confirm"
+                  type="text"
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  disabled={restoring}
+                  autoComplete="off"
+                  className="w-full max-w-xs px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-mono focus:outline-hidden focus:border-rose-400"
+                />
               </div>
-            )}
-
-            {/* Preview of Selected Backup */}
-            {importedBackup && (
-              <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-3 text-xs">
-                <div className="flex items-center justify-between text-emerald-900 font-bold">
-                  <span className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Valid Archive Verified</span>
-                  </span>
-                  <span className="text-[10px] bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-full font-mono">
-                    {importedBackup.version || "v2.5"}
-                  </span>
+              {restoreError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{restoreError}</span>
                 </div>
-
-                <div className="grid grid-cols-3 gap-2 text-center text-slate-700 text-[11px]">
-                  <div className="bg-white p-2 rounded-xl border border-emerald-100">
-                    <div className="font-bold text-slate-900">{importedBackup.data?.surveys?.length || 0}</div>
-                    <div className="text-slate-500 text-[10px]">Surveys</div>
-                  </div>
-                  <div className="bg-white p-2 rounded-xl border border-emerald-100">
-                    <div className="font-bold text-slate-900">{importedBackup.data?.responses?.length || 0}</div>
-                    <div className="text-slate-500 text-[10px]">Responses</div>
-                  </div>
-                  <div className="bg-white p-2 rounded-xl border border-emerald-100">
-                    <div className="font-bold text-slate-900">{importedBackup.data?.users?.length || 0}</div>
-                    <div className="text-slate-500 text-[10px]">Users</div>
-                  </div>
-                </div>
-
-                {/* Mode Selector */}
-                <div className="space-y-1.5 pt-1">
-                  <span className="text-[11px] font-bold text-slate-700 block">Restore Strategy:</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label
-                      className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center gap-2 transition-all ${
-                        restoreMode === "overwrite"
-                          ? "bg-indigo-50 border-indigo-300 text-indigo-900 font-bold"
-                          : "bg-white border-slate-200 text-slate-600"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="restoreMode"
-                        checked={restoreMode === "overwrite"}
-                        onChange={() => setRestoreMode("overwrite")}
-                        className="text-indigo-600"
-                      />
-                      <span>Full Overwrite</span>
-                    </label>
-
-                    <label
-                      className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center gap-2 transition-all ${
-                        restoreMode === "merge"
-                          ? "bg-indigo-50 border-indigo-300 text-indigo-900 font-bold"
-                          : "bg-white border-slate-200 text-slate-600"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="restoreMode"
-                        checked={restoreMode === "merge"}
-                        onChange={() => setRestoreMode("merge")}
-                        className="text-indigo-600"
-                      />
-                      <span>Smart Merge</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
-            <button
-              disabled={!importedBackup}
-              onClick={() => setIsConfirmingRestore(true)}
-              className={`px-5 py-2.5 font-bold text-xs rounded-xl flex items-center gap-2 transition-colors ${
-                importedBackup
-                  ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
-                  : "bg-slate-100 text-slate-400 cursor-not-allowed"
-              }`}
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span>Apply Restore</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Snapshots History Table */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="font-serif text-lg font-bold text-slate-900">
-              System Recovery Points & Saved Snapshots
-            </h3>
-            <p className="text-xs text-slate-500">
-              Fast rollbacks stored locally in platform cache. Allows instant rollback without file uploads.
-            </p>
-          </div>
-          <button
-            onClick={() => setIsCreatingSnapshot(true)}
-            className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto border border-indigo-200"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Create Recovery Point</span>
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] tracking-wider">
-              <tr>
-                <th className="p-4">Snapshot Label</th>
-                <th className="p-4">Timestamp</th>
-                <th className="p-4">Created By</th>
-                <th className="p-4">Records Contained</th>
-                <th className="p-4">Size</th>
-                <th className="p-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {snapshots.length > 0 ? (
-                snapshots.map((snap) => (
-                  <tr key={snap.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-4 font-bold text-slate-900">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
-                        <span>{snap.name}</span>
-                      </div>
-                    </td>
-                    <td className="p-4 text-slate-500">{snap.createdAt}</td>
-                    <td className="p-4 font-mono text-[11px] text-slate-600">{snap.createdBy}</td>
-                    <td className="p-4 text-slate-700">
-                      <span className="font-bold text-slate-900">{snap.stats.surveysCount}</span> surveys,{" "}
-                      <span className="font-bold text-slate-900">{snap.stats.responsesCount}</span> responses
-                    </td>
-                    <td className="p-4 font-mono text-[11px] text-slate-500">
-                      {(snap.sizeBytes / 1024).toFixed(1)} KB
-                    </td>
-                    <td className="p-4 text-right space-x-1 whitespace-nowrap">
-                      <button
-                        onClick={() => handleRestoreSnapshot(snap)}
-                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold transition-colors cursor-pointer border border-emerald-200"
-                        title="Restore system to this snapshot point"
-                      >
-                        Restore
-                      </button>
-                      <button
-                        onClick={() => handleDeleteSnapshot(snap.id, snap.name)}
-                        className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                        title="Delete Snapshot"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400">
-                    <Clock className="w-6 h-6 text-slate-300 mx-auto mb-1.5" />
-                    <div className="font-semibold text-slate-600 text-xs">No local snapshots saved yet</div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Click "Create Recovery Point" or download a backup to automatically save a snapshot.
-                    </p>
-                  </td>
-                </tr>
               )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Firebase Cloud Database Readiness & Activation Section */}
-      <div className="bg-gradient-to-br from-amber-500/5 via-orange-500/5 to-amber-500/10 rounded-3xl border border-amber-200 p-6 sm:p-8 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-bold uppercase tracking-wider border border-amber-200">
-              <Flame className="w-3.5 h-3.5 text-amber-600 fill-amber-600" />
-              <span>Firebase Cloud Architecture Ready</span>
-            </div>
-            <h3 className="font-serif text-xl font-bold text-slate-900">
-              Database Persistence Mode & Cloud Sync
-            </h3>
-            <p className="text-xs text-slate-600 max-w-2xl">
-              Equipped with real-time Google Firebase Firestore and Auth integration. Automatically activates when environment variables are detected.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-amber-200 text-xs shadow-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-slate-500 font-medium">Active Database:</span>
-              <span className="font-bold text-slate-900">
-                {USE_FIREBASE && isFirebaseConfigured() ? "Firebase Firestore (Cloud)" : "Persistent Local Engine"}
-              </span>
-            </div>
-
-            <button
-              onClick={() => setShowFirebaseGuide(!showFirebaseGuide)}
-              className="px-3.5 py-2 rounded-xl bg-white hover:bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-            >
-              <Code className="w-3.5 h-3.5 text-amber-600" />
-              <span>{showFirebaseGuide ? "Hide Setup Steps" : "Show Setup Steps"}</span>
-              {showFirebaseGuide ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-        </div>
-
-        {showFirebaseGuide && (
-          <div className="space-y-4 pt-2 border-t border-amber-200/60 text-xs">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Step 1 */}
-              <div className="bg-white p-4 rounded-2xl border border-amber-100 shadow-xs space-y-2">
-                <div className="flex items-center gap-2 font-bold text-slate-900">
-                  <span className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[11px] font-bold">1</span>
-                  <span>Set Environment Variables</span>
-                </div>
-                <p className="text-slate-500 text-[11px]">
-                  Configure <code className="font-mono text-amber-700 bg-amber-50 px-1 py-0.5 rounded">VITE_FIREBASE_*</code> keys in your deployment environment or <code className="font-mono text-slate-700">.env</code>.
-                </p>
-                <div className="text-[10px] text-slate-400">
-                  Status: {isFirebaseConfigured() ? "✅ Credentials Detected" : "⏳ Standby (Local Mode Active)"}
-                </div>
-              </div>
-
-              {/* Step 2 */}
-              <div className="bg-white p-4 rounded-2xl border border-amber-100 shadow-xs space-y-2">
-                <div className="flex items-center gap-2 font-bold text-slate-900">
-                  <span className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[11px] font-bold">2</span>
-                  <span>Deploy Security Rules</span>
-                </div>
-                <p className="text-slate-500 text-[11px]">
-                  Apply the production security rules in <code className="font-mono text-amber-700 bg-amber-50 px-1 py-0.5 rounded">firestore.rules</code> to protect student records.
-                </p>
-                <div className="text-[10px] text-slate-400">
-                  Rules: <span className="font-mono font-bold text-amber-600">firestore.rules ready</span>
-                </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleRestore}
+                  disabled={!canRestore}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {restoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  <span>{restoring ? "Restoring... do not close this page" : "Wipe and restore"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={resetRestore}
+                  disabled={restoring}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           </div>
         )}
       </div>
-
-      {/* ============================================================ */}
-      {/* MODAL: CREATE INSTANT SNAPSHOT */}
-      {/* ============================================================ */}
-      {isCreatingSnapshot && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setIsCreatingSnapshot(false)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="font-serif text-lg font-bold text-slate-900">
-                  Create Recovery Point Snapshot
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Save a point-in-time state of surveys, responses, and users.
-                </p>
-              </div>
-              <button
-                onClick={() => setIsCreatingSnapshot(false)}
-                className="p-1 text-slate-400 hover:bg-slate-100 rounded-full cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateSnapshotSubmit} className="space-y-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Snapshot Label / Description</label>
-                <input
-                  type="text"
-                  value={snapshotCustomName}
-                  onChange={(e) => setSnapshotCustomName(e.target.value)}
-                  placeholder="e.g. Pre-Midterm Backup, Q1 Evaluation Archive"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:bg-white focus:outline-hidden focus:border-indigo-400"
-                />
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-[11px] space-y-1">
-                <div className="font-bold text-slate-800">Snapshot Contents:</div>
-                <div>{surveys.length} Surveys · {responses.length} Responses · {users.length} Users</div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreatingSnapshot(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs cursor-pointer"
-                >
-                  Save Snapshot
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/* MODAL: CONFIRM RESTORE */}
-      {/* ============================================================ */}
-      {isConfirmingRestore && importedBackup && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setIsConfirmingRestore(false)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="font-serif text-lg font-bold text-slate-900">
-                Confirm Database Restore
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                You are about to restore the system from{" "}
-                <strong className="text-slate-900">{importFileName}</strong> using{" "}
-                <strong className="text-indigo-600 uppercase font-mono">{restoreMode}</strong> mode.
-              </p>
-            </div>
-
-            <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 text-xs text-amber-900 space-y-1">
-              <div className="font-bold">Important Notice:</div>
-              <p className="text-[11px] leading-relaxed">
-                {restoreMode === "overwrite"
-                  ? "This will replace all current surveys, responses, users, and ML datasets with the records from the backup archive."
-                  : "New records from the archive will be merged into your current database. Existing IDs will not be duplicated."}
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setIsConfirmingRestore(false)}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleExecuteRestore}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer"
-              >
-                Confirm & Apply Restore
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 };

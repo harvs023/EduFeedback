@@ -1,19 +1,14 @@
 import React, { useState } from "react";
-import { Survey, Question, UserProfile, Answer } from "../types";
+import { Survey, UserProfile, Answer } from "../types";
 import confetti from "canvas-confetti";
 import {
   X,
   CheckCircle2,
   Lock,
-  Calendar,
-  Sparkles,
   HelpCircle,
-  MessageSquare,
-  Star,
   Send,
   ShieldCheck,
   UserCheck,
-  FileCheck,
   ArrowRight,
   AlertTriangle,
 } from "lucide-react";
@@ -593,10 +588,12 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                   <span className="text-slate-500">Total Questions:</span>
                   <span className="font-bold text-slate-900">{survey.questions.length} Questions</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Comment analysis:</span>
-                  <span className="font-bold text-blue-700">Sentiment (Google Gemini)</span>
-                </div>
+                {survey.questions.some((q) => q.type === "paragraph") && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">Comment analysis:</span>
+                    <span className="font-bold text-blue-700">Sentiment (Google Gemini)</span>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 flex items-center gap-3">

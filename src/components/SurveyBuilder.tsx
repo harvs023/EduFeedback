@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { Survey, Question, UserProfile, TargetAudience, Topic, AcademicYearTerms } from "../types";
-import { DEPARTMENTS_DATA } from "../data/initialData";
 import { SurveyCriteriaModal } from "./SurveyCriteriaModal";
 import { schoolYearFor } from "../lib/schoolYear";
 import { TopicBlocksEditor } from "./TopicBlocksEditor";
@@ -9,14 +8,7 @@ import {
   PlusCircle,
   Pencil,
   ArrowLeft,
-  Calendar,
-  Layers,
-  Sparkles,
-  Users,
-  Flame,
   ArrowRight,
-  Clock,
-  Tag,
 } from "lucide-react";
 
 /** Most surveys one person may have waiting for review at the same time (admin has no limit). */

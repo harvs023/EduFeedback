@@ -10,6 +10,7 @@ import { adminError, adminReady } from "./server/firestoreAdmin";
 import { eligibleCountFor } from "./server/eligible";
 import { cleanFindings, suggestWording, MAX_FINDINGS } from "./server/recommendationWording";
 import { analyzeAll, processPendingResponse, resumePendingResponses } from "./server/processResponse";
+import { logBackup, makeBackup, requireAdmin, restoreBackup } from "./server/backup";
 
 dotenv.config();
 
@@ -17,7 +18,11 @@ const app = express();
 // Hosting services (e.g. Render) choose the port; on your computer it is 3000.
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: "10mb" }));
+// A restore uploads a whole backup file, so that one route accepts a larger body.
+const RESTORE_ROUTE = "/api/admin/restore";
+const normalJson = express.json({ limit: "10mb" });
+const restoreJson = express.json({ limit: "100mb" });
+app.use((req, res, next) => (req.path === RESTORE_ROUTE ? restoreJson : normalJson)(req, res, next));
 
 // In-memory rate limiting map: userId -> { count: number, resetTime: number }
 const userRateLimits = new Map<string, { count: number; resetTime: number }>();
@@ -114,7 +119,7 @@ function getGeminiAI(): GoogleGenAI | null {
 }
 
 // Health check: shows whether Gemini is set up, never any part of the key.
-app.get("/api/health", (req, res) => {
+app.get("/api/health", (_req, res) => {
   let promptReady = true;
   try {
     loadPromptTemplate();
@@ -236,6 +241,38 @@ app.post("/api/recommendations/wording", async (req, res) => {
   }
 });
 
+// Full backup (admin only): every collection, including each person's private
+// "already answered" records and likes, which the browser cannot read.
+app.post("/api/admin/backup", async (req, res) => {
+  try {
+    const admin = await requireAdmin(String((req as any).user?.email || ""));
+    if (!admin.ok) return res.status(admin.status).json({ error: admin.error });
+    const backup = await makeBackup(admin.db, admin.email);
+    await logBackup(admin.db, admin.email, Object.keys(backup.documents).length);
+    res.json(backup);
+  } catch (err) {
+    console.error("[Backup] Failed:", (err as Error)?.message || err);
+    res.status(500).json({ error: "Could not make the backup now. Please try again." });
+  }
+});
+
+// Wipe and restore (admin only). Body: { backup }. Replaces the database with the file's contents;
+// the admin's own profile is kept. The file is checked completely before anything changes.
+app.post(RESTORE_ROUTE, async (req, res) => {
+  try {
+    const admin = await requireAdmin(String((req as any).user?.email || ""));
+    if (!admin.ok) return res.status(admin.status).json({ error: admin.error });
+    const result = await restoreBackup(admin.db, admin.email, req.body?.backup);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.json({ success: true, written: result.written, deleted: result.deleted, failed: result.failed });
+  } catch (err) {
+    console.error("[Restore] Failed:", (err as Error)?.message || err);
+    res.status(500).json({
+      error: "The restore stopped because of an error. Some data may be mixed; restore your safety backup.",
+    });
+  }
+});
+
 const PENDING_SWEEP_MS = 10 * 60 * 1000;
 
 async function startServer() {
@@ -248,7 +285,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

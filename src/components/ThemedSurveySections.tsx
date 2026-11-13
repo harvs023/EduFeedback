@@ -9,8 +9,6 @@ import {
   Search,
   CheckCircle2,
   Clock,
-  Users,
-  Calendar,
   ArrowRight,
   BarChart3,
   ClipboardList,

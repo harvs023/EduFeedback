@@ -15,7 +15,6 @@ import {
   doc,
   getDoc,
   setDoc,
-  addDoc,
   updateDoc,
   deleteDoc,
   deleteField,
@@ -645,18 +644,38 @@ export const FirestoreNewsService = {
     }
   },
 
-  async incrementLike(id: string): Promise<void> {
+  /**
+   * Like or un-like a post. The person's own like record and the post's count change
+   * together (all or nothing), so each person can like a post only once.
+   */
+  async setLiked(id: string, email: string, liked: boolean): Promise<void> {
     const firestore = getFirebaseDb();
-    if (!firestore) return;
-    const newsRef = doc(firestore, COLLECTIONS.NEWS, id);
+    if (!firestore) throw new Error("The database is not available. Please try again.");
+    const userKey = email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    const likeRef = doc(firestore, COLLECTIONS.USERS, userKey, "newsLikes", id);
+    const batch = writeBatch(firestore);
+    if (liked) batch.set(likeRef, { newsId: id });
+    else batch.delete(likeRef);
+    batch.update(doc(firestore, COLLECTIONS.NEWS, id), { likesCount: increment(liked ? 1 : -1) });
     try {
-      const snap = await getDoc(newsRef);
-      if (snap.exists()) {
-        const curLikes = snap.data().likesCount || 0;
-        await updateDoc(newsRef, { likesCount: curLikes + 1 });
-      }
+      await batch.commit();
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.NEWS}/${id}`);
+      console.warn("Could not save the like:", err);
+      throw new Error("Could not save your like. Please refresh the page and try again.");
+    }
+  },
+
+  /** The news posts this person has liked (read from their own private list). */
+  async getLikedNewsIds(email: string): Promise<string[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    const userKey = email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    try {
+      const snap = await getDocs(collection(firestore, COLLECTIONS.USERS, userKey, "newsLikes"));
+      return snap.docs.map((docSnap) => docSnap.id);
+    } catch (err) {
+      console.warn("Could not load liked posts:", err);
+      return [];
     }
   },
 };

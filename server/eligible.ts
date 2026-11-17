@@ -38,8 +38,13 @@ export async function eligibleCountFor(surveyId: string, callerEmail: string): P
     return { ok: true, eligible: cached.eligible, cutoff };
   }
   // Only the fields the count needs; names and other profile details are not even loaded.
-  const usersSnap = await db.collection("users").select("email", "status", "pos", "joined").get();
-  const users = usersSnap.docs.map((d) => d.data() as Pick<UserProfile, "email" | "status" | "pos" | "joined">);
+  const usersSnap = await db
+    .collection("users")
+    .select("email", "status", "pos", "joined", "department", "program", "year", "section")
+    .get();
+  const users = usersSnap.docs.map(
+    (d) => d.data() as Pick<UserProfile, "email" | "status" | "pos" | "joined" | "department" | "program" | "year" | "section">
+  );
   const eligible = countEligibleUsers(survey, users, cutoff);
   cache.set(surveyId, { at: Date.now(), eligible, cutoff });
   return { ok: true, eligible, cutoff };

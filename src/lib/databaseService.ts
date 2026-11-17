@@ -20,6 +20,7 @@ import {
   FirestoreSettingsService,
   FirestoreSchoolService,
   FirestoreReportService,
+  FirestoreProfileRequestService,
   FirebaseAuthService,
   isFirebaseConfigured,
   seedFirestoreWithData,
@@ -42,6 +43,7 @@ import {
   SurveyReport,
   SurveyTopicBlock,
   TopicMoveRecord,
+  ProfileChangeRequest,
 } from "../types";
 import {
   MASTER_ADMIN_EMAIL,
@@ -328,6 +330,49 @@ export class DatabaseService {
     decision: Pick<SurveyReport, "status" | "decidedBy" | "decidedAt" | "decisionNote">
   ): Promise<void> {
     await FirestoreReportService.decide(ids, decision);
+  }
+
+  static async getMyProfileRequest(email: string): Promise<ProfileChangeRequest | null> {
+    return await FirestoreProfileRequestService.getMine(email);
+  }
+
+  static async getProfileRequests(): Promise<ProfileChangeRequest[]> {
+    return await FirestoreProfileRequestService.getAll();
+  }
+
+  static async sendProfileRequest(request: Omit<ProfileChangeRequest, "id" | "status">): Promise<ProfileChangeRequest> {
+    return await FirestoreProfileRequestService.send(request);
+  }
+
+  static async cancelProfileRequest(email: string): Promise<void> {
+    await FirestoreProfileRequestService.cancel(email);
+  }
+
+  static async decideProfileRequest(
+    id: string,
+    decision: Pick<ProfileChangeRequest, "status" | "decidedBy" | "decidedAt" | "decisionNote">
+  ): Promise<void> {
+    await FirestoreProfileRequestService.decide(id, decision);
+  }
+
+  /** The person's own name only (the school fields are locked; see firestore.rules). */
+  static async updateOwnName(email: string, name: string): Promise<void> {
+    await FirestoreUserService.updateOwnFields(email, { name });
+  }
+
+  /** Remembers that the person has seen the decision on their last change request. */
+  static async markProfileRequestSeen(email: string, decidedAt: number): Promise<void> {
+    await FirestoreUserService.updateOwnFields(email, { profileRequestSeenAt: decidedAt });
+  }
+
+  /** The one-time section pick after the admin moved this student up a year. */
+  static async pickNewSection(email: string, section: string): Promise<void> {
+    await FirestoreUserService.updateOwnFields(email, { section, sectionPickNeeded: false });
+  }
+
+  /** Admin: update only some fields of many profiles (New school year move). */
+  static async updateUsersFields(updates: { email: string; fields: Partial<UserProfile> }[]): Promise<void> {
+    await FirestoreUserService.updateMany(updates);
   }
 
   static async getSchoolLists(): Promise<SchoolLists> {

@@ -6,9 +6,9 @@ import { askGemini, modelVersionFor, sentimentModel } from "./sentiment";
 /**
  * Optional "AI-suggested wording" for the rule-based recommendations (plan step 7d). Gemini only
  * rewords findings the rules already computed; any suggestion containing a number that is not in
- * its finding is hidden. Nothing is saved.
+ * its finding, or a word that suggests a statistical test, is hidden. Nothing is saved.
  */
-export const RECOMMENDATION_PROMPT_VERSION = "v1";
+export const RECOMMENDATION_PROMPT_VERSION = "v2";
 export const MAX_FINDINGS = 15;
 const MAX_COMMENTS_PER_FINDING = 3;
 const MAX_COMMENT_CHARS = 300;
@@ -80,6 +80,14 @@ export function keepsNumbers(suggestion: string, allowedText: string): boolean {
   return numbersIn(suggestion).every((n) => allowed.has(n));
 }
 
+/**
+ * True when the text uses words that suggest a statistical test or a proven cause (prompt rule 8).
+ * "confirm" is left out on purpose: "confirm the schedule with the office" is a normal suggestion.
+ */
+export function usesTestWords(text: string): boolean {
+  return /\b(significan\w*|statistical\w*|prove[sdn]?|proof|correlat\w*|caused by)\b/i.test(text);
+}
+
 export async function suggestWording(
   ai: GoogleGenAI | null,
   surveyTitle: string,
@@ -103,6 +111,13 @@ export async function suggestWording(
     if (!text) return { id: f.id, suggestion: null, problem: "No suggestion was returned for this finding." };
     if (!keepsNumbers(text, `${f.sentence} ${f.evidence} ${title} ${when}`)) {
       return { id: f.id, suggestion: null, problem: "Hidden: the AI wording contained a number that is not in the finding." };
+    }
+    if (usesTestWords(text)) {
+      return {
+        id: f.id,
+        suggestion: null,
+        problem: "Hidden: the AI wording used a word like \"significant\" or \"proves\", but these results are descriptive, not a statistical test.",
+      };
     }
     return { id: f.id, suggestion: text };
   });

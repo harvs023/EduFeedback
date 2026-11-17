@@ -20,6 +20,7 @@ export const TOP_COLLECTIONS = [
   "evaluation_runs",
   "school_setup",
   "survey_reports",
+  "profile_requests",
 ] as const;
 
 /** Private per-person lists stored under each user profile. */
@@ -44,6 +45,7 @@ export const BACKUP_GROUPS = [
   "evaluation_runs",
   "school_setup",
   "survey_reports",
+  "profile_requests",
 ] as const;
 
 export type BackupGroup = (typeof BACKUP_GROUPS)[number];
@@ -63,6 +65,7 @@ export const BACKUP_GROUP_LABELS: Record<BackupGroup, string> = {
   evaluation_runs: "Saved evaluation results",
   school_setup: "School setup lists",
   survey_reports: "Survey reports",
+  profile_requests: "Profile change requests",
 };
 
 export const MAX_BACKUP_DOCUMENTS = 200_000;

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Survey, Question, UserProfile, TargetAudience, Topic, AcademicYearTerms } from "../types";
+import { Survey, Question, UserProfile, TargetAudience, Topic, AcademicYearTerms, SchoolLists } from "../types";
+import { AudienceFilters, audienceListsToSave } from "./AudienceFilters";
+import { describeAudience, type AudienceLists } from "../lib/audience";
 import { SurveyCriteriaModal } from "./SurveyCriteriaModal";
 import { schoolYearFor } from "../lib/schoolYear";
 import { TopicBlocksEditor } from "./TopicBlocksEditor";
@@ -10,6 +12,11 @@ import {
   ArrowLeft,
   ArrowRight,
 } from "lucide-react";
+
+/** The narrowing lists stored on a survey's audience (empty lists when none). */
+function listsOf(t: TargetAudience | undefined): AudienceLists {
+  return { departments: t?.departments || [], programs: t?.programs || [], years: t?.years || [], sections: t?.sections || [] };
+}
 
 /** Most surveys one person may have waiting for review at the same time (admin has no limit). */
 const MAX_PENDING_SURVEYS = 3;
@@ -40,6 +47,8 @@ interface SurveyBuilderProps {
   academicCalendar?: AcademicYearTerms[];
   /** How many of this user's other surveys are waiting for review. */
   myPendingCount?: number;
+  /** School Setup lists, for narrowing the audience by department / program / year / section. */
+  schoolLists?: SchoolLists | null;
   initialSurvey?: Survey | null;
   onSaveSurvey: (surveyData: Partial<Survey>, status: "draft" | "pending" | "published" | "scheduled") => void;
   onCancel?: () => void;
@@ -52,6 +61,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   creationOpen = true,
   academicCalendar = [],
   myPendingCount = 0,
+  schoolLists = null,
   initialSurvey,
   onSaveSurvey,
   onCancel,
@@ -80,6 +90,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   const [selectedRoles, setSelectedRoles] = useState<string[]>(
     initialSurvey?.targetAudience?.filters?.roles || ["students", "faculty", "officers"]
   );
+  const [audienceLists, setAudienceLists] = useState<AudienceLists>(listsOf(initialSurvey?.targetAudience));
 
   // Mandatory / Required Survey (Admin Only Feature)
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
@@ -119,6 +130,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       setOpenEnded(Boolean(initialSurvey.openEnded));
       setTargetType(initialSurvey.targetAudience?.type || "all");
       setSelectedRoles(initialSurvey.targetAudience?.filters?.roles || ["students", "faculty", "officers"]);
+      setAudienceLists(listsOf(initialSurvey.targetAudience));
       if (initialSurvey.questions && initialSurvey.questions.length > 0) {
         setBuilder(prepareBlocks(initialSurvey.questions, initialSurvey.topicBlocks, topics));
       }
@@ -224,7 +236,8 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
       ownerName: initialSurvey?.ownerName || currentUser?.name || "Campus Instructor",
       targetAudience: {
         type: targetType,
-        filters: targetType === "custom" ? { roles: selectedRoles } : undefined,
+        ...(targetType === "custom" ? { filters: { roles: selectedRoles } } : {}),
+        ...audienceListsToSave(targetType, audienceLists),
       },
       isRequired: isSuperadmin ? isRequired : (initialSurvey?.isRequired || false),
       requiredAudience: isSuperadmin ? requiredAudience : (initialSurvey?.requiredAudience || "students"),
@@ -431,6 +444,12 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
               <option value="faculty">👨‍🏫 Faculty Members Only</option>
               <option value="officers">👔 Student Officers Only</option>
             </select>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Who can answer:{" "}
+              <strong className="text-slate-700">
+                {describeAudience({ type: targetType, ...audienceListsToSave(targetType, audienceLists) })}
+              </strong>
+            </p>
           </div>
 
           <div>
@@ -447,6 +466,8 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
             </select>
           </div>
         </div>
+
+        <AudienceFilters type={targetType} lists={schoolLists} value={audienceLists} onChange={setAudienceLists} />
 
         {/* Who can see who answered */}
         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">

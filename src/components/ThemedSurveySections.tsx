@@ -35,7 +35,7 @@ interface ThemedSurveySectionsProps {
 
 // Helper to evaluate dynamic performance metrics for surveys
 // "Trending": automatically designated if survey reached a mass amount of respondents in a timeframe (high volume/velocity)
-// "Top Rated": automatically designated if survey achieved 4.4+ rating backed by statistically sound volume (>= 20 respondents)
+// "Top Rated": automatically designated if survey achieved 4.4+ rating from at least 20 respondents
 export const getSurveyPerformanceMetrics = (survey: Survey) => {
   const totalResponses = survey.responses || 0;
   const ratingAverage = survey.ratingAverage || 0;
@@ -60,7 +60,7 @@ export const getSurveyPerformanceMetrics = (survey: Survey) => {
   // Dynamic Trending: Mass amount of respondents in timeframe (>= 150 total OR >= 40 with >= 1.5 daily velocity)
   const isTrending = totalResponses >= 150 || (totalResponses >= 40 && velocityDaily >= 1.5);
 
-  // Dynamic Top Rated: Statistically sound rating (>= 4.4 rating with >= 20 respondents)
+  // Dynamic Top Rated: >= 4.4 rating with >= 20 respondents
   const isTopRated = ratingAverage >= 4.4 && totalResponses >= 20;
 
   return {
@@ -120,7 +120,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   );
 
   // Target audience eligibility check
-  const isEligible = (survey: Survey) => !currentUser || isInAudience(survey, currentUser.pos);
+  const isEligible = (survey: Survey) => !currentUser || isInAudience(survey, currentUser);
 
   const effectiveSearch = (searchQuery || internalSearch).trim().toLowerCase();
 

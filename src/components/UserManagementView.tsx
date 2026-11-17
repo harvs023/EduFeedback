@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { UserProfile, Survey, SchoolLists } from "../types";
 import { SchoolFieldsPicker } from "./SchoolFieldsPicker";
+import { NewSchoolYearMove } from "./NewSchoolYearMove";
 import { activeDepartments, missingSchoolField } from "../lib/schoolLists";
 import {
   Users,
@@ -32,6 +33,9 @@ interface UserManagementViewProps {
   onApproveUser?: (email: string) => void;
   onPromoteUser: (email: string, newPos: UserProfile["pos"]) => void;
   schoolLists?: SchoolLists | null;
+  /** Last "New school year" move, and the action itself (admin). */
+  lastYearMoveAt?: number;
+  onNewSchoolYear?: () => Promise<void>;
 }
 
 export const UserManagementView: React.FC<UserManagementViewProps> = ({
@@ -45,6 +49,8 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   onApproveUser,
   onPromoteUser,
   schoolLists = null,
+  lastYearMoveAt,
+  onNewSchoolYear,
 }) => {
   const countAuthoredSurveys = (email: string) => {
     const clean = (email || "").trim().toLowerCase();
@@ -269,6 +275,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
+            {onNewSchoolYear && (
+              <NewSchoolYearMove users={users} lists={schoolLists} lastMoveAt={lastYearMoveAt} onConfirm={onNewSchoolYear} />
+            )}
             <button
               onClick={handleExportCSV}
               className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer border border-slate-200"
@@ -630,7 +639,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                                 u.status === "active" ? "bg-emerald-500" : "bg-rose-500"
                               }`}
                             />
-                            <span>{u.status.toUpperCase()}</span>
+                            <span>{u.status === "suspended" && u.graduatedAt ? "GRADUATED" : u.status.toUpperCase()}</span>
                           </span>
                         )}
                       </td>

@@ -1,4 +1,7 @@
 import { Survey, UserProfile } from "../types";
+import { isInAudience, type AudiencePerson } from "./audience";
+
+export { isInAudience };
 
 export type SurveyAvailability = "upcoming" | "open" | "closed" | "not-live";
 
@@ -78,28 +81,6 @@ export function getSurveyAvailability(
 }
 
 /**
- * Is someone with this position part of the survey's target audience? The one check used by
- * Take a Survey, the eligible count and (mirrored) the Firestore response rule `inAudience`.
- * all or missing = everyone; students = Student or Student Officer; faculty = Faculty;
- * officers = Student Officer; custom = any of filters.roles with the same mapping.
- */
-export function isInAudience(survey: Pick<Survey, "targetAudience">, pos: string | undefined): boolean {
-  const target = survey.targetAudience;
-  const type = target?.type || "all";
-  const isStudent = pos === "Student" || pos === "Student Officer";
-  if (type === "all") return true;
-  if (type === "students") return isStudent;
-  if (type === "faculty") return pos === "Faculty";
-  if (type === "officers") return pos === "Student Officer";
-  const roles = target?.filters?.roles || [];
-  return (
-    (roles.includes("students") && isStudent) ||
-    (roles.includes("faculty") && pos === "Faculty") ||
-    (roles.includes("officers") && pos === "Student Officer")
-  );
-}
-
-/**
  * When a survey stopped taking answers: when it was archived, or the end of its closing date if
  * that has passed. null = still open. Used so participation of a closed survey only counts people
  * who had an account before it closed.
@@ -130,7 +111,7 @@ function joinedBy(user: Pick<UserProfile, "joined">, cutoff: number | null): boo
  */
 export function countEligibleUsers(
   survey: Survey,
-  users: Pick<UserProfile, "email" | "status" | "pos" | "joined">[],
+  users: (Pick<UserProfile, "email" | "status" | "joined"> & AudiencePerson)[],
   cutoff: number | null = null
 ): number {
   const ownerEmail = (survey.owner || "").trim().toLowerCase();
@@ -138,7 +119,7 @@ export function countEligibleUsers(
     if (u.status !== "active") return false;
     if (!joinedBy(u, cutoff)) return false;
     if (u.email && u.email.trim().toLowerCase() === ownerEmail) return false;
-    return isInAudience(survey, u.pos);
+    return isInAudience(survey, u);
   }).length;
 }
 

@@ -8,6 +8,7 @@ import {
   responsesForSurvey,
   sampleLevel,
 } from "./analytics";
+import { sampleSd } from "./resultsTable";
 
 /**
  * Results per topic across all surveys (admin overview, plan step P part B).
@@ -30,6 +31,8 @@ export interface TopicQuestion {
   /** Rating: answers given; comment: comments written. */
   n: number;
   average: number | null;
+  /** Sample standard deviation of the 1-5 answers (rating questions with 2+ answers). */
+  sd: number | null;
 }
 
 export interface TopicSurveyPart {
@@ -138,10 +141,17 @@ export function topicsAcrossSurveys(
             const values = surveyResponses
               .map((r) => r.answers[i]?.ratingValue)
               .filter((v): v is number => typeof v === "number" && v >= 1 && v <= 5);
-            return { text: q.text, type: "rating" as const, blockTitle: idx.blockOf.get(i) || "", n: values.length, average: mean(values) };
+            return {
+              text: q.text,
+              type: "rating" as const,
+              blockTitle: idx.blockOf.get(i) || "",
+              n: values.length,
+              average: mean(values),
+              sd: sampleSd(values),
+            };
           }
           const comments = surveyResponses.filter((r) => !EMPTY_ANSWERS.has((r.answers[i]?.answer || "").trim())).length;
-          return { text: q.text, type: "paragraph" as const, blockTitle: idx.blockOf.get(i) || "", n: comments, average: null };
+          return { text: q.text, type: "paragraph" as const, blockTitle: idx.blockOf.get(i) || "", n: comments, average: null, sd: null };
         });
       row.parts.push({ surveyId: String(survey.id), surveyTitle: survey.title, n, average: mean(surveyAverages), questions });
       acc.set(topicId, row);
@@ -171,14 +181,25 @@ export function topicsAcrossSurveys(
 /** CSV of every question under every topic (topic, survey, block, question, n, mean), for the paper. */
 export function topicQuestionsCsv(rows: TopicRow[], periodName: string, interpret: (avg: number) => string, minN: number): string {
   const cell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const header = ["Period", "Topic", "Survey", "Block", "Question", "Type", "n", "Mean", "Interpretation"];
+  const header = ["Period", "Topic", "Survey", "Block", "Question", "Type", "n", "Mean", "SD", "Interpretation"];
   const lines: string[] = [];
   for (const r of rows) {
     for (const p of r.parts) {
       for (const q of p.questions) {
         const show = q.type === "rating" && q.average !== null && q.n >= minN;
         lines.push(
-          [periodName, r.topicName, p.surveyTitle, q.blockTitle, q.text, q.type === "rating" ? "Rating" : "Comment", q.n, show ? q.average!.toFixed(2) : "", show ? interpret(q.average!) : ""]
+          [
+            periodName,
+            r.topicName,
+            p.surveyTitle,
+            q.blockTitle,
+            q.text,
+            q.type === "rating" ? "Rating" : "Comment",
+            q.n,
+            show ? q.average!.toFixed(2) : "",
+            show && q.sd !== null ? q.sd.toFixed(2) : "",
+            show ? interpret(q.average!) : "",
+          ]
             .map(cell)
             .join(",")
         );

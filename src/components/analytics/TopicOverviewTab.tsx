@@ -15,7 +15,7 @@ import {
 } from "../../lib/analytics";
 import { MIN_COMMENTS_FOR_PERCENT } from "../../lib/recommendations";
 import { topicQuestionsCsv, topicsAcrossSurveys, topicTableCsv, type TopicRow } from "../../lib/topicAnalytics";
-import { SENTIMENT_COLORS, SentimentBar, StatCard, fmtPct } from "./AnalyticsParts";
+import { DivergingAxis, SentimentBar, SentimentLegend, SentimentRowLabel, StatCard, fmtPct } from "./AnalyticsParts";
 
 interface Props {
   surveys: Survey[];
@@ -146,7 +146,9 @@ export const TopicOverviewTab: React.FC<Props> = ({ surveys, responses, topics, 
         <span>
           {periodLabel(period)}. Each topic combines the rating answers of every survey that uses it: each respondent's own
           average over the topic's questions in one survey counts once. Whole surveys are not averaged together. The
-          surveys have different respondents and dates, so these are descriptive results only. A topic needs at least{" "}
+          surveys have different respondents and dates, and can be meant for different groups (for example one program or
+          year level), so combined figures mix different respondents and are descriptive results only. A topic needs at
+          least{" "}
           {MIN_RESPONSES} responses to show numbers; under 30 it is marked as a small sample.
         </span>
       </div>
@@ -205,14 +207,7 @@ export const TopicOverviewTab: React.FC<Props> = ({ surveys, responses, topics, 
           <section className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-slate-900">Comment sentiment per topic</h3>
-              <span className="flex gap-3 text-xs text-slate-600">
-                {(["positive", "neutral", "negative"] as const).map((k) => (
-                  <span key={k} className="inline-flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: SENTIMENT_COLORS[k] }} />
-                    {k[0].toUpperCase() + k.slice(1)}
-                  </span>
-                ))}
-              </span>
+              <SentimentLegend />
             </div>
             {withComments.length === 0 ? (
               <p className="text-xs text-slate-500">
@@ -220,12 +215,13 @@ export const TopicOverviewTab: React.FC<Props> = ({ surveys, responses, topics, 
               </p>
             ) : (
               <div className="space-y-3">
+                <div className="sm:pl-51">
+                  <DivergingAxis />
+                </div>
                 {withComments.map((r) => (
                   <div key={r.topicId} className="grid grid-cols-1 sm:grid-cols-[minmax(0,12rem)_1fr] gap-x-3 gap-y-1 items-center">
-                    <span className="text-sm text-slate-700 truncate" title={r.topicName}>
-                      {r.topicName} <span className="text-xs text-slate-400">({r.sentiment.analyzed})</span>
-                    </span>
-                    <SentimentBar counts={r.sentiment} compact />
+                    <SentimentRowLabel name={r.topicName} counts={r.sentiment} />
+                    <SentimentBar counts={r.sentiment} compact legend={false} />
                   </div>
                 ))}
               </div>
@@ -358,6 +354,7 @@ export const TopicOverviewTab: React.FC<Props> = ({ surveys, responses, topics, 
                                             ) : (
                                               <>
                                                 <strong>{q.average.toFixed(2)}</strong>{" "}
+                                                {q.sd !== null && <span className="text-slate-500">(SD {q.sd.toFixed(2)})</span>}{" "}
                                                 <span className="text-slate-500">{interpretRating(q.average)}</span>
                                               </>
                                             )}

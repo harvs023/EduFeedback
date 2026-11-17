@@ -52,6 +52,7 @@ import {
   SurveyReport,
   SurveyTopicBlock,
   TopicMoveRecord,
+  ProfileChangeRequest,
 } from "../types";
 import appletConfig from "../../firebase-applet-config.json";
 
@@ -199,6 +200,7 @@ export const COLLECTIONS = {
   SETTINGS: "settings",
   SCHOOL_SETUP: "school_setup",
   SURVEY_REPORTS: "survey_reports",
+  PROFILE_REQUESTS: "profile_requests",
 };
 
 /**
@@ -587,6 +589,34 @@ export const FirestoreUserService = {
     }
   },
 
+  /**
+   * Updates only the given fields of one's own profile, so a self-edit never touches the locked
+   * school fields (name, profileRequestSeenAt, or the one-time section pick).
+   */
+  async updateOwnFields(
+    email: string,
+    fields: Partial<Pick<UserProfile, "name" | "profileRequestSeenAt" | "section" | "sectionPickNeeded">>
+  ): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("The database is not available. Please try again.");
+    const docId = email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    await updateDoc(doc(firestore, COLLECTIONS.USERS, docId), fields);
+  },
+
+  /** Admin: update only some fields of many profiles, in batches (Firestore allows 500 writes per batch). */
+  async updateMany(updates: { email: string; fields: Partial<UserProfile> }[]): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    for (let i = 0; i < updates.length; i += 400) {
+      const batch = writeBatch(firestore);
+      for (const u of updates.slice(i, i + 400)) {
+        const docId = u.email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+        batch.update(doc(firestore, COLLECTIONS.USERS, docId), u.fields);
+      }
+      await batch.commit();
+    }
+  },
+
   async delete(email: string): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) return;
@@ -931,6 +961,66 @@ export const FirestoreReportService = {
     const batch = writeBatch(firestore);
     ids.forEach((id) => batch.update(doc(firestore, COLLECTIONS.SURVEY_REPORTS, id), decision));
     await batch.commit();
+  },
+};
+
+/** Requests to change one's own locked school fields. One per person (id = email key). */
+export const FirestoreProfileRequestService = {
+  idFor(email: string): string {
+    return email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+  },
+
+  /** This person's latest request, or null. */
+  async getMine(email: string): Promise<ProfileChangeRequest | null> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return null;
+    try {
+      const snap = await getDoc(doc(firestore, COLLECTIONS.PROFILE_REQUESTS, FirestoreProfileRequestService.idFor(email)));
+      return snap.exists() ? { ...(snap.data() as Omit<ProfileChangeRequest, "id">), id: snap.id } : null;
+    } catch (err) {
+      console.warn("Could not load your change request:", err);
+      return null;
+    }
+  },
+
+  /** Admin: every request. */
+  async getAll(): Promise<ProfileChangeRequest[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    const snap = await getDocs(collection(firestore, COLLECTIONS.PROFILE_REQUESTS));
+    return snap.docs.map((d) => ({ ...(d.data() as Omit<ProfileChangeRequest, "id">), id: d.id }));
+  },
+
+  /** Sends a new request, replacing an already decided one (the rules refuse it while one is waiting). */
+  async send(request: Omit<ProfileChangeRequest, "id" | "status">): Promise<ProfileChangeRequest> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("The database is not available. Please try again.");
+    const id = FirestoreProfileRequestService.idFor(request.email);
+    const data = { ...request, status: "pending" as const };
+    try {
+      await setDoc(doc(firestore, COLLECTIONS.PROFILE_REQUESTS, id), data);
+    } catch (err) {
+      console.warn("Could not send the change request:", err);
+      throw new Error("Could not send your request. You may already have one waiting for the admin.");
+    }
+    return { ...data, id };
+  },
+
+  /** Cancels this person's waiting request. */
+  async cancel(email: string): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("The database is not available. Please try again.");
+    await deleteDoc(doc(firestore, COLLECTIONS.PROFILE_REQUESTS, FirestoreProfileRequestService.idFor(email)));
+  },
+
+  /** Admin: record the decision. */
+  async decide(
+    id: string,
+    decision: Pick<ProfileChangeRequest, "status" | "decidedBy" | "decidedAt" | "decisionNote">
+  ): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    await updateDoc(doc(firestore, COLLECTIONS.PROFILE_REQUESTS, id), decision);
   },
 };
 

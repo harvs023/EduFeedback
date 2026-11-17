@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { useConfirm } from "./ConfirmDialog";
 import { Survey, UserProfile, SurveyResponse } from "../types";
 import { getSurveyAvailability } from "../lib/surveyReview";
+import { describeAudience } from "../lib/audience";
 import {
   PlusCircle,
   Pencil,
@@ -640,7 +641,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                     </div>
                     <div className="flex items-center gap-1.5">
                       <CheckSquare className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>{survey.targetAudience?.type ? `Target: ${survey.targetAudience.type}` : "Open Campus"}</span>
+                      <span>For: {describeAudience(survey.targetAudience)}</span>
                     </div>
                   </div>
 

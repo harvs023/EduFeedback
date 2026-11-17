@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Info } from "lucide-react";
+import { AlertTriangle, Info } from "lucide-react";
 import { Survey, SurveyResponse } from "../../types";
 import {
   ComparedRow,
@@ -12,6 +12,7 @@ import {
   surveyStats,
 } from "../../lib/analytics";
 import { SampleNotice, SentimentBar, SentimentFootnote, StatCard, fmtPct } from "./AnalyticsParts";
+import { describeAudience, sameAudience } from "../../lib/audience";
 
 interface Props {
   /** Only the surveys the viewer may see: owners their own, the admin all. */
@@ -22,12 +23,13 @@ interface Props {
 const selectClass =
   "w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200";
 
-function SideSummary({ name, stats }: { name: string; stats: SurveyStats }) {
+function SideSummary({ name, audience, stats }: { name: string; audience: string; stats: SurveyStats }) {
   const usable = stats.level !== "insufficient";
   return (
     <div className="space-y-3 min-w-0">
       <p className="text-sm font-bold text-slate-800 truncate" title={name}>
         {name}
+        <span className="block text-[11px] font-normal text-slate-500 whitespace-normal">For: {audience}</span>
       </p>
       <SampleNotice level={stats.level} n={stats.responses} />
       <div className="grid grid-cols-2 gap-3">
@@ -187,9 +189,21 @@ export const CompareTab: React.FC<Props> = ({ surveys, responses }) => {
       ) : result ? (
         <>
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            <SideSummary name={`A: ${a.title}`} stats={result.sa} />
-            <SideSummary name={`B: ${b.title}`} stats={result.sb} />
+            <SideSummary name={`A: ${a.title}`} audience={describeAudience(a.targetAudience)} stats={result.sa} />
+            <SideSummary name={`B: ${b.title}`} audience={describeAudience(b.targetAudience)} stats={result.sb} />
           </div>
+
+          {!sameAudience(a.targetAudience, b.targetAudience) && (
+            <div className="flex items-start gap-2 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200 text-sm text-amber-900">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
+              <div className="space-y-1">
+                <p className="font-bold">Different groups answered these surveys.</p>
+                <p className="text-xs">A: {describeAudience(a.targetAudience)}</p>
+                <p className="text-xs">B: {describeAudience(b.targetAudience)}</p>
+                <p className="text-xs">Differences may come from who answered, not only from the survey itself.</p>
+              </div>
+            </div>
+          )}
 
           {result.bothUsable && s && t && (
             <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100 text-sm text-slate-800 space-y-1">

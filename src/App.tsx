@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings, SchoolLists, SurveyReport, ReportReason, TopicBlockMove, TopicMoveRecord } from "./types";
+import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings, SchoolLists, SurveyReport, ReportReason, TopicBlockMove, TopicMoveRecord, ProfileChangeRequest, ProfileSchoolFields } from "./types";
 import { DatabaseService } from "./lib/databaseService";
 import { schoolYearFor } from "./lib/schoolYear";
 import { isFirebaseConfigured, FirebaseAuthService, FirestoreUserService } from "./lib/firebase";
@@ -15,6 +15,9 @@ import {
 } from "./lib/sentiment";
 import { MASTER_ADMIN_EMAIL } from "./data/initialData";
 import { activeCategoryNames } from "./lib/schoolLists";
+import { describeChanges, fieldKeysFor, schoolFieldsOf } from "./lib/profileRequests";
+import { planUpdates, planYearMove } from "./lib/schoolYearMove";
+import { SectionPickPrompt } from "./components/SectionPickPrompt";
 import { OTHER_TOPIC_ID, OTHER_TOPIC_NAME } from "./lib/topicBlocks";
 import { applicableCount, applyMoves } from "./lib/topicMoves";
 import { Navbar } from "./components/Navbar";
@@ -73,6 +76,12 @@ export default function App() {
   // Surveys this person has reported; the admin also loads every report.
   const [myReportedSurveyIds, setMyReportedSurveyIds] = useState<string[]>([]);
   const [surveyReports, setSurveyReports] = useState<SurveyReport[]>([]);
+  // Locked school details: this person's latest change request, and (admin) everyone's.
+  const [myProfileRequest, setMyProfileRequest] = useState<ProfileChangeRequest | null>(null);
+  const [profileRequests, setProfileRequests] = useState<ProfileChangeRequest[]>([]);
+  const [showRequestDecision, setShowRequestDecision] = useState(false);
+  // The one-time section pick after a "New school year" move; "Later" hides it until the next login.
+  const [sectionPickLater, setSectionPickLater] = useState(false);
   // Saved sentiment results confirmed by the server's signature check (see lib/sentiment.ts).
   const [validResultKeys, setValidResultKeys] = useState<Set<string>>(new Set());
   const [signatureCheck, setSignatureCheck] = useState<"checking" | "done" | "unavailable">("done");
@@ -157,6 +166,8 @@ export default function App() {
         user?.email ? (await DatabaseService.getMySurveyReports(user.email)).map((r) => String(r.surveyId)) : []
       );
       setSurveyReports(user?.role === "superadmin" ? await DatabaseService.getSurveyReports().catch(() => []) : []);
+      setMyProfileRequest(user?.email ? await DatabaseService.getMyProfileRequest(user.email) : null);
+      setProfileRequests(user?.role === "superadmin" ? await DatabaseService.getProfileRequests().catch(() => []) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load data from Firestore.", "info");
     }
@@ -206,7 +217,9 @@ export default function App() {
             setCurrentUser(null);
             setNotifications([]);
             showToast(
-              profile.status === "suspended"
+              profile.status === "suspended" && profile.graduatedAt
+                ? "This account was closed because you have graduated. If this is a mistake, please contact the administrator."
+                : profile.status === "suspended"
                 ? "This university account has been suspended by system administration."
                 : "Your account is currently awaiting administrative approval.",
               "info"
@@ -235,6 +248,9 @@ export default function App() {
         setLikedNewsIds([]);
         setMyReportedSurveyIds([]);
         setSurveyReports([]);
+        setMyProfileRequest(null);
+        setProfileRequests([]);
+        setSectionPickLater(false);
       }
     });
 
@@ -353,6 +369,8 @@ export default function App() {
         user?.email ? (await DatabaseService.getMySurveyReports(user.email)).map((r) => String(r.surveyId)) : []
       );
       setSurveyReports(user?.role === "superadmin" ? await DatabaseService.getSurveyReports().catch(() => []) : []);
+      setMyProfileRequest(user?.email ? await DatabaseService.getMyProfileRequest(user.email) : null);
+      setProfileRequests(user?.role === "superadmin" ? await DatabaseService.getProfileRequests().catch(() => []) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load Firestore data for user.", "info");
     }
@@ -381,6 +399,9 @@ export default function App() {
     setLikedNewsIds([]);
     setMyReportedSurveyIds([]);
     setSurveyReports([]);
+    setMyProfileRequest(null);
+    setProfileRequests([]);
+    setSectionPickLater(false);
     showToast("Signed out successfully.", "info");
   };
 
@@ -1677,7 +1698,7 @@ export default function App() {
       updatedBy: currentUser.email.trim().toLowerCase(),
     };
     await DatabaseService.saveSettings(next);
-    setAppSettings(next);
+    setAppSettings((prev) => ({ ...prev, ...next }));
     try {
       await logActivityAndRefresh({
         user: currentUser.name,
@@ -1846,17 +1867,214 @@ export default function App() {
     });
   };
 
-  const handleUpdateProfile = async (updated: Partial<UserProfile>) => {
-    if (!currentUser) return;
-    const modifiedUser = { ...currentUser, ...updated };
+  /** The person's own name (the only profile field they may change themselves). */
+  const handleUpdateName = async (name: string): Promise<boolean> => {
+    if (!currentUser) return false;
     try {
-      await DatabaseService.saveUser(modifiedUser);
-      setCurrentUser(modifiedUser);
-      setUsers((prev) => prev.map((u) => (u.email === currentUser.email ? modifiedUser : u)));
-      showToast("Profile details updated!", "success");
-    } catch (err: any) {
-      showToast(err.message || "Failed to update profile.", "info");
+      await DatabaseService.updateOwnName(currentUser.email, name);
+    } catch {
+      showToast("Could not save your name. Please try again.", "info");
+      return false;
     }
+    const modifiedUser = { ...currentUser, name };
+    setCurrentUser(modifiedUser);
+    setUsers((prev) => prev.map((u) => (u.email === currentUser.email ? modifiedUser : u)));
+    showToast("Name updated.", "success");
+    return true;
+  };
+
+  /** Opens My Profile with fresh data (an approved request may have changed the school details). */
+  const handleOpenProfile = async () => {
+    setShowRequestDecision(false);
+    setShowProfileModal(true);
+    if (!currentUser?.email) return;
+    const [fresh, request] = await Promise.all([
+      FirestoreUserService.getByEmail(currentUser.email).catch(() => null),
+      DatabaseService.getMyProfileRequest(currentUser.email),
+    ]);
+    const me = fresh || currentUser;
+    setMyProfileRequest(request);
+    // A decision is shown once: the first time My Profile is opened after it was made.
+    const decidedAt = request && request.status !== "pending" ? request.decidedAt || 0 : 0;
+    const unseen = decidedAt > 0 && decidedAt > (me.profileRequestSeenAt || 0);
+    setShowRequestDecision(unseen);
+    if (unseen) {
+      DatabaseService.markProfileRequestSeen(me.email, decidedAt).catch((err) =>
+        console.warn("Could not remember that the decision was seen:", err)
+      );
+      setCurrentUser({ ...me, profileRequestSeenAt: decidedAt });
+    } else if (fresh) {
+      setCurrentUser(fresh);
+    }
+  };
+
+  /** Sends a request to change the locked school details. */
+  const handleSendProfileRequest = async (requested: ProfileSchoolFields, reason: string): Promise<boolean> => {
+    if (!currentUser) return false;
+    const email = currentUser.email.trim().toLowerCase();
+    let saved: ProfileChangeRequest;
+    try {
+      saved = await DatabaseService.sendProfileRequest({
+        email,
+        name: currentUser.name,
+        current: schoolFieldsOf(currentUser),
+        requested,
+        reason,
+        requestedAt: Date.now(),
+      });
+    } catch (err: any) {
+      showToast(err.message || "Could not send your request.", "info");
+      return false;
+    }
+    setMyProfileRequest(saved);
+    try {
+      await DatabaseService.addNotification({
+        to: MASTER_ADMIN_EMAIL.toLowerCase(),
+        title: "📝 Profile change request",
+        message: `${currentUser.name} asked to change their school details (${describeChanges(saved.current, saved.requested)}). Review it in Review Center > Profile Requests.`,
+        icon: "📝",
+        type: "profile_request",
+        data: { email },
+      });
+    } catch {}
+    showToast("Request sent. The administrator will review it.", "success");
+    return true;
+  };
+
+  const handleCancelProfileRequest = async () => {
+    if (!currentUser) return;
+    try {
+      await DatabaseService.cancelProfileRequest(currentUser.email);
+      setMyProfileRequest(null);
+      showToast("Request cancelled.", "info");
+    } catch {
+      showToast("Could not cancel the request. It may have been decided already.", "info");
+    }
+  };
+
+  /** Admin: "New school year": move students up one year, mark last-year students graduated. */
+  const handleNewSchoolYear = async () => {
+    if (!currentUser) return;
+    const plan = planYearMove(users, schoolLists);
+    const now = Date.now();
+    const updates = planUpdates(plan, now);
+    if (updates.length === 0) return;
+    try {
+      await DatabaseService.updateUsersFields(updates);
+    } catch {
+      showToast("The move stopped partway because of an error. Check the user list, then try again (people already moved will move again).", "info");
+      setUsers(await DatabaseService.getUsers(currentUser).catch(() => users));
+      return;
+    }
+    const byEmail = new Map(updates.map((u) => [u.email, u.fields]));
+    setUsers((prev) => prev.map((u) => (byEmail.has(u.email) ? { ...u, ...byEmail.get(u.email) } : u)));
+    const settings = { lastYearMoveAt: now, lastYearMoveBy: currentUser.email.trim().toLowerCase() };
+    try {
+      await DatabaseService.saveSettings({ ...appSettings, ...settings });
+      setAppSettings((prev) => ({ ...prev, ...settings }));
+    } catch {}
+    for (let i = 0; i < plan.moveUp.length; i += 20) {
+      await Promise.all(
+        plan.moveUp.slice(i, i + 20).map((m) =>
+          DatabaseService.addNotification({
+            to: m.user.email.toLowerCase(),
+            title: "🎓 New school year",
+            message: `You moved up to ${m.to}. Please choose your new section when you next open EduFeedback.`,
+            icon: "🎓",
+            type: "school_year",
+          }).catch(() => {})
+        )
+      );
+    }
+    try {
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: "New School Year",
+        details: `${plan.moveUp.length} student(s) moved up one year; ${plan.graduate.length} marked graduated and suspended; ${plan.skipped.length} skipped.`,
+      });
+    } catch {}
+    showToast(`${plan.moveUp.length} moved up, ${plan.graduate.length} marked graduated.`, "success");
+  };
+
+  /** Student: the one-time section pick after the move. */
+  const handlePickNewSection = async (section: string): Promise<boolean> => {
+    if (!currentUser) return false;
+    try {
+      await DatabaseService.pickNewSection(currentUser.email, section);
+    } catch {
+      showToast("Could not save your section. Please try again.", "info");
+      return false;
+    }
+    const updated = { ...currentUser, section, sectionPickNeeded: false };
+    setCurrentUser(updated);
+    setUsers((prev) => prev.map((u) => (u.email === currentUser.email ? updated : u)));
+    showToast(`Section saved: ${section}.`, "success");
+    return true;
+  };
+
+  /** Admin: approve (update the profile) or reject a school-details change request. */
+  const handleDecideProfileRequest = async (request: ProfileChangeRequest, approve: boolean, note: string) => {
+    if (!currentUser) return;
+    const person = users.find((u) => u.email.toLowerCase() === request.email.toLowerCase());
+    if (approve) {
+      if (!person) {
+        showToast("This account no longer exists, so the request cannot be approved.", "info");
+        return;
+      }
+      const updated: UserProfile = { ...person };
+      for (const k of fieldKeysFor(person.pos)) {
+        if (k in request.requested) updated[k] = request.requested[k] || "";
+      }
+      // An approved section replaces the one-time section pick after a "New school year" move.
+      if (updated.sectionPickNeeded && updated.section) updated.sectionPickNeeded = false;
+      try {
+        await DatabaseService.saveUser(updated);
+      } catch {
+        showToast("Could not update the profile. Nothing was changed.", "info");
+        return;
+      }
+      setUsers((prev) => prev.map((u) => (u.email === person.email ? updated : u)));
+    }
+    const decision = {
+      status: approve ? ("approved" as const) : ("rejected" as const),
+      decidedBy: currentUser.email.trim().toLowerCase(),
+      decidedAt: Date.now(),
+      decisionNote: note,
+    };
+    try {
+      await DatabaseService.decideProfileRequest(request.id, decision);
+    } catch {
+      showToast(
+        approve
+          ? "The profile was updated, but the request could not be marked as approved. Please try again."
+          : "Could not save the decision. Please try again.",
+        "info"
+      );
+      return;
+    }
+    setProfileRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, ...decision } : r)));
+    const changes = describeChanges(request.current, request.requested);
+    try {
+      await DatabaseService.addNotification({
+        to: request.email.toLowerCase(),
+        title: approve ? "✅ Profile change approved" : "ℹ️ Profile change not approved",
+        message: approve
+          ? `Your school details were updated (${changes}).${note ? ` Note: ${note}` : ""}`
+          : `Your request (${changes}) was not approved. Reason: ${note}`,
+        icon: approve ? "✅" : "ℹ️",
+        type: "profile_request",
+      });
+    } catch {}
+    try {
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: approve ? "Profile Change Approved" : "Profile Change Rejected",
+        details: `${request.name} (${request.email}): ${changes}${note ? `. Note: ${note}` : ""}`,
+      });
+    } catch {}
+    showToast(approve ? "Approved. The profile was updated." : "Request rejected.", "success");
   };
 
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
@@ -2013,7 +2231,7 @@ export default function App() {
           onNavigate={handleNavigate}
           currentUser={currentUser}
           onSignOut={handleSignOut}
-          onOpenProfile={() => setShowProfileModal(true)}
+          onOpenProfile={handleOpenProfile}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           selectedCategory={selectedCategory}
@@ -2183,6 +2401,7 @@ export default function App() {
                 currentUser={currentUser}
                 creationOpen={appSettings.surveyCreationOpen}
                 categories={activeCategoryNames(schoolLists)}
+                schoolLists={schoolLists}
                 topics={topics}
                 academicCalendar={academicCalendar}
                 myPendingCount={
@@ -2247,9 +2466,13 @@ export default function App() {
               onRefreshUsers={handleRefreshUsers}
               surveyCreationOpen={appSettings.surveyCreationOpen}
               onSetSurveyCreation={handleSetSurveyCreation}
+              lastYearMoveAt={appSettings.lastYearMoveAt}
+              onNewSchoolYear={handleNewSchoolYear}
               schoolLists={schoolLists}
               onSaveSchoolLists={handleSaveSchoolLists}
               surveyReports={surveyReports}
+              profileRequests={profileRequests}
+              onDecideProfileRequest={handleDecideProfileRequest}
               onMoveTopicBlocks={handleMoveTopicBlocks}
               onUndoTopicMove={handleUndoTopicMove}
               onDecideTopicRequest={handleDecideTopicRequest}
@@ -2301,7 +2524,20 @@ export default function App() {
           currentUser={currentUser}
           schoolLists={schoolLists}
           onClose={() => setShowProfileModal(false)}
-          onUpdateProfile={handleUpdateProfile}
+          profileRequest={myProfileRequest}
+          showRequestDecision={showRequestDecision}
+          onUpdateName={handleUpdateName}
+          onSendProfileRequest={handleSendProfileRequest}
+          onCancelProfileRequest={handleCancelProfileRequest}
+        />
+      )}
+
+      {currentUser?.sectionPickNeeded && !sectionPickLater && !showProfileModal && (
+        <SectionPickPrompt
+          user={currentUser}
+          lists={schoolLists}
+          onSave={handlePickNewSection}
+          onLater={() => setSectionPickLater(true)}
         />
       )}
 

@@ -1,3 +1,4 @@
+import { describeAudience } from "../../lib/audience";
 import React, { useEffect, useMemo, useState } from "react";
 import { Download, Info } from "lucide-react";
 import { AcademicYearTerms, Survey, SurveyResponse, UserProfile } from "../../types";
@@ -22,6 +23,7 @@ import {
 import { endOfDay, startOfDay } from "../../lib/schoolYear";
 import { Change, RatingValue, SampleNotice, SentimentBar, SentimentFootnote, StatCard, fmtPct } from "./AnalyticsParts";
 import { QuestionResults } from "./QuestionResults";
+import { ResultsTableCard } from "./ResultsTableCard";
 import { TopicInsights } from "./TopicInsights";
 import { ResponseChecks } from "./ResponseChecks";
 import { FlagResponseDialog } from "./FlagResponseDialog";
@@ -296,6 +298,7 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({
               </option>
             ))}
           </select>
+          {survey && <span className="block text-xs text-slate-500">For: {describeAudience(survey.targetAudience)}</span>}
         </label>
         <div className="space-y-1">
           <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Period</span>
@@ -369,6 +372,15 @@ export const SurveyAnalyticsTab: React.FC<Props> = ({
                 </p>
               ))}
           </div>
+
+          {survey && mainStats.level !== "insufficient" && (
+            <ResultsTableCard
+              survey={survey}
+              questions={mainStats.questions}
+              periodName={periodLabel(mainPeriod)}
+              n={mainStats.responses}
+            />
+          )}
 
           {survey && mainStats.level !== "insufficient" && (
             <TopicInsights

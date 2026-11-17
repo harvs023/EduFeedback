@@ -1,6 +1,9 @@
 import { formatDateTime } from "../lib/timeAgo";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useConfirm } from "./ConfirmDialog";
+import SetupChecklist from "./SetupChecklist";
+import { termFor } from "../lib/schoolYear";
+import { allCategories } from "../lib/schoolLists";
 import {
   Survey,
   SurveyResponse,
@@ -13,6 +16,7 @@ import {
   SurveyReport,
   TopicBlockMove,
   TopicMoveRecord,
+  ProfileChangeRequest,
 } from "../types";
 import type { TopicDecision } from "./TopicRequestsPanel";
 import { UserManagementView } from "./UserManagementView";
@@ -21,6 +25,7 @@ import { TopicsManager } from "./TopicsManager";
 import { AcademicCalendarManager } from "./AcademicCalendarManager";
 import { SchoolSetupManager } from "./SchoolSetupManager";
 import { ReportedSurveysPanel } from "./ReportedSurveysPanel";
+import { ProfileRequestsPanel } from "./ProfileRequestsPanel";
 import { SurveyApprovalsPanel } from "./SurveyApprovalsPanel";
 import { NewsApprovalsPanel } from "./NewsApprovalsPanel";
 import { FlaggedResponsesPanel, FlagDecision } from "./FlaggedResponsesPanel";
@@ -51,6 +56,7 @@ import {
   CalendarRange,
   Newspaper,
   School,
+  UserCog,
 } from "lucide-react";
 
 interface SuperadminDashboardProps {
@@ -62,6 +68,9 @@ interface SuperadminDashboardProps {
   topics?: Topic[];
   currentUser?: UserProfile | null;
   surveyReports?: SurveyReport[];
+  /** Requests to change locked school details (department, program, year, section, student ID). */
+  profileRequests?: ProfileChangeRequest[];
+  onDecideProfileRequest?: (request: ProfileChangeRequest, approve: boolean, note: string) => Promise<void>;
   onMoveTopicBlocks?: (moves: TopicBlockMove[], kind: "move" | "merge", retireTopicId?: string) => Promise<void>;
   onUndoTopicMove?: (logId: string, record: TopicMoveRecord) => Promise<void>;
   onDecideTopicRequest?: (surveyId: string, blockId: string, decision: TopicDecision, note: string) => Promise<void>;
@@ -91,7 +100,10 @@ interface SuperadminDashboardProps {
   /** Admin switch: survey creation open for everyone (the admin can always create). */
   surveyCreationOpen?: boolean;
   onSetSurveyCreation?: (open: boolean) => Promise<void>;
-  initialTab?: "approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school";
+  /** "New school year: move students up one year" (User & Role Directory). */
+  lastYearMoveAt?: number;
+  onNewSchoolYear?: () => Promise<void>;
+  initialTab?: "approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school" | "profile-requests";
   showToast?: (text: string, type?: "success" | "info") => void;
 }
 
@@ -153,6 +165,8 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   topics = [],
   currentUser = null,
   surveyReports = [],
+  profileRequests = [],
+  onDecideProfileRequest,
   onMoveTopicBlocks,
   onUndoTopicMove,
   onDecideTopicRequest,
@@ -180,12 +194,14 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onRefreshUsers,
   surveyCreationOpen = true,
   onSetSurveyCreation,
+  lastYearMoveAt,
+  onNewSchoolYear,
   initialTab = "approvals",
   showToast,
 }) => {
   const { confirm, confirmDialog } = useConfirm();
   // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school">(
+  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school" | "profile-requests">(
     initialTab || "approvals"
   );
 
@@ -276,6 +292,22 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
     return Array.from(map.entries()).map(([email, name]) => ({ email, name }));
   }, [surveys]);
 
+  // A survey's school year and semester: what was saved on it, otherwise worked out from its
+  // creation date with the academic calendar. Empty when unknown (never a made-up value).
+  const termOf = (s: Survey): { year: string; term: string } => {
+    const created = s.createdAtTimestamp || (s.created ? Date.parse(s.created) : NaN);
+    const info = Number.isFinite(created) && created > 0 ? termFor(created, academicCalendar) : null;
+    return { year: s.academicYear || info?.schoolYear || "", term: s.term || info?.term || "" };
+  };
+  const termLabel = (s: Survey) => {
+    const { year, term } = termOf(s);
+    return [year && `SY ${year}`, term].filter(Boolean).join(" · ") || "School year unknown";
+  };
+  const yearOptions = Array.from(new Set(surveys.map((s) => termOf(s).year).filter(Boolean))).sort().reverse();
+  const categoryOptions = Array.from(
+    new Set([...allCategories(schoolLists).map((c) => c.name), ...surveys.map((s) => s.cat).filter(Boolean)])
+  );
+
   // Filter surveys strictly based on Year, Month, Date, and criteria
   const filteredSurveys = useMemo(() => {
     const today = new Date();
@@ -312,14 +344,12 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 
       // 4. Academic Year
       if (filterAcademicYear !== "all") {
-        const surveyAy = s.academicYear || "2025-2026";
-        if (surveyAy !== filterAcademicYear) return false;
+        if (termOf(s).year !== filterAcademicYear) return false;
       }
 
       // 5. Semester / Term
       if (filterSemester !== "all") {
-        const surveyTerm = s.term || "2nd Sem";
-        if (surveyTerm !== filterSemester) return false;
+        if (termOf(s).term !== filterSemester) return false;
       }
 
       // 6. Category
@@ -351,6 +381,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
     });
   }, [
     surveys,
+    academicCalendar,
     filterYear,
     filterMonth,
     dateFilterMode,
@@ -447,6 +478,17 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
     <div className="space-y-6 pb-12">
       {confirmDialog}
       {/* Superadmin Oversight Header */}
+      <SetupChecklist
+        schoolLists={schoolLists}
+        topics={topics}
+        academicCalendar={academicCalendar}
+        onOpen={(tab) => {
+          setActiveTab(tab);
+          // The tab's content opens under the tab row; bring the row into view.
+          tabsContainerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }}
+      />
+
       <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-800 space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-2">
@@ -567,6 +609,12 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                 { id: "surveys", label: "Creation Timeframe Directory", count: surveys.length, icon: CalendarDays },
                 { id: "reports", label: "Reported Surveys", count: reportedSurveyCount, icon: Flag },
                 { id: "users", label: "User & Role Directory", count: users.length, icon: Users },
+                {
+                  id: "profile-requests",
+                  label: "Profile Requests",
+                  count: profileRequests.filter((r) => r.status === "pending").length,
+                  icon: UserCog,
+                },
                 { id: "logs", label: "Activity Audit Trail", count: logs.length, icon: Activity },
                 { id: "backup", label: "Backup & Restore", icon: Database },
                 { id: "topics", label: "Survey Topics", count: topics.length, icon: Tag },
@@ -747,10 +795,29 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                   onChange={(e) => setFilterAcademicYear(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
                 >
-                  <option value="all">All Academic Years</option>
-                  <option value="2025-2026">AY 2025–2026 (Current)</option>
-                  <option value="2024-2025">AY 2024–2025</option>
-                  <option value="2023-2024">AY 2023–2024</option>
+                  <option value="all">All school years</option>
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      SY {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filter 5: Semester (from the academic calendar) */}
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
+                  Semester
+                </label>
+                <select
+                  value={filterSemester}
+                  onChange={(e) => setFilterSemester(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
+                >
+                  <option value="all">All semesters</option>
+                  <option value="1st Sem">1st Sem</option>
+                  <option value="2nd Sem">2nd Sem</option>
+                  <option value="Between terms">Between terms</option>
                 </select>
               </div>
 
@@ -765,11 +832,11 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
                 >
                   <option value="all">All Categories</option>
-                  <option value="Course">Course</option>
-                  <option value="Instructor">Instructor</option>
-                  <option value="Facilities">Facilities</option>
-                  <option value="Student Services">Student Services</option>
-                  <option value="General">General / Governance</option>
+                  {categoryOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -943,7 +1010,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                                   {s.cat}
                                 </span>
                                 <span className="text-[11px] font-semibold text-slate-500">
-                                  {s.academicYear || "AY 2025-2026"} · {s.term || "2nd Sem"}
+                                  {termLabel(s)}
                                 </span>
                               </div>
 
@@ -1096,9 +1163,9 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 
                             <td className="p-4 space-y-0.5 whitespace-nowrap">
                               <div className="font-semibold text-slate-800">
-                                {s.academicYear || "AY 2025-2026"}
+                                {termOf(s).year ? `SY ${termOf(s).year}` : "Unknown"}
                               </div>
-                              <div className="text-[10px] text-slate-500">{s.term || "2nd Sem"}</div>
+                              <div className="text-[10px] text-slate-500">{termOf(s).term || "–"}</div>
                             </td>
 
                             <td className="p-4 space-y-0.5 whitespace-nowrap">
@@ -1197,10 +1264,16 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           onApproveUser={(email) => onToggleUserStatus(email, "active")}
           onPromoteUser={onPromoteUser}
           schoolLists={schoolLists}
+          lastYearMoveAt={lastYearMoveAt}
+          onNewSchoolYear={onNewSchoolYear}
         />
       )}
 
       {/* TAB 4: ACTIVITY AUDIT TRAIL */}
+      {activeTab === "profile-requests" && onDecideProfileRequest && (
+        <ProfileRequestsPanel requests={profileRequests} users={users} onDecide={onDecideProfileRequest} />
+      )}
+
       {activeTab === "logs" && (
         <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
@@ -1305,7 +1378,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
             <div className="flex items-start justify-between border-b border-slate-100 pb-4">
               <div>
                 <span className="px-2.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-xs border border-indigo-200">
-                  {selectedSurveyForPreview.cat} · {selectedSurveyForPreview.academicYear || "AY 2025-2026"}
+                  {selectedSurveyForPreview.cat} · {termLabel(selectedSurveyForPreview)}
                 </span>
                 <h3 className="font-serif text-xl font-bold text-slate-900 mt-2">
                   {selectedSurveyForPreview.title}

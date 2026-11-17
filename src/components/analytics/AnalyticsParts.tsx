@@ -74,38 +74,134 @@ export function Change({ now, before, digits = 2, suffix = "" }: { now: number |
   );
 }
 
-/** One stacked bar: Positive / Neutral / Negative as percentages of analyzed comments. */
-export function SentimentBar({ counts, compact = false }: { counts: SentimentCounts; compact?: boolean }) {
+/** Below this share a percentage does not fit inside its bar segment. */
+const INSIDE_LABEL_MIN = 12;
+/** Neutral is drawn across both halves, so it has twice the room of one segment. */
+const NEUTRAL_LABEL_MIN = 8;
+
+/** Scale shown above a list of diverging sentiment bars. */
+export function DivergingAxis() {
+  return (
+    <div className="grid grid-cols-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+      <span>More negative</span>
+      <span className="text-center">0</span>
+      <span className="text-right">More positive</span>
+    </div>
+  );
+}
+
+/**
+ * Diverging bar: negative grows left from the middle line, positive grows right,
+ * neutral is split evenly across the middle. Each side of the line is 0-100% of
+ * the analyzed comments, so bars in a list can be compared with each other.
+ */
+/** Color key in bar order: Negative, Neutral, Positive. */
+export function SentimentLegend() {
+  return (
+    <span className="flex flex-wrap gap-3 text-xs text-slate-600">
+      {(["negative", "neutral", "positive"] as const).map((k) => (
+        <span key={k} className="inline-flex items-center gap-1">
+          <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: SENTIMENT_COLORS[k] }} />
+          {k[0].toUpperCase() + k.slice(1)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** Row label for a list of diverging bars: name, then "n = 12 comments · neutral 17%". */
+export function SentimentRowLabel({ name, counts }: { name: string; counts: SentimentCounts }) {
+  return (
+    <span className="min-w-0">
+      <span className="block text-sm font-semibold text-slate-800 truncate" title={name}>
+        {name}
+      </span>
+      <span className="block text-[11px] text-slate-500">
+        n = {counts.analyzed} comment{counts.analyzed === 1 ? "" : "s"} · neutral{" "}
+        {fmtPct(percent(counts.neutral, counts.analyzed))}
+      </span>
+    </span>
+  );
+}
+
+export function SentimentBar({
+  counts,
+  compact = false,
+  legend = true,
+}: {
+  counts: SentimentCounts;
+  compact?: boolean;
+  /** false in lists that use SentimentRowLabel and a SentimentLegend in the header. */
+  legend?: boolean;
+}) {
   if (counts.analyzed === 0) {
     return <p className="text-sm text-slate-500">No analyzed comments in this period.</p>;
   }
   const parts = [
-    { key: "positive" as const, label: "Positive", value: counts.positive },
-    { key: "neutral" as const, label: "Neutral", value: counts.neutral },
     { key: "negative" as const, label: "Negative", value: counts.negative },
+    { key: "neutral" as const, label: "Neutral", value: counts.neutral },
+    { key: "positive" as const, label: "Positive", value: counts.positive },
   ];
+  const pct = {
+    positive: percent(counts.positive, counts.analyzed),
+    neutral: percent(counts.neutral, counts.analyzed),
+    negative: percent(counts.negative, counts.analyzed),
+  };
+  const tip = (p: (typeof parts)[number]) =>
+    `${p.label}: ${p.value} of ${counts.analyzed} comments (${fmtPct(pct[p.key])})`;
+  // A segment's width in the whole bar = its share / 2 (each side is half the bar).
+  const segment = (key: "positive" | "neutral" | "negative", share: number, rounded: string, showLabel: boolean) =>
+    share > 0 ? (
+      <div
+        className={`h-full flex items-center justify-center text-[11px] font-bold text-white ${rounded}`}
+        style={{ width: `${share / 2}%`, backgroundColor: SENTIMENT_COLORS[key] }}
+        title={tip(parts.find((p) => p.key === key)!)}
+      >
+        {showLabel && pct[key] >= INSIDE_LABEL_MIN ? fmtPct(pct[key]) : null}
+      </div>
+    ) : null;
+  // Too small to hold its number: write it just outside the bar end instead.
+  const outside = (key: "negative" | "positive") =>
+    pct[key] < INSIDE_LABEL_MIN ? (
+      <span className={`self-center text-[11px] font-bold text-slate-600 ${key === "negative" ? "pr-1" : "pl-1"}`}>
+        {fmtPct(pct[key])}
+      </span>
+    ) : null;
   return (
     <div className="space-y-2">
-      <div className="flex h-3 w-full gap-[2px] rounded-full overflow-hidden bg-white">
-        {parts.map((p) =>
-          p.value > 0 ? (
-            <div
-              key={p.key}
-              title={`${p.label}: ${p.value} of ${counts.analyzed} comments (${fmtPct(percent(p.value, counts.analyzed))})`}
-              style={{ width: `${percent(p.value, counts.analyzed)}%`, backgroundColor: SENTIMENT_COLORS[p.key] }}
-            />
-          ) : null
+      <div className={`relative flex w-full ${compact ? "h-5" : "h-6"}`}>
+        <div className="flex w-1/2 justify-end gap-0.5 pr-px">
+          {outside("negative")}
+          {segment("negative", pct.negative, "rounded-l-md", true)}
+          {segment("neutral", pct.neutral, "", false)}
+        </div>
+        <div className="flex w-1/2 gap-0.5 pl-px">
+          {segment("neutral", pct.neutral, "", false)}
+          {segment("positive", pct.positive, "rounded-r-md", true)}
+          {outside("positive")}
+        </div>
+        <div className="absolute -inset-y-0.75 left-1/2 w-px bg-slate-400" aria-hidden="true" />
+        {/* Neutral spans the middle line; its number sits on the line (dark text, gray is light). */}
+        {pct.neutral >= NEUTRAL_LABEL_MIN && (
+          <span
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-1 rounded text-[11px] font-bold text-slate-800"
+            style={{ backgroundColor: SENTIMENT_COLORS.neutral }}
+          >
+            {fmtPct(pct.neutral)}
+          </span>
         )}
       </div>
-      <div className={`flex flex-wrap gap-x-4 gap-y-1 ${compact ? "text-xs" : "text-sm"} text-slate-700`}>
-        {parts.map((p) => (
-          <span key={p.key} className="inline-flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: SENTIMENT_COLORS[p.key] }} />
-            {p.label} <strong>{fmtPct(percent(p.value, counts.analyzed))}</strong>
-            {!compact && <span className="text-slate-400">({p.value})</span>}
-          </span>
-        ))}
-      </div>
+      {legend && (
+        <div className={`flex flex-wrap justify-center gap-x-4 gap-y-1 ${compact ? "text-xs" : "text-sm"} text-slate-700`}>
+          {parts.map((p) => (
+            <span key={p.key} className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: SENTIMENT_COLORS[p.key] }} />
+              {p.label} <strong>{fmtPct(pct[p.key])}</strong>
+              {!compact && <span className="text-slate-400">({p.value})</span>}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

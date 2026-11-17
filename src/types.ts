@@ -22,6 +22,12 @@ export interface UserProfile {
   restrictionReason?: string;
   /** Last time this person had the app open (heartbeat every 5 minutes); admin sees "active now". */
   lastSeenAt?: number;
+  /** `decidedAt` of the last profile change decision this person has seen (shown once in My Profile). */
+  profileRequestSeenAt?: number;
+  /** Set by the admin's "New school year" move: the student picks their new section once. */
+  sectionPickNeeded?: boolean;
+  /** Set when the "New school year" move found the student in their program's last year (account suspended). */
+  graduatedAt?: number;
 }
 
 export type SurveyStatus = "draft" | "pending" | "rejected" | "scheduled" | "published" | "archived";
@@ -44,23 +50,17 @@ export interface TargetAudience {
   type: "all" | "faculty" | "students" | "officers" | "custom";
   filters?: {
     roles?: string[];
-    studentFilters?: {
-      departments?: Array<{
-        department: string;
-        programs: string[];
-        years: string[];
-        sections: string[];
-      }>;
-    };
-    officerFilters?: {
-      departments?: Array<{
-        department: string;
-        programs: string[];
-        years: string[];
-        sections: string[];
-      }>;
-    };
   };
+  /**
+   * Optional narrowing (plan step 10c-2). For each list that is not empty, the person's own
+   * (locked) value must be in it; empty or missing = no limit. Names as in School Setup
+   * (department, program), year labels ("3rd Year") and section labels ("CS-3A"). A section
+   * target always comes with a program target. Checked by `isInAudience` and the rule `inAudience`.
+   */
+  departments?: string[];
+  programs?: string[];
+  years?: string[];
+  sections?: string[];
 }
 
 export interface Topic {
@@ -109,6 +109,33 @@ export interface SurveyReport {
   decisionNote?: string;
 }
 
+/** The school fields a person cannot change themselves (locked; changed by the admin or by request). */
+export interface ProfileSchoolFields {
+  department?: string;
+  program?: string;
+  year?: string;
+  section?: string;
+  studentId?: string;
+}
+
+/**
+ * `profile_requests/{emailKey}`: one per person (the latest). Only the person and the admin can
+ * read it; the person sends or cancels it while pending; only the admin decides.
+ */
+export interface ProfileChangeRequest {
+  id: string;
+  email: string;
+  name: string;
+  current: ProfileSchoolFields;
+  requested: ProfileSchoolFields;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  requestedAt: number;
+  decidedBy?: string;
+  decidedAt?: number;
+  decisionNote?: string;
+}
+
 /** One degree program. Sections are letters per year level; the section name is CODE-<year><letter>. */
 export interface SchoolProgram {
   id: string;
@@ -150,6 +177,9 @@ export interface AppSettings {
   surveyCreationOpen: boolean;
   updatedAt?: number;
   updatedBy?: string;
+  /** Last "New school year: move students up one year" (User Management). */
+  lastYearMoveAt?: number;
+  lastYearMoveBy?: string;
 }
 
 /**

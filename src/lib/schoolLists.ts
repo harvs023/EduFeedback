@@ -1,3 +1,4 @@
+import { audienceNamesUsed } from "./audience";
 import type { SchoolDepartment, SchoolLists, SchoolProgram, Survey, SurveyCategory, UserProfile } from "../types";
 import { DEFAULT_SURVEY_CATEGORIES } from "../data/initialData";
 
@@ -190,7 +191,8 @@ export function validateSchoolLists(
     }
   }
 
-  // Names in use must not disappear or change.
+  // Names in use (by accounts or by survey audiences) must not disappear or change.
+  const targeted = audienceNamesUsed(surveys);
   if (before) {
     const nowDept = new Map(lists.departments.map((d) => [d.id, d]));
     const nowProg = new Map(lists.departments.flatMap((d) => d.programs).map((p) => [p.id, p]));
@@ -199,18 +201,24 @@ export function validateSchoolLists(
       const now = nowDept.get(d.id);
       if (n > 0 && (!now || now.name.trim() !== d.name)) {
         errors.push(`Department "${d.name}" is used by ${n} account(s), so it cannot be renamed or deleted. Retire it instead.`);
+      } else if (targeted.departments.has(d.name) && (!now || now.name.trim() !== d.name)) {
+        errors.push(`Department "${d.name}" is the audience of a survey, so it cannot be renamed or deleted. Retire it instead.`);
       }
       for (const p of d.programs) {
         const pnow = nowProg.get(p.id);
         const pn = usage.programs.get(p.name) || 0;
         if (pn > 0 && (!pnow || pnow.name.trim() !== p.name)) {
           errors.push(`Program "${p.name}" is used by ${pn} account(s), so it cannot be renamed or deleted. Retire it instead.`);
+        } else if (targeted.programs.has(p.name) && (!pnow || pnow.name.trim() !== p.name)) {
+          errors.push(`Program "${p.name}" is the audience of a survey, so it cannot be renamed or deleted. Retire it instead.`);
         }
         const kept = new Set(pnow ? allSectionLabels(pnow) : []);
         for (const label of allSectionLabels(p)) {
           const sn = usage.sections.get(label) || 0;
           if (sn > 0 && !kept.has(label)) {
             errors.push(`Section ${label} is used by ${sn} account(s), so it cannot be removed or have its code changed.`);
+          } else if (targeted.sections.has(label) && !kept.has(label)) {
+            errors.push(`Section ${label} is the audience of a survey, so it cannot be removed or have its code changed.`);
           }
         }
       }

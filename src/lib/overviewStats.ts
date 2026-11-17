@@ -125,13 +125,22 @@ export function overviewNumbers(
   }
 
   const ratingAnswers = distribution.reduce((s, x) => s + x, 0);
-  const months = [...monthCounts.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-18)
-    .map(([month, count]) => {
-      const [y, m] = month.split("-").map(Number);
-      return { month, count, label: new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "2-digit" }) };
-    });
+  // Every month from the first to the last month with responses (quiet months shown as 0), last 18 only.
+  const keys = [...monthCounts.keys()].sort();
+  const months: OverviewNumbers["months"] = [];
+  if (keys.length) {
+    const [fy, fm] = keys[0].split("-").map(Number);
+    const [ly, lm] = keys[keys.length - 1].split("-").map(Number);
+    for (let d = new Date(fy, fm - 1, 1); d <= new Date(ly, lm - 1, 1); d.setMonth(d.getMonth() + 1)) {
+      const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      months.push({
+        month,
+        count: monthCounts.get(month) || 0,
+        label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+      });
+    }
+  }
+  months.splice(0, Math.max(0, months.length - 18));
 
   return {
     rows,

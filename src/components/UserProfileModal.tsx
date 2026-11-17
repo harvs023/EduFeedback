@@ -1,59 +1,50 @@
 import React, { useState } from "react";
-import { SchoolLists, UserProfile } from "../types";
+import { ProfileChangeRequest, ProfileSchoolFields as Fields, SchoolLists, UserProfile } from "../types";
 import { X, CheckCircle2, Shield } from "lucide-react";
-import { SchoolFieldsPicker } from "./SchoolFieldsPicker";
-import { missingSchoolField, type SchoolFields } from "../lib/schoolLists";
+import { ProfileSchoolFields } from "./ProfileSchoolFields";
 
 interface UserProfileModalProps {
   currentUser: UserProfile;
   schoolLists: SchoolLists | null;
+  /** This person's latest school-details change request, or null. */
+  profileRequest: ProfileChangeRequest | null;
+  /** true only the first time My Profile is opened after the admin decided the request. */
+  showRequestDecision: boolean;
   onClose: () => void;
-  onUpdateProfile: (updated: Partial<UserProfile>) => void;
+  /** Saves only the name; the school details are locked. */
+  onUpdateName: (name: string) => Promise<boolean>;
+  onSendProfileRequest: (requested: Fields, reason: string) => Promise<boolean>;
+  onCancelProfileRequest: () => Promise<void>;
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   currentUser,
   schoolLists,
+  profileRequest,
+  showRequestDecision,
   onClose,
-  onUpdateProfile,
+  onUpdateName,
+  onSendProfileRequest,
+  onCancelProfileRequest,
 }) => {
   const [name, setName] = useState<string>(currentUser.name);
-  const [school, setSchool] = useState<SchoolFields>({
-    department: currentUser.department || "",
-    program: currentUser.program || "",
-    year: currentUser.year || "",
-    section: currentUser.section || "",
-  });
-  const [studentId, setStudentId] = useState<string>(currentUser.studentId || "");
   const [error, setError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
-  const isStudent = currentUser.pos === "Student" || currentUser.pos === "Student Officer";
-  const needsSchool = isStudent || currentUser.pos === "Faculty";
+  const hasSchoolFields = currentUser.pos === "Student" || currentUser.pos === "Student Officer" || currentUser.pos === "Faculty";
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError("Please enter your name.");
       return;
     }
-    const missing = needsSchool ? missingSchoolField(school, isStudent) : null;
-    if (missing) {
-      setError(missing);
-      return;
-    }
-    if (isStudent && !studentId.trim()) {
-      setError("Please enter your student ID.");
-      return;
-    }
     setError(null);
-    onUpdateProfile({
-      name: name.trim(),
-      department: school.department,
-      ...(isStudent
-        ? { program: school.program, year: school.year, section: school.section, studentId: studentId.trim() }
-        : {}),
-    });
+    if (name.trim() === currentUser.name) {
+      onClose();
+      return;
+    }
+    if (!(await onUpdateName(name.trim()))) return;
     setSavedSuccess(true);
     setTimeout(() => {
       setSavedSuccess(false);
@@ -76,8 +67,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <Shield className="w-3.5 h-3.5" />
               <span>{currentUser.role} Account</span>
             </div>
-            <h2 className="font-serif text-xl font-bold text-slate-900">User Profile & Demographics</h2>
-            <p className="text-xs text-slate-500">Configure academic cohort info for filtered survey participation</p>
+            <h2 className="font-serif text-xl font-bold text-slate-900">My Profile</h2>
+            <p className="text-xs text-slate-500">Your name and school details</p>
           </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
             <X className="w-5 h-5" />
@@ -112,18 +103,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             />
           </div>
 
-          <SchoolFieldsPicker lists={schoolLists} isStudent={isStudent} value={school} onChange={setSchool} />
-
-          {isStudent && (
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Student ID</label>
-              <input
-                type="text"
-                value={studentId}
-                onChange={(e) => setStudentId(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-              />
-            </div>
+          {hasSchoolFields && (
+            <ProfileSchoolFields
+              user={currentUser}
+              lists={schoolLists}
+              request={profileRequest}
+              showDecision={showRequestDecision}
+              onSend={onSendProfileRequest}
+              onCancel={onCancelProfileRequest}
+            />
           )}
 
           {error && (
@@ -136,13 +124,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               onClick={onClose}
               className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl"
             >
-              Cancel
+              Close
             </button>
             <button
               type="submit"
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs"
             >
-              Save Profile Changes
+              Save name
             </button>
           </div>
         </form>

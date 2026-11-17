@@ -65,20 +65,32 @@ service cloud.firestore {
     }
 
     // Is the signed-in person part of a survey's target audience?
-    // Same mapping as the app: "students" = Student or Student Officer.
+    // 1) Role: same mapping as the app ("students" = Student or Student Officer).
+    // 2) Optional narrowing: for each list that is not empty, the person's own (locked)
+    //    department / program / year / section must be in it. A section target also needs
+    //    a program target, so a wrong section name alone can never match.
     function inAudience(survey) {
       let target = survey.get('targetAudience', {});
       let type = target.get('type', 'all');
       let roles = target.get('filters', {}).get('roles', []);
-      let pos = get(myProfilePath()).data.pos;
-      return type == 'all'
-        || (type == 'students' && pos in ['Student', 'Student Officer'])
-        || (type == 'faculty' && pos == 'Faculty')
-        || (type == 'officers' && pos == 'Student Officer')
-        || (type == 'custom' && (
-              ('students' in roles && pos in ['Student', 'Student Officer'])
-              || ('faculty' in roles && pos == 'Faculty')
-              || ('officers' in roles && pos == 'Student Officer')));
+      let me = get(myProfilePath()).data;
+      let pos = me.pos;
+      let depts = target.get('departments', []);
+      let progs = target.get('programs', []);
+      let years = target.get('years', []);
+      let secs = target.get('sections', []);
+      return (type == 'all'
+          || (type == 'students' && pos in ['Student', 'Student Officer'])
+          || (type == 'faculty' && pos == 'Faculty')
+          || (type == 'officers' && pos == 'Student Officer')
+          || (type == 'custom' && (
+                ('students' in roles && pos in ['Student', 'Student Officer'])
+                || ('faculty' in roles && pos == 'Faculty')
+                || ('officers' in roles && pos == 'Student Officer'))))
+        && (depts.size() == 0 || me.get('department', '') in depts)
+        && (progs.size() == 0 || me.get('program', '') in progs)
+        && (years.size() == 0 || me.get('year', '') in years)
+        && (secs.size() == 0 || (progs.size() > 0 && me.get('section', '') in secs));
     }
 
     // ------------------------------------------------------- academic calendar
@@ -137,6 +149,32 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ------------------------------------------------------- profile change requests
+    // A request to change one's own locked school fields. One per person (id = email key), so
+    // only one can wait at a time. Only the person and the admin can read it; the person can
+    // send it, cancel it while waiting, or send a new one after a decision; only the admin decides.
+    function validProfileRequest() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['email', 'name', 'current', 'requested', 'reason', 'status', 'requestedAt'])
+        && d.email == myEmail()
+        && d.status == 'pending'
+        && d.requestedAt is int
+        && d.reason is string && d.reason.size() >= 10 && d.reason.size() <= 500
+        && d.current is map
+        && d.current.keys().hasOnly(['department', 'program', 'year', 'section', 'studentId'])
+        && d.requested is map
+        && d.requested.keys().hasOnly(['department', 'program', 'year', 'section', 'studentId']);
+    }
+
+    match /profile_requests/{requestId} {
+      allow read: if isAdmin() || (isActive() && requestId == myKey());
+      allow create: if isActive() && requestId == myKey() && validProfileRequest();
+      allow update: if isActive() && requestId == myKey()
+        && resource.data.status != 'pending' && validProfileRequest();
+      allow delete: if isActive() && requestId == myKey() && resource.data.status == 'pending';
+      allow update, delete: if isAdmin();
+    }
+
     // ------------------------------------------------------- evaluation results
     // Saved results of the thesis sentiment evaluation (accuracy, macro-F1, ...).
     // Only the admin can read, add or delete them. They can never be edited.
@@ -172,11 +210,25 @@ service cloud.firestore {
             && request.resource.data.status == 'pending_approval')
         );
 
+      // People may edit their own profile, except role/status/admin fields and the school
+      // fields (department, program, year, section, student ID): those change only through the
+      // admin (directly or by approving a profile change request), because surveys target them.
       allow update: if signedIn()
         && userId.lower() == myKey()
-        && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['role', 'pos', 'status', 'email', 'joined',
-                       'canCreateSurveys', 'canPostNews', 'restrictionReason']);
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['role', 'pos', 'status', 'email', 'joined',
+                      'canCreateSurveys', 'canPostNews', 'restrictionReason',
+                      'department', 'program', 'year', 'section', 'studentId',
+                      'sectionPickNeeded'])
+          ||
+          // One-time section pick after the admin moved this student up a year.
+          (resource.data.get('sectionPickNeeded', false) == true
+            && onlyChanges(['section', 'sectionPickNeeded'])
+            && request.resource.data.sectionPickNeeded == false
+            && request.resource.data.section is string
+            && request.resource.data.section.size() > 0)
+        );
 
       allow create, update, delete: if isAdmin();
     }

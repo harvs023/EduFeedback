@@ -1,3 +1,4 @@
+import { describeAudience } from "../../lib/audience";
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, ChevronRight, Info, ThumbsUp } from "lucide-react";
 import type { AcademicYearTerms, Survey, SurveyResponse, Topic, UserProfile } from "../../types";
@@ -21,7 +22,7 @@ import {
 } from "../../lib/recommendations";
 import { topicsAcrossSurveys } from "../../lib/topicAnalytics";
 import { overviewNumbers } from "../../lib/overviewStats";
-import { CountBar, SENTIMENT_COLORS, SentimentBar, StatCard, fmtPct } from "./AnalyticsParts";
+import { CountBar, DivergingAxis, SENTIMENT_COLORS, SentimentBar, SentimentLegend, SentimentRowLabel, StatCard, fmtPct } from "./AnalyticsParts";
 
 interface Props {
   surveys: Survey[];
@@ -206,8 +207,9 @@ export const OverviewTab: React.FC<Props> = ({ surveys, responses, topics, calen
         <span>
           {periodLabel(period)}. Combined figures count each respondent's own average once per survey; whole survey averages
           are not averaged with each other. The surveys have different questions, respondents and dates, so combined numbers
-          are descriptive only. Groups with fewer than {MIN_RESPONSES} responses show no numbers; under 30 they are marked as
-          a small sample.
+          are descriptive only. Surveys can be meant for different groups (for example one program or year level), so combined
+          figures mix different respondents. Groups with fewer than {MIN_RESPONSES} responses show no numbers; under 30 they
+          are marked as a small sample.
         </span>
       </div>
 
@@ -267,16 +269,7 @@ export const OverviewTab: React.FC<Props> = ({ surveys, responses, topics, calen
 
         <Panel
           title="Comment sentiment"
-          action={
-            <span className="flex gap-3 text-xs text-slate-600">
-              {(["positive", "neutral", "negative"] as const).map((k) => (
-                <span key={k} className="inline-flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: SENTIMENT_COLORS[k] }} />
-                  {k[0].toUpperCase() + k.slice(1)}
-                </span>
-              ))}
-            </span>
-          }
+          action={<SentimentLegend />}
         >
           <div className="space-y-1">
             <p className="text-xs font-semibold text-slate-600">All comments</p>
@@ -289,12 +282,13 @@ export const OverviewTab: React.FC<Props> = ({ surveys, responses, topics, calen
           {topicSentiment.length > 0 && (
             <div className="space-y-2.5 pt-2 border-t border-slate-100">
               <p className="text-xs font-semibold text-slate-600">Per topic</p>
+              <div className="sm:pl-39">
+                <DivergingAxis />
+              </div>
               {topicSentiment.map((r) => (
                 <div key={r.topicId} className="grid grid-cols-1 sm:grid-cols-[minmax(0,9rem)_1fr] gap-x-3 gap-y-1 items-center">
-                  <span className="text-xs text-slate-700 truncate" title={r.topicName}>
-                    {r.topicName} <span className="text-slate-400">({r.sentiment.analyzed})</span>
-                  </span>
-                  <SentimentBar counts={r.sentiment} compact />
+                  <SentimentRowLabel name={r.topicName} counts={r.sentiment} />
+                  <SentimentBar counts={r.sentiment} compact legend={false} />
                 </div>
               ))}
             </div>
@@ -319,11 +313,20 @@ export const OverviewTab: React.FC<Props> = ({ surveys, responses, topics, calen
         {nums.months.length === 0 ? (
           <p className="text-xs text-slate-500">No responses in this period.</p>
         ) : (
-          <div className="flex items-end gap-1.5 h-36 overflow-x-auto pb-1" role="img" aria-label="Number of responses per month">
+          <div className="flex gap-1.5 h-44 overflow-x-auto pb-1" role="img" aria-label="Number of responses per month">
             {nums.months.map((m) => (
-              <div key={m.month} className="flex flex-col items-center justify-end h-full min-w-[2.25rem] flex-1" title={`${m.label}: ${m.count} responses`}>
-                <span className="text-[10px] font-semibold text-slate-700 tabular-nums">{m.count}</span>
-                <div className="w-full max-w-8 rounded-t-md bg-indigo-500" style={{ height: `${Math.max((m.count / maxMonth) * 100, 3)}%` }} />
+              <div key={m.month} className="flex flex-col items-center h-full min-w-9 flex-1" title={`${m.label}: ${m.count} responses`}>
+                {/* Plot area: the bar's height is a share of this box; the top padding leaves room for the number. */}
+                <div className="flex-1 min-h-0 w-full flex items-end justify-center pt-4 border-b border-slate-200">
+                  <div
+                    className={`relative w-full max-w-8 rounded-t-md ${m.count > 0 ? "bg-indigo-500" : ""}`}
+                    style={{ height: m.count > 0 ? `${Math.max((m.count / maxMonth) * 100, 3)}%` : "0" }}
+                  >
+                    <span className="absolute -top-4 inset-x-0 text-center text-[10px] font-semibold text-slate-700 tabular-nums">
+                      {m.count}
+                    </span>
+                  </div>
+                </div>
                 <span className="text-[10px] text-slate-500 mt-1 whitespace-nowrap">{m.label}</span>
               </div>
             ))}
@@ -350,6 +353,9 @@ export const OverviewTab: React.FC<Props> = ({ surveys, responses, topics, calen
                       <p className="text-[11px] text-slate-500 capitalize">
                         {survey.status} · {survey.cat}
                       </p>
+                      <p className="text-[11px] text-slate-500 truncate" title={describeAudience(survey.targetAudience)}>
+                        For: {describeAudience(survey.targetAudience)}
+                      </p>
                     </div>
                     <p className="text-sm text-slate-700">n = {stats.responses}</p>
                     {!ok ? (
@@ -373,7 +379,7 @@ export const OverviewTab: React.FC<Props> = ({ surveys, responses, topics, calen
                           {c.analyzed === 0 ? (
                             <span className="text-slate-400">No analyzed comments</span>
                           ) : (
-                            (["positive", "neutral", "negative"] as const).map((k) => (
+                            (["negative", "neutral", "positive"] as const).map((k) => (
                               <span key={k} className="inline-flex items-center gap-1">
                                 <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: SENTIMENT_COLORS[k] }} />
                                 {k[0].toUpperCase() + k.slice(1)} {fmtPct(percent(c[k], c.analyzed))}

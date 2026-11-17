@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Survey, UserProfile, Topic } from "../types";
+import { describeAudience } from "../lib/audience";
 import {
   runPreChecks,
   countEligibleUsers,
@@ -32,34 +33,6 @@ interface SurveyApprovalsPanelProps {
   onRejectSurvey?: (surveyId: string | number, reason: string) => Promise<void> | void;
   onUpdateUser?: (email: string, changes: Partial<UserProfile>) => Promise<void> | void;
   showToast?: (text: string, type?: "success" | "info") => void;
-}
-
-function formatReadableAudience(survey: Survey): string {
-  const target = survey.targetAudience;
-  if (!target || target.type === "all") {
-    return "All Campus (Students, Officers, Faculty)";
-  }
-  if (target.type === "students") {
-    return "Students & Student Officers";
-  }
-  if (target.type === "faculty") {
-    return "Faculty Members";
-  }
-  if (target.type === "officers") {
-    return "Student Officers Only";
-  }
-  if (target.type === "custom") {
-    const roles = target.filters?.roles || [];
-    if (roles.length === 0) return "Custom (No roles selected)";
-    const labels = roles.map((r) => {
-      if (r === "students") return "Students";
-      if (r === "faculty") return "Faculty";
-      if (r === "officers") return "Officers";
-      return r;
-    });
-    return `Custom (${labels.join(", ")})`;
-  }
-  return "Campus Community";
 }
 
 function formatQuestionType(type: string): string {
@@ -387,7 +360,7 @@ export const SurveyApprovalsPanel: React.FC<SurveyApprovalsPanelProps> = ({
                   </span>
                   <div className="text-slate-800 font-semibold mt-0.5 flex items-center gap-1.5">
                     <Users className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                    <span>{formatReadableAudience(survey)}</span>
+                    <span>{describeAudience(survey.targetAudience)}</span>
                   </div>
                 </div>
                 <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 font-bold text-[11px] shrink-0">

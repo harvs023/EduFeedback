@@ -1,7 +1,8 @@
 import type { Survey, TargetAudience, UserProfile } from "../types";
 
 /** The profile fields an audience check needs (all locked against self-edit). */
-export type AudiencePerson = Pick<UserProfile, "pos" | "department" | "program" | "year" | "section">;
+export type AudiencePerson = Pick<UserProfile, "pos" | "department" | "program" | "year" | "section"> &
+  Partial<Pick<UserProfile, "role">>;
 
 export type AudienceLists = Pick<TargetAudience, "departments" | "programs" | "years" | "sections">;
 
@@ -32,6 +33,8 @@ const inList = (list: string[] | undefined, value: string | undefined) =>
  */
 export function isInAudience(survey: Pick<Survey, "targetAudience">, person: AudiencePerson): boolean {
   const t = survey.targetAudience;
+  // The admin account is a system account, never a respondent (same as the rule).
+  if (person.role === "superadmin" || person.pos === "Superadmin") return false;
   return (
     roleMatches(t, person.pos) &&
     inList(t?.departments, person.department) &&

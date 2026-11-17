@@ -33,9 +33,9 @@ export const ActiveUsersCard: React.FC<{ users: UserProfile[]; onRefresh?: () =>
   };
 
   return (
-    <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/80">
+    <div className="bg-white p-4 rounded-2xl border border-slate-200">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active users</span>
+        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide block">Active users</span>
         {onRefresh && (
           <button
             type="button"
@@ -43,17 +43,17 @@ export const ActiveUsersCard: React.FC<{ users: UserProfile[]; onRefresh?: () =>
             disabled={busy}
             title="Check again"
             aria-label="Check active users again"
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 cursor-pointer disabled:opacity-50"
+            className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${busy ? "animate-spin" : ""}`} />
           </button>
         )}
       </div>
-      <div className="font-serif text-2xl font-black text-emerald-400 flex items-center gap-2">
-        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" aria-hidden="true" />
-        {counts.now} <span className="text-sm font-sans font-semibold text-emerald-300">now</span>
+      <div className="text-2xl font-extrabold text-slate-900 flex items-center gap-2">
+        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" aria-hidden="true" />
+        {counts.now} <span className="text-sm font-semibold text-slate-500">now</span>
       </div>
-      <span className="text-[11px] text-slate-400">
+      <span className="text-[11px] text-slate-500">
         {counts.today} today · checked {new Date(checkedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
       </span>
     </div>

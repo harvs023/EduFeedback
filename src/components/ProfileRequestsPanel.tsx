@@ -51,7 +51,7 @@ export function ProfileRequestsPanel({
           <p className="text-xs text-slate-500 max-w-2xl">
             People cannot change their department, program, year, section or student ID themselves, because surveys
             can be meant for these groups. Approving a request updates the person's profile right away. You can also
-            edit anyone directly in the User &amp; Role Directory.
+            edit anyone directly on the Users page.
           </p>
         </div>
         <div className="flex gap-1 p-1 rounded-xl bg-slate-100 text-xs font-bold">
@@ -126,8 +126,8 @@ export function ProfileRequestsPanel({
 
                 {outdated && (
                   <p className="text-xs p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900">
-                    This person's profile changed after the request was sent. Check the current values in the User &amp;
-                    Role Directory before approving.
+                    This person's profile changed after the request was sent. Check the current values on the Users page before
+                    approving.
                   </p>
                 )}
 

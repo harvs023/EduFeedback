@@ -188,7 +188,7 @@ export const SentimentAnalysisView: React.FC<SentimentAnalysisViewProps> = ({
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-12">
+    <div className="space-y-6">
       {confirmDialog}
       {/* Header + honest explanation */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-4">

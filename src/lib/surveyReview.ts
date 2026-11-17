@@ -111,12 +111,14 @@ function joinedBy(user: Pick<UserProfile, "joined">, cutoff: number | null): boo
  */
 export function countEligibleUsers(
   survey: Survey,
-  users: (Pick<UserProfile, "email" | "status" | "joined"> & AudiencePerson)[],
+  users: (Pick<UserProfile, "email" | "status" | "joined" | "role"> & AudiencePerson)[],
   cutoff: number | null = null
 ): number {
   const ownerEmail = (survey.owner || "").trim().toLowerCase();
   return users.filter((u) => {
     if (u.status !== "active") return false;
+    // The admin account is a system account, not a respondent.
+    if (u.role === "superadmin" || u.pos === "Superadmin") return false;
     if (!joinedBy(u, cutoff)) return false;
     if (u.email && u.email.trim().toLowerCase() === ownerEmail) return false;
     return isInAudience(survey, u);

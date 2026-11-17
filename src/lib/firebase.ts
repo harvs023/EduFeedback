@@ -34,6 +34,7 @@ import {
   signOut,
   onAuthStateChanged,
   deleteUser,
+  sendPasswordResetEmail,
   User as FirebaseUser,
 } from "firebase/auth";
 import {
@@ -225,6 +226,13 @@ export const FirebaseAuthService = {
     const authInstance = getFirebaseAuth();
     if (!authInstance) return;
     await signOut(authInstance);
+  },
+
+  /** Firebase emails the person a link to choose a new password (nobody else sees the password). */
+  async sendPasswordReset(email: string): Promise<void> {
+    const authInstance = getFirebaseAuth();
+    if (!authInstance) throw new Error("Sign-in is not available.");
+    await sendPasswordResetEmail(authInstance, email.trim().toLowerCase());
   },
 
   /** Removes the login that was just created (used when saving the profile fails). */

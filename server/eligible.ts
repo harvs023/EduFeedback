@@ -40,10 +40,11 @@ export async function eligibleCountFor(surveyId: string, callerEmail: string): P
   // Only the fields the count needs; names and other profile details are not even loaded.
   const usersSnap = await db
     .collection("users")
-    .select("email", "status", "pos", "joined", "department", "program", "year", "section")
+    .select("email", "status", "pos", "role", "joined", "department", "program", "year", "section")
     .get();
   const users = usersSnap.docs.map(
-    (d) => d.data() as Pick<UserProfile, "email" | "status" | "pos" | "joined" | "department" | "program" | "year" | "section">
+    (d) =>
+      d.data() as Pick<UserProfile, "email" | "status" | "pos" | "role" | "joined" | "department" | "program" | "year" | "section">
   );
   const eligible = countEligibleUsers(survey, users, cutoff);
   cache.set(surveyId, { at: Date.now(), eligible, cutoff });

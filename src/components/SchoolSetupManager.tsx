@@ -164,7 +164,7 @@ export const SchoolSetupManager: React.FC<SchoolSetupManagerProps> = ({ lists, u
   const inputCls = "w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-hidden focus:border-indigo-400";
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-6">
       {confirmDialog}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-3">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold uppercase tracking-wider border border-indigo-200">

@@ -65,13 +65,14 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, badge: undefined },
-    { id: "take-survey", label: "Take a Survey", icon: ClipboardList, badge: undefined },
+    // The admin account is not a respondent, so it has no Take a Survey page.
+    ...(isSuperadmin ? [] : [{ id: "take-survey", label: "Take a Survey", icon: ClipboardList, badge: undefined }]),
     ...(currentUser
       ? [
           {
             id: "my-surveys",
-            label: isSuperadmin ? "Survey Management" : "My Surveys",
-            icon: isSuperadmin ? SlidersHorizontal : UserCheck,
+            label: "My Surveys",
+            icon: UserCheck,
             badge: undefined,
           },
         ]
@@ -328,7 +329,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ) : (
                         <ClipboardList className="w-4 h-4 text-slate-400" />
                       )}
-                      <span>{isSuperadmin ? "Campus Survey Management" : "My Created Surveys"}</span>
+                      <span>My Surveys</span>
                     </button>
                     <button
                       onClick={() => {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Survey, UserProfile, Answer, ReportReason } from "../types";
 import { ReportSurveyDialog } from "./ReportSurveyDialog";
 import confetti from "canvas-confetti";
@@ -66,17 +66,37 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
   const [isAnonymous, setIsAnonymous] = useState<boolean>(!requiresName);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
   const [submittedReceipt, setSubmittedReceipt] = useState<{
-    receiptId: string;
     timestamp: string;
     isAnonymous: boolean;
-    questionsCount: number;
   } | null>(null);
 
-    const [submitting, setSubmitting] = useState<boolean>(false);
+  const [submitting, setSubmitting] = useState<boolean>(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // The first unanswered question after pressing Submit (outlined in red, scrolled into view).
+  const [invalidIdx, setInvalidIdx] = useState<number | null>(null);
+  const questionRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  const isAnswered = (idx: number): boolean => {
+    const q = survey.questions[idx];
+    const a = answersState[idx];
+    if (q.type === "rating") return Boolean(answersState[`${idx}_raw`] || a);
+    if (q.type === "checkbox") return Array.isArray(a) ? a.length > 0 : Boolean(a);
+    if (q.type === "paragraph") return typeof a === "string" && a.trim().length > 0;
+    return Boolean(a);
+  };
+  const answeredCount = survey.questions.filter((_, i) => isAnswered(i)).length;
+  const totalQuestions = survey.questions.length;
+  const progress = totalQuestions ? Math.round((answeredCount / totalQuestions) * 100) : 0;
+  const clearInvalid = (qIdx: number) => {
+    if (invalidIdx === qIdx) {
+      setInvalidIdx(null);
+      setValidationError(null);
+    }
+  };
 
   const handleRatingSelect = (qIdx: number, val: number, label?: string) => {
     if (isReadOnly) return;
+    clearInvalid(qIdx);
     setAnswersState((prev) => ({
       ...prev,
       [qIdx]: `${val} stars${label ? ` (${label})` : ""}`,
@@ -86,11 +106,13 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
 
   const handleMultipleSelect = (qIdx: number, val: string) => {
     if (isReadOnly) return;
+    clearInvalid(qIdx);
     setAnswersState((prev) => ({ ...prev, [qIdx]: val }));
   };
 
   const handleCheckboxToggle = (qIdx: number, val: string) => {
     if (isReadOnly) return;
+    clearInvalid(qIdx);
     const current: string[] = Array.isArray(answersState[qIdx])
       ? answersState[qIdx]
       : typeof answersState[qIdx] === "string"
@@ -108,26 +130,24 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
 
   const handleParagraphChange = (qIdx: number, val: string) => {
     if (isReadOnly) return;
+    clearInvalid(qIdx);
     setAnswersState((prev) => ({ ...prev, [qIdx]: val }));
   };
 
+  // Rating, multiple choice and comment questions must be answered; checkboxes may stay empty.
   const validateForm = (): boolean => {
     setValidationError(null);
+    setInvalidIdx(null);
     for (let i = 0; i < survey.questions.length; i++) {
       const q = survey.questions[i];
-      const ans = answersState[i];
-      if (q.type === "rating" && !ans) {
-        setValidationError(`Please provide a rating for Question #${i + 1}.`);
-        return false;
-      }
-      if (q.type === "multiple" && !ans) {
-        setValidationError(`Please select an option for Question #${i + 1}.`);
-        return false;
-      }
-      if (q.type === "paragraph" && (!ans || !ans.trim())) {
-        setValidationError(`Please provide your feedback response for Question #${i + 1}.`);
-        return false;
-      }
+      if (q.type === "checkbox" || isAnswered(i)) continue;
+      const left = survey.questions.filter((qq, j) => qq.type !== "checkbox" && !isAnswered(j)).length;
+      setValidationError(
+        `Please answer question ${i + 1}${left > 1 ? ` (${left} questions still need an answer)` : ""}.`
+      );
+      setInvalidIdx(i);
+      questionRefs.current[i]?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return false;
     }
     return true;
   };
@@ -165,12 +185,9 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
 
       await onSubmit(answers, isAnonymous);
 
-      const receiptId = `EVAL-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
       setSubmittedReceipt({
-        receiptId,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric", year: "numeric" }),
+        timestamp: new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }),
         isAnonymous,
-        questionsCount: survey.questions.length,
       });
 
       setShowConfirmModal(false);
@@ -206,25 +223,16 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <span className="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-200 uppercase tracking-wider">
-                Submission Confirmed
-              </span>
-              <h2 className="font-serif text-2xl font-extrabold text-slate-900">
-                Evaluation Successfully Recorded!
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
-                Thank you for contributing to our institutional quality improvement. Your feedback has been safely stored and processed.
+              <h2 className="text-2xl font-extrabold text-slate-900">Thank you!</h2>
+              <p className="text-sm text-slate-600 max-w-md mx-auto">
+                Your answers were saved. Your feedback helps the school see what works and what to improve.
               </p>
             </div>
 
-            {/* Official Receipt Card */}
+            {/* Summary of what was sent (no reference code: nothing like that is saved) */}
             <div className="max-w-md mx-auto p-4 bg-slate-50 border border-slate-200 rounded-2xl text-left space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Official Receipt Reference</span>
-                <span className="font-mono text-xs font-bold text-slate-800">{submittedReceipt.receiptId}</span>
-              </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500">Survey Title:</span>
+                <span className="text-slate-500">Survey:</span>
                 <span className="font-bold text-slate-900 truncate max-w-[220px]">{survey.title}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
@@ -232,11 +240,11 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                 <span className="font-semibold text-blue-700">{survey.cat}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500">Submission Timestamp:</span>
+                <span className="text-slate-500">Sent:</span>
                 <span className="font-medium text-slate-700">{submittedReceipt.timestamp}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500">Privacy Status:</span>
+                <span className="text-slate-500">Answered:</span>
                 <span className="font-bold flex items-center gap-1.5">
                   {submittedReceipt.isAnonymous ? (
                     <span className="text-emerald-700 flex items-center gap-1">
@@ -244,7 +252,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                     </span>
                   ) : (
                     <span className="text-indigo-700 flex items-center gap-1">
-                      <UserCheck className="w-3.5 h-3.5" /> Verified Profile ({currentUser?.name || "Student"})
+                      <UserCheck className="w-3.5 h-3.5" /> With your name ({currentUser?.name || "you"})
                     </span>
                   )}
                 </span>
@@ -257,7 +265,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                 onClick={onClose}
                 className="px-8 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all cursor-pointer"
               >
-                Done & Return to Campus Surveys
+                Done
               </button>
             </div>
           </div>
@@ -304,6 +312,31 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Progress: stays at the top of the window while scrolling */}
+        {!isReadOnly && totalQuestions > 0 && (
+          <div className="sticky -top-6 sm:-top-8 z-10 -mx-6 sm:-mx-8 px-6 sm:px-8 py-3 bg-white/95 backdrop-blur-xs border-b border-slate-100">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-600 mb-1.5">
+              <span>
+                {answeredCount} of {totalQuestions} answered
+              </span>
+              <span className={progress === 100 ? "text-emerald-600" : "text-slate-400"}>{progress}%</span>
+            </div>
+            <div
+              className="h-2 rounded-full bg-slate-100 overflow-hidden"
+              role="progressbar"
+              aria-valuenow={answeredCount}
+              aria-valuemin={0}
+              aria-valuemax={totalQuestions}
+              aria-label="Questions answered"
+            >
+              <div
+                className={`h-full rounded-full transition-all ${progress === 100 ? "bg-emerald-500" : "bg-indigo-600"}`}
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* How do you want to answer? */}
         {previewOnly && (
@@ -354,8 +387,8 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                 <div>
                   <div className="text-xs font-bold">Answer anonymously</div>
                   <div className="text-[11px] text-slate-500 leading-tight mt-0.5">
-                    Your name and email are not saved with your answers. Your department, program and year level may
-                    still be included for statistics.
+                    Your name, email and section are not saved with your answers. Your department, program and year
+                    level are kept for statistics.
                   </div>
                 </div>
               </button>
@@ -399,32 +432,41 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
             return (
               <React.Fragment key={idx}>
               {block && startsNewBlock && (
-                <div className={`${idx === 0 ? "" : "pt-4"} space-y-1`}>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-extrabold uppercase tracking-wider">
-                      Section {(blockIndex ?? 0) + 1} of {blocks.length}
-                    </span>
-                  </div>
-                  <h2 className="font-serif text-base sm:text-lg font-bold text-slate-900 border-b border-indigo-100 pb-1.5">
-                    {block.title || "Untitled section"}
-                  </h2>
-                  {block.description && <p className="text-xs text-slate-500 leading-relaxed">{block.description}</p>}
+                <div className={`${idx === 0 ? "" : "mt-8"} rounded-2xl bg-indigo-600 text-white px-4 py-3`}>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-200">
+                    Section {(blockIndex ?? 0) + 1} of {blocks.length}
+                  </p>
+                  <h2 className="text-base sm:text-lg font-bold leading-snug">{block.title || "Untitled section"}</h2>
+                  {block.description && <p className="text-xs text-indigo-100 leading-relaxed mt-0.5">{block.description}</p>}
                 </div>
               )}
-              <div className="p-5 rounded-2xl bg-slate-50/80 border border-slate-200 space-y-3 transition-all">
+              <div
+                ref={(el) => {
+                  questionRefs.current[idx] = el;
+                }}
+                className={`p-5 rounded-2xl border space-y-3 transition-all ${
+                  invalidIdx === idx ? "bg-rose-50/60 border-rose-400 ring-2 ring-rose-200" : "bg-slate-50/80 border-slate-200"
+                }`}
+              >
                 <div className="flex items-start gap-2.5">
                   <span className="w-6 h-6 rounded-lg bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
                     {idx + 1}
                   </span>
                   <div className="flex-1">
                     <h3 className="font-bold text-sm text-slate-900 leading-snug">{q.text}</h3>
+                    {invalidIdx === idx && (
+                      <p className="text-xs font-semibold text-rose-700 mt-1">Please answer this question.</p>
+                    )}
                   </div>
                 </div>
 
                 {/* Rating Scale Question */}
                 {q.type === "rating" && (
                   <div className="space-y-2 pt-2">
-                    <div className="flex flex-wrap gap-2">
+                    <div
+                      className="grid gap-1.5 sm:gap-2"
+                      style={{ gridTemplateColumns: `repeat(${(q.max || 5) - (q.min || 1) + 1}, minmax(0, 1fr))` }}
+                    >
                       {Array.from({ length: (q.max || 5) - (q.min || 1) + 1 }, (_, i) => {
                         const val = (q.min || 1) + i;
                         const label = q.labels && q.labels[i] ? q.labels[i] : undefined;
@@ -438,16 +480,17 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                             type="button"
                             disabled={isReadOnly}
                             onClick={() => handleRatingSelect(idx, val, label)}
-                            className={`flex flex-col items-center justify-center p-2.5 rounded-xl border transition-all cursor-pointer min-w-[56px] flex-1 ${
+                            aria-pressed={isSelected}
+                            className={`flex flex-col items-center justify-center min-h-16 px-1 py-2.5 rounded-xl border transition-all cursor-pointer ${
                               isSelected
                                 ? "bg-blue-600 text-white border-blue-600 shadow-sm"
                                 : "bg-white text-slate-700 border-slate-200 hover:border-blue-300 hover:bg-blue-50/30"
                             } ${isReadOnly ? "cursor-default" : ""}`}
                           >
-                            <span className="text-sm font-extrabold">{val}</span>
+                            <span className="text-lg font-extrabold">{val}</span>
                             {label && (
                               <span
-                                className={`text-[9px] font-medium mt-0.5 text-center leading-tight ${
+                                className={`text-[10px] font-medium mt-0.5 text-center leading-tight ${
                                   isSelected ? "text-blue-100" : "text-slate-500"
                                 }`}
                               >
@@ -532,7 +575,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                       disabled={isReadOnly}
                       value={currentAnswer || ""}
                       onChange={(e) => handleParagraphChange(idx, e.target.value)}
-                      placeholder="Type your candid feedback in Tagalog, Taglish, or English..."
+                      placeholder="Write your feedback in English, Filipino or Taglish..."
                       className="w-full p-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-600 font-sans leading-relaxed"
                     />
                     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
@@ -567,7 +610,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                 className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <Send className="w-4 h-4" />
-                <span>{submitting ? "Submitting..." : "Submit Survey Responses"}</span>
+                <span>{submitting ? "Submitting..." : "Submit answers"}</span>
               </button>
             )}
           </div>
@@ -588,7 +631,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
               </div>
               <div className="text-center space-y-1">
                 <h3 className="font-serif text-lg font-bold text-slate-900">
-                  Confirm Survey Submission
+                  Submit your answers?
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   You are about to submit your response for{" "}
@@ -599,7 +642,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
 
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Submission Mode:</span>
+                  <span className="text-slate-500">Answering:</span>
                   <span className="font-bold flex items-center gap-1.5 text-slate-900">
                     {isAnonymous ? (
                       <span className="text-emerald-700 flex items-center gap-1">
@@ -607,14 +650,14 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                       </span>
                     ) : (
                       <span className="text-indigo-700 flex items-center gap-1">
-                        <UserCheck className="w-3.5 h-3.5" /> Verified Profile ({currentUser?.name || "Student"})
+                        <UserCheck className="w-3.5 h-3.5" /> With your name ({currentUser?.name || "you"})
                       </span>
                     )}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Total Questions:</span>
-                  <span className="font-bold text-slate-900">{survey.questions.length} Questions</span>
+                  <span className="text-slate-500">Questions:</span>
+                  <span className="font-bold text-slate-900">{survey.questions.length}</span>
                 </div>
                 {survey.questions.some((q) => q.type === "paragraph") && (
                   <div className="flex justify-between items-center">
@@ -631,7 +674,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                   onClick={() => setShowConfirmModal(false)}
                   className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                 >
-                  Review Answers
+                  Go back
                 </button>
                 <button
                   type="button"
@@ -643,7 +686,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                     <span>Submitting...</span>
                   ) : (
                     <>
-                      <span>Yes, Submit Feedback</span>
+                      <span>Yes, submit</span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}

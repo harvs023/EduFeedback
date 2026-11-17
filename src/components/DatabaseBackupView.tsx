@@ -177,7 +177,7 @@ export const DatabaseBackupView: React.FC<DatabaseBackupViewProps> = ({ showToas
   };
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-6">
       {/* Header */}
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold uppercase tracking-wider mb-2 border border-indigo-200">

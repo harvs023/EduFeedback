@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { UserProfile, Survey, SchoolLists } from "../types";
 import { SchoolFieldsPicker } from "./SchoolFieldsPicker";
+import { useConfirm } from "./ConfirmDialog";
 import { NewSchoolYearMove } from "./NewSchoolYearMove";
 import { activeDepartments, missingSchoolField } from "../lib/schoolLists";
 import {
@@ -16,7 +17,6 @@ import {
   UserX,
   X,
   Check,
-  Copy,
   CheckCircle2,
   AlertTriangle,
   Mail,
@@ -32,6 +32,8 @@ interface UserManagementViewProps {
   onToggleUserStatus: (email: string, status: "active" | "suspended" | "pending_approval") => void;
   onApproveUser?: (email: string) => void;
   onPromoteUser: (email: string, newPos: UserProfile["pos"]) => void;
+  /** Firebase emails the person a link to set a new password. */
+  onSendPasswordReset?: (email: string) => Promise<void>;
   schoolLists?: SchoolLists | null;
   /** Last "New school year" move, and the action itself (admin). */
   lastYearMoveAt?: number;
@@ -48,6 +50,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   onToggleUserStatus,
   onApproveUser,
   onPromoteUser,
+  onSendPasswordReset,
   schoolLists = null,
   lastYearMoveAt,
   onNewSchoolYear,
@@ -67,8 +70,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
-  const [resetCredsUser, setResetCredsUser] = useState<{ user: UserProfile; tempPass: string } | null>(null);
-  const [copiedPass, setCopiedPass] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   // Form State for Add User
   const [addForm, setAddForm] = useState({
@@ -158,12 +160,12 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       `"${u.pos}"`,
       `"${u.role}"`,
       `"${u.status}"`,
-      `"${u.department || "N/A"}"`,
-      `"${u.program || "N/A"}"`,
-      `"${u.year || "N/A"}"`,
-      `"${u.section || "N/A"}"`,
-      `"${u.studentId || "N/A"}"`,
-      `"${u.joined || "Aug 2024"}"`,
+      `"${u.department || ""}"`,
+      `"${u.program || ""}"`,
+      `"${u.year || ""}"`,
+      `"${u.section || ""}"`,
+      `"${u.studentId || ""}"`,
+      `"${u.joined || ""}"`,
       `"${countAuthoredSurveys(u.email)}"`,
     ]);
 
@@ -248,127 +250,82 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     }
   };
 
-  // Generate Temporary Credentials
-  const handleGenerateCreds = (user: UserProfile) => {
-    const randomSuffix = Math.random().toString(36).slice(-6).toUpperCase();
-    const tempPass = `EduPass_${randomSuffix}!`;
-    setResetCredsUser({ user, tempPass });
-    setCopiedPass(false);
+  // Password reset: Firebase emails the person a link (the admin never sees or sets a password).
+  const handleSendReset = async (user: UserProfile) => {
+    if (!onSendPasswordReset) return;
+    const ok = await confirm({
+      title: "Send a password reset email?",
+      message: `Firebase will email ${user.email} a link to choose a new password. Their current password keeps working until they change it.`,
+      confirmLabel: "Send email",
+    });
+    if (ok) await onSendPasswordReset(user.email);
+  };
+
+  // Changing someone's position changes what they can do, so it is confirmed first.
+  const handleChangePosition = async (user: UserProfile, pos: UserProfile["pos"]) => {
+    if (pos === user.pos) return;
+    const ok = await confirm({
+      title: pos === "Superadmin" ? "Make this person an administrator?" : `Change ${user.name} to ${pos}?`,
+      message:
+        pos === "Superadmin"
+          ? `${user.name} will get full admin access: approving surveys, managing every account, backups and restores. Only do this for a trusted staff member.`
+          : `${user.name} (${user.pos}) will become a ${pos}. This changes which surveys they can answer.`,
+      confirmLabel: pos === "Superadmin" ? "Make administrator" : "Change",
+      danger: pos === "Superadmin",
+    });
+    if (ok) onPromoteUser(user.email, pos);
+  };
+
+  const approveAll = async () => {
+    const pendingUsers = users.filter((u) => u.status === "pending_approval");
+    const ok = await confirm({
+      title: `Approve all ${pendingUsers.length} waiting accounts?`,
+      message: "They can sign in right away. Check the list first if you are not sure who they are.",
+      confirmLabel: "Approve all",
+    });
+    if (!ok) return;
+    pendingUsers.forEach((u) => (onApproveUser ? onApproveUser(u.email) : onToggleUserStatus(u.email, "active")));
   };
 
   return (
-    <div className="space-y-8 pb-12">
-      {/* Header & Quick Action Bar */}
-      <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold uppercase tracking-wider mb-2 border border-indigo-200">
-              <Users className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Institutional Identity & Access Management</span>
-            </div>
-            <h1 className="font-serif text-2xl sm:text-3xl font-extrabold text-slate-900">
-              User & Permission Directory
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Manage student, student officer, faculty and administrator accounts. Everyone except the admin has the same features.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2.5 flex-wrap">
-            {onNewSchoolYear && (
-              <NewSchoolYearMove users={users} lists={schoolLists} lastMoveAt={lastYearMoveAt} onConfirm={onNewSchoolYear} />
-            )}
-            <button
-              onClick={handleExportCSV}
-              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer border border-slate-200"
-              title="Download user roster spreadsheet"
-            >
-              <Download className="w-4 h-4 text-slate-500" />
-              <span>Export Roster (CSV)</span>
-            </button>
-
-            <button
-              onClick={() => {
-                setFormError(null);
-                setShowAddModal(true);
-              }}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>Add / Invite User</span>
-            </button>
-          </div>
+    <div className="space-y-6">
+      {confirmDialog}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-900">Users</h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {stats.total} accounts · {stats.active} active · {stats.students} students · {stats.officers} officers ·{" "}
+            {stats.faculty} faculty{stats.suspended > 0 ? ` · ${stats.suspended} suspended` : ""}
+          </p>
         </div>
-
-        {/* Global User Metrics Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-100">
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-              Total Accounts
-            </span>
-            <div className="font-serif text-2xl font-black text-slate-900 mt-0.5">{stats.total}</div>
-            <span className="text-[11px] text-slate-500">enrolled on platform</span>
-          </div>
-
-          <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200">
-            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
-              Active Status
-            </span>
-            <div className="font-serif text-2xl font-black text-emerald-700 mt-0.5">{stats.active}</div>
-            <span className="text-[11px] text-emerald-600">authorized access</span>
-          </div>
-
-          <div className="bg-rose-50/60 p-4 rounded-2xl border border-rose-200">
-            <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">
-              Suspended
-            </span>
-            <div className="font-serif text-2xl font-black text-rose-700 mt-0.5">{stats.suspended}</div>
-            <span className="text-[11px] text-rose-600">login restricted</span>
-          </div>
-
-          <div className="bg-blue-50/60 p-4 rounded-2xl border border-blue-200">
-            <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block">
-              Students
-            </span>
-            <div className="font-serif text-2xl font-black text-blue-700 mt-0.5">{stats.students}</div>
-            <span className="text-[11px] text-blue-600">creators & respondents</span>
-          </div>
-
-          <div className="bg-purple-50/60 p-4 rounded-2xl border border-purple-200">
-            <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider block">
-              Survey Creators
-            </span>
-            <div className="font-serif text-2xl font-black text-purple-700 mt-0.5">{stats.creators}</div>
-            <span className="text-[11px] text-purple-600">Students, Faculty & Officers</span>
-          </div>
-
-          {stats.pending > 0 ? (
-            <div
-              onClick={() => setStatusFilter("pending_approval")}
-              className="bg-amber-500/10 hover:bg-amber-500/20 p-4 rounded-2xl border border-amber-300 transition-all cursor-pointer ring-1 ring-amber-400/50"
-            >
-              <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                <span>Needs Approval</span>
-              </span>
-              <div className="font-serif text-2xl font-black text-amber-900 mt-0.5">{stats.pending}</div>
-              <span className="text-[11px] text-amber-700 font-semibold underline">Click to review</span>
-            </div>
-          ) : (
-            <div className="bg-amber-50/60 p-4 rounded-2xl border border-amber-200">
-              <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
-                Administrators
-              </span>
-              <div className="font-serif text-2xl font-black text-amber-700 mt-0.5">{stats.admins}</div>
-              <span className="text-[11px] text-amber-600">superadmin rights</span>
-            </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {onNewSchoolYear && (
+            <NewSchoolYearMove users={users} lists={schoolLists} lastMoveAt={lastYearMoveAt} onConfirm={onNewSchoolYear} />
           )}
+          <button
+            onClick={handleExportCSV}
+            className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm rounded-xl flex items-center gap-2 cursor-pointer border border-slate-200"
+            title="Download the list of accounts (CSV)"
+          >
+            <Download className="w-4 h-4 text-slate-500" />
+            <span>Export list</span>
+          </button>
+          <button
+            onClick={() => {
+              setFormError(null);
+              setShowAddModal(true);
+            }}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl flex items-center gap-2 cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Add user</span>
+          </button>
         </div>
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+      <div className="bg-white p-3 rounded-2xl border border-slate-200 space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
           {/* Search Box */}
           <div className="sm:col-span-4 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -388,11 +345,11 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               onChange={(e) => setRoleFilter(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden cursor-pointer"
             >
-              <option value="all">All Roles & Positions</option>
+                          <option value="all">All positions</option>
               <option value="Student">Student</option>
               <option value="Student Officer">Student Officer</option>
               <option value="Faculty">Faculty</option>
-              <option value="Superadmin">Superadmin (Administrator)</option>
+              <option value="Superadmin">Administrator</option>
             </select>
           </div>
 
@@ -403,10 +360,10 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               onChange={(e) => setStatusFilter(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden cursor-pointer"
             >
-              <option value="all">All Statuses</option>
-              <option value="active">Active Only</option>
-              <option value="pending_approval">Pending Approval ({stats.pending})</option>
-              <option value="suspended">Suspended Only</option>
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="pending_approval">Waiting for approval ({stats.pending})</option>
+              <option value="suspended">Suspended or graduated</option>
             </select>
           </div>
 
@@ -417,7 +374,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               onChange={(e) => setDepartmentFilter(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden"
             >
-              <option value="all">All Academic Colleges</option>
+              <option value="all">All departments</option>
               {Array.from(
                 new Set([
                   ...activeDepartments(schoolLists).map((d) => d.name),
@@ -432,30 +389,8 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
           </div>
         </div>
 
-        {/* Filter tags & Reset */}
         {(searchQuery || roleFilter !== "all" || statusFilter !== "all" || departmentFilter !== "all") && (
-          <div className="flex items-center gap-2 pt-2 border-t border-slate-100 text-xs flex-wrap">
-            <span className="text-slate-500 font-medium">Active filters:</span>
-            {searchQuery && (
-              <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-bold">
-                "{searchQuery}"
-              </span>
-            )}
-            {roleFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold border border-indigo-200">
-                Role: {roleFilter}
-              </span>
-            )}
-            {statusFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-bold">
-                Status: {statusFilter}
-              </span>
-            )}
-            {departmentFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-bold">
-                Dept: {departmentFilter}
-              </span>
-            )}
+          <div className="flex justify-end">
             <button
               onClick={() => {
                 setSearchQuery("");
@@ -463,9 +398,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 setStatusFilter("all");
                 setDepartmentFilter("all");
               }}
-              className="text-xs text-rose-600 hover:text-rose-700 font-bold ml-auto cursor-pointer"
+              className="text-sm text-indigo-700 hover:underline font-semibold cursor-pointer"
             >
-              Reset Filters
+              Clear filters
             </button>
           </div>
         )}
@@ -473,7 +408,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
 
       {/* Pending Accounts Approval Action Callout */}
       {stats.pending > 0 && (
-        <div className="p-5 rounded-3xl bg-amber-500/10 border border-amber-300 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0 text-amber-700">
               <ShieldAlert className="w-5 h-5" />
@@ -481,10 +416,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-amber-900 text-sm">
-                  {stats.pending} Account{stats.pending > 1 ? "s" : ""} Pending Administrative Approval
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10px] font-extrabold uppercase">
-                  Action Required
+                  {stats.pending} account{stats.pending > 1 ? "s" : ""} waiting for your approval
                 </span>
               </div>
               <p className="text-xs text-amber-800 mt-0.5">
@@ -500,16 +432,10 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               }}
               className="px-3.5 py-2 bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
             >
-              Filter Pending Only
+              Show only these
             </button>
             <button
-              onClick={() => {
-                const pendingUsers = users.filter((u) => u.status === "pending_approval");
-                pendingUsers.forEach((u) => {
-                  if (onApproveUser) onApproveUser(u.email);
-                  else onToggleUserStatus(u.email, "active");
-                });
-              }}
+              onClick={approveAll}
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-4 h-4" />
@@ -520,24 +446,21 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       )}
 
       {/* User Directory Table */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
-          <div className="text-xs font-bold text-slate-700">
-            Showing <strong className="text-slate-900">{filteredUsers.length}</strong> of{" "}
-            <strong className="text-slate-900">{users.length}</strong> registered accounts
-          </div>
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 text-sm text-slate-600">
+          {filteredUsers.length === users.length ? `${users.length} accounts` : `${filteredUsers.length} of ${users.length} accounts`}
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] tracking-wider">
               <tr>
-                <th className="p-4">User & Contact Details</th>
-                <th className="p-4">Assigned Role</th>
-                <th className="p-4">Department & Academic Program</th>
-                <th className="p-4">Surveys Authored</th>
+                <th className="p-4">Name</th>
+                <th className="p-4">Position</th>
+                <th className="p-4">Department / program</th>
+                <th className="p-4">Surveys</th>
                 <th className="p-4">Status</th>
-                <th className="p-4 text-right">Administrative Actions</th>
+                <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -588,19 +511,19 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                         <select
                           value={u.pos}
                           disabled={isCurrent}
-                          onChange={(e) => onPromoteUser(u.email, e.target.value as any)}
+                          onChange={(e) => handleChangePosition(u, e.target.value as UserProfile["pos"])}
                           className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors focus:outline-hidden ${roleBadgeColor}`}
                         >
                           <option value="Student">Student</option>
                           <option value="Student Officer">Student Officer</option>
                           <option value="Faculty">Faculty</option>
-                          <option value="Superadmin">Superadmin (Admin)</option>
+                          <option value="Superadmin">Administrator</option>
                         </select>
                       </td>
 
                       {/* Department & Program */}
                       <td className="p-4 space-y-0.5">
-                        <div className="font-semibold text-slate-900">{u.department || "Institutional QA"}</div>
+                        <div className="font-semibold text-slate-900">{u.department || "—"}</div>
                         {u.program && (
                           <div className="text-[11px] text-slate-500 max-w-xs truncate">{u.program}</div>
                         )}
@@ -660,7 +583,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                             title="Approve and activate this account"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Approve Account</span>
+                            <span>Approve</span>
                           </button>
                         )}
 
@@ -678,9 +601,10 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
 
                         {/* Reset Password Button */}
                         <button
-                          onClick={() => handleGenerateCreds(u)}
-                          className="p-1.5 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer"
-                          title="Reset Password / Generate Temp Credentials"
+                          onClick={() => handleSendReset(u)}
+                          disabled={!onSendPasswordReset}
+                          className="p-1.5 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer disabled:opacity-40"
+                          title="Send a password reset email"
                         >
                           <KeyRound className="w-4 h-4" />
                         </button>
@@ -793,7 +717,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               {/* Email */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block font-bold text-slate-700">Institutional Email *</label>
+                  <label className="block font-bold text-slate-700">Email *</label>
                 </div>
                 <input
                   type="email"
@@ -1084,66 +1008,6 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/* MODAL: RESET CREDENTIALS */}
-      {/* ============================================================ */}
-      {resetCredsUser && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setResetCredsUser(null)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
-              <KeyRound className="w-6 h-6" />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="font-serif text-lg font-bold text-slate-900">
-                Temporary Credentials Generated
-              </h3>
-              <p className="text-xs text-slate-500">
-                A single-use temporary password has been issued for <strong>{resetCredsUser.user.name}</strong> ({resetCredsUser.user.email}).
-              </p>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-              <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
-                Temporary Password (Valid 24h)
-              </div>
-              <div className="flex items-center justify-between font-mono text-sm font-black text-indigo-700 bg-white p-2.5 rounded-xl border border-slate-200">
-                <span>{resetCredsUser.tempPass}</span>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(resetCredsUser.tempPass);
-                    setCopiedPass(true);
-                    setTimeout(() => setCopiedPass(false), 2000);
-                  }}
-                  className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  {copiedPass ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedPass ? "Copied" : "Copy"}</span>
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-500 leading-snug">
-                Provide this temporary password to the user. They will be prompted to choose a permanent secure password upon login.
-              </p>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => setResetCredsUser(null)}
-                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl cursor-pointer"
-              >
-                Close Window
-              </button>
-            </div>
           </div>
         </div>
       )}

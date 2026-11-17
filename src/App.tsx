@@ -3,7 +3,7 @@ import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, Ac
 import { DatabaseService } from "./lib/databaseService";
 import { schoolYearFor } from "./lib/schoolYear";
 import { isFirebaseConfigured, FirebaseAuthService, FirestoreUserService } from "./lib/firebase";
-import { countEligibleUsers, getSurveyAvailability } from "./lib/surveyReview";
+import { countEligibleUsers, getSurveyAvailability, isInAudience } from "./lib/surveyReview";
 import {
   analyzeResponse,
   initialCommentStatus,
@@ -28,7 +28,7 @@ import { MAX_PENDING_NEWS } from "./components/NewsAnnouncementsFeed";
 import { Dashboard } from "./components/Dashboard";
 import { SurveyBuilder } from "./components/SurveyBuilder";
 import { MySurveysScreen } from "./components/MySurveysScreen";
-import { SuperadminDashboard } from "./components/SuperadminDashboard";
+import { SuperadminDashboard, type ReviewTab } from "./components/SuperadminDashboard";
 import { TakeSurveyModal } from "./components/TakeSurveyModal";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { StandaloneAuthPage } from "./components/StandaloneAuthPage";
@@ -41,7 +41,6 @@ import {
   ShieldAlert,
   Sparkles,
   UserCheck,
-  SlidersHorizontal,
 } from "lucide-react";
 
 export default function App() {
@@ -80,6 +79,9 @@ export default function App() {
   const [myProfileRequest, setMyProfileRequest] = useState<ProfileChangeRequest | null>(null);
   const [profileRequests, setProfileRequests] = useState<ProfileChangeRequest[]>([]);
   const [showRequestDecision, setShowRequestDecision] = useState(false);
+  // Which Review Center page opens next (Dashboard admin cards open a specific page).
+  const [reviewStartTab, setReviewStartTab] = useState<ReviewTab>("home");
+  const [reviewOpenCount, setReviewOpenCount] = useState(0);
   // The one-time section pick after a "New school year" move; "Later" hides it until the next login.
   const [sectionPickLater, setSectionPickLater] = useState(false);
   // Saved sentiment results confirmed by the server's signature check (see lib/sentiment.ts).
@@ -1311,14 +1313,34 @@ export default function App() {
     const cleanEmail = email.trim();
     const targetUser = users.find((u) => u.email.trim().toLowerCase() === cleanEmail.toLowerCase());
     if (!targetUser) return;
-    const updatedUser: UserProfile = { ...targetUser, pos: newPos, role: newPos === "Superadmin" ? "superadmin" : "user" };
+    // Same roles as sign-up: Faculty -> faculty, Student Officer -> officer, Student -> user.
+    const role: UserProfile["role"] =
+      newPos === "Superadmin" ? "superadmin" : newPos === "Faculty" ? "faculty" : newPos === "Student Officer" ? "officer" : "user";
+    const updatedUser: UserProfile = { ...targetUser, pos: newPos, role };
 
     try {
       await DatabaseService.saveUser(updatedUser);
       setUsers((prev) => prev.map((u) => (u.email.trim().toLowerCase() === cleanEmail.toLowerCase() ? updatedUser : u)));
-      showToast(`User promoted to ${newPos}.`, "success");
+      showToast(`${targetUser.name} is now ${newPos === "Superadmin" ? "an administrator" : `a ${newPos}`}.`, "success");
     } catch (err: any) {
       showToast(err.message || "Failed to promote user.", "info");
+    }
+  };
+
+  /** Admin: Firebase sends the person an email with a link to set a new password. */
+  const handleSendPasswordReset = async (email: string) => {
+    try {
+      await DatabaseService.sendPasswordReset(email);
+      // Firebase may not say whether the email has a login (email enumeration protection).
+      showToast(`If ${email} has a login, Firebase has emailed it a reset link (check spam too).`, "success");
+    } catch (err: any) {
+      const code = String(err?.code || "");
+      showToast(
+        code.includes("user-not-found")
+          ? "This email has no login yet (the person has not registered), so no email was sent."
+          : "Could not send the reset email. Please try again later.",
+        "info"
+      );
     }
   };
 
@@ -2083,7 +2105,70 @@ export default function App() {
   // Review Center badge: surveys with user reports waiting for a decision.
   const reportedSurveyCount = new Set(surveyReports.filter((r) => r.status === "open").map((r) => String(r.surveyId))).size;
 
+  // A shared survey link (#survey-<id>): once signed in and the surveys are loaded, open that survey
+  // to answer, or say plainly why it cannot be opened. The link is then removed from the address bar.
+  useEffect(() => {
+    const match = /^#survey-(.+)$/.exec(window.location.hash);
+    if (!match || !currentUser || surveys.length === 0) return;
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    const survey = surveys.find((s) => String(s.id) === decodeURIComponent(match[1]));
+    const mine = (survey?.owner || "").trim().toLowerCase() === currentUser.email.trim().toLowerCase();
+    if (!survey || getSurveyAvailability(survey) !== "open") {
+      showToast("This survey link is not open right now. The survey may have closed.", "info");
+    } else if (mine) {
+      setCurrentView("my-surveys");
+      showToast("This is your own survey. You can see it in My Surveys.", "info");
+    } else if (currentUser.role === "superadmin" || currentUser.pos === "Superadmin") {
+      showToast("The admin account does not answer surveys. Open it in the Review Center instead.", "info");
+    } else if (!isInAudience(survey, currentUser)) {
+      showToast("This survey is meant for a different group, so you cannot answer it.", "info");
+    } else {
+      setCurrentView("take-survey");
+      handleTakeSurvey(survey);
+    }
+    // Runs when the person or the survey list changes; the link is used once.
+  }, [currentUser, surveys]);
+
+  /** Opens a survey to answer (Take a Survey and the Dashboard's Trending list). */
+  const handleTakeSurvey = (survey: Survey) => {
+    if (!currentUser) {
+      showToast("Please sign in or register to take this survey.", "info");
+      return;
+    }
+    const myEmail = currentUser.email.trim().toLowerCase();
+    const hasNamedAnswer = responses.some(
+      (r) => String(r.surveyId) === String(survey.id) && (r.userEmail || "").trim().toLowerCase() === myEmail
+    );
+    if (answeredSurveyIds.includes(String(survey.id)) && !hasNamedAnswer) {
+      showToast("You already answered this survey anonymously. Each person can answer once.", "info");
+      return;
+    }
+    setActiveSurveyForTaking(survey);
+  };
+
+  // Admin: everything waiting in the Review Center (same items as its Home page).
+  const adminWaitingCount = isSuperadmin
+    ? surveys.filter((s) => s.status === "pending").length +
+      newsList.filter((n) => n.status === "pending").length +
+      reportedSurveyCount +
+      responses.filter((r) => r.review?.status === "flagged").length +
+      profileRequests.filter((r) => r.status === "pending").length
+    : 0;
+
+  /** Opens the Review Center on one page (from the Dashboard's admin cards). */
+  const handleOpenReviewCenter = (tab: string) => {
+    setReviewStartTab(tab as ReviewTab);
+    setReviewOpenCount((n) => n + 1);
+    setEditingSurvey(null);
+    setCurrentView("admin");
+  };
+
   const handleNavigate = (view: string) => {
+    if (view === "take-survey" && isSuperadmin) view = "admin";
+    if (view === "admin") {
+      setReviewStartTab("home");
+      setReviewOpenCount((n) => n + 1);
+    }
     if (view !== "create") {
       setEditingSurvey(null);
     }
@@ -2092,13 +2177,13 @@ export default function App() {
 
   const sidebarNavItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "take-survey", label: "Take a Survey", icon: ClipboardList },
+    ...(isSuperadmin ? [] : [{ id: "take-survey", label: "Take a Survey", icon: ClipboardList }]),
     ...(currentUser
       ? [
           {
             id: "my-surveys",
-            label: isSuperadmin ? "Survey Management" : "My Surveys",
-            icon: isSuperadmin ? SlidersHorizontal : UserCheck,
+            label: "My Surveys",
+            icon: UserCheck,
           },
         ]
       : []),
@@ -2246,6 +2331,8 @@ export default function App() {
 
         {/* View Router */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+          {/* One page width and bottom space for every screen. */}
+          <div className="max-w-7xl mx-auto pb-12">
           {currentView === "dashboard" && (
             <Dashboard
               surveys={surveys}
@@ -2258,7 +2345,10 @@ export default function App() {
               onNavigate={handleNavigate}
               onLikeNews={handleLikeNews}
               likedNewsIds={likedNewsIds}
-              reportedSurveyCount={reportedSurveyCount}
+              adminWaitingCount={adminWaitingCount}
+              onOpenReviewCenter={handleOpenReviewCenter}
+              onTakeSurvey={handleTakeSurvey}
+              academicCalendar={academicCalendar}
               onDeleteNews={handleDeleteNews}
               onAddNews={handleAddNews}
               onMarkNotificationRead={handleMarkNotificationRead}
@@ -2266,7 +2356,7 @@ export default function App() {
             />
           )}
 
-          {currentView === "take-survey" && (
+          {currentView === "take-survey" && !isSuperadmin && (
             <ThemedSurveySections
               categories={activeCategoryNames(schoolLists)}
               surveys={
@@ -2283,22 +2373,7 @@ export default function App() {
               answeredSurveyIds={answeredSurveyIds}
               searchQuery={searchQuery}
               selectedCategory={selectedCategory}
-              onTakeSurvey={(survey) => {
-                if (!currentUser) {
-                  showToast("Please sign in or register to take this survey.", "info");
-                  return;
-                }
-                const myEmail = currentUser.email.trim().toLowerCase();
-                const hasNamedAnswer = responses.some(
-                  (r) =>
-                    String(r.surveyId) === String(survey.id) && (r.userEmail || "").trim().toLowerCase() === myEmail
-                );
-                if (answeredSurveyIds.includes(String(survey.id)) && !hasNamedAnswer) {
-                  showToast("You already answered this survey anonymously. Each person can answer once.", "info");
-                  return;
-                }
-                setActiveSurveyForTaking(survey);
-              }}
+              onTakeSurvey={handleTakeSurvey}
               onViewAnalytics={(surveyId) => {
                 setAnalyticsTargetSurveyId(surveyId);
                 setCurrentView("analytics");
@@ -2323,8 +2398,7 @@ export default function App() {
                   setCurrentView("create");
                 }
               }}
-              onEditSurvey={handleEditSurvey}
-              onDeleteSurvey={handleDeleteSurvey}
+              onTakedownSurvey={handleTakedownSurvey}
             />
           )}
 
@@ -2347,7 +2421,6 @@ export default function App() {
               onArchiveSurvey={handleArchiveSurvey}
               onWithdrawSurvey={handleWithdrawSurvey}
               onDuplicateSurvey={handleDuplicateSurvey}
-              onTakedownSurvey={handleTakedownSurvey}
             />
           )}
 
@@ -2448,6 +2521,8 @@ export default function App() {
 
           {currentView === "admin" && (
             <SuperadminDashboard
+              key={reviewOpenCount}
+              initialTab={reviewStartTab}
               surveys={surveys}
               users={users}
               logs={logs}
@@ -2456,7 +2531,9 @@ export default function App() {
               topics={topics}
               currentUser={currentUser}
               onDeleteSurvey={handleDeleteSurvey}
+              onTakedownSurvey={handleTakedownSurvey}
               onToggleUserStatus={handleToggleUserStatus}
+              onSendPasswordReset={handleSendPasswordReset}
               onPromoteUser={handlePromoteUser}
               onAddUser={handleAddUser}
               onUpdateUser={handleUpdateUser}
@@ -2493,6 +2570,7 @@ export default function App() {
               onNavigateToML={() => setCurrentView("tagalog-ml")}
             />
           )}
+          </div>
         </main>
       </div>
 

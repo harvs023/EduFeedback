@@ -355,6 +355,10 @@ export class DatabaseService {
     await FirestoreProfileRequestService.decide(id, decision);
   }
 
+  static async sendPasswordReset(email: string): Promise<void> {
+    await FirebaseAuthService.sendPasswordReset(email);
+  }
+
   /** The person's own name only (the school fields are locked; see firestore.rules). */
   static async updateOwnName(email: string, name: string): Promise<void> {
     await FirestoreUserService.updateOwnFields(email, { name });

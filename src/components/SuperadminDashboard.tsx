@@ -1,9 +1,10 @@
 import { formatDateTime } from "../lib/timeAgo";
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import { useConfirm } from "./ConfirmDialog";
 import SetupChecklist from "./SetupChecklist";
-import { termFor } from "../lib/schoolYear";
-import { allCategories } from "../lib/schoolLists";
+import { AllSurveysPanel } from "./reviewCenter/AllSurveysPanel";
+import { ReviewCenterLayout, type ReviewCenterGroup } from "./ReviewCenterLayout";
+import { ReviewCenterHome, type WaitingTile } from "./ReviewCenterHome";
 import {
   Survey,
   SurveyResponse,
@@ -32,31 +33,20 @@ import { FlaggedResponsesPanel, FlagDecision } from "./FlaggedResponsesPanel";
 import { ActiveUsersCard } from "./ActiveUsersCard";
 import { SurveyCreationSwitch } from "./SurveyCreationSwitch";
 import {
-  ShieldAlert,
   Users,
   Activity,
   Database,
   CheckCircle2,
-  XCircle,
   Download,
-  Trash2,
-  Search,
-  Eye,
-  RotateCcw,
-  Calendar,
-  Clock,
-  ChevronLeft,
-  ChevronRight,
   Flag,
-  BarChart3,
-  BrainCircuit,
   CalendarDays,
-  ListFilter,
   Tag,
   CalendarRange,
   Newspaper,
   School,
   UserCog,
+  Home,
+  MessageSquareWarning,
 } from "lucide-react";
 
 interface SuperadminDashboardProps {
@@ -77,8 +67,11 @@ interface SuperadminDashboardProps {
   onDismissReports?: (surveyId: string, note: string) => Promise<void>;
   onTakedownReported?: (surveyId: string, reason: string) => Promise<void>;
   onDeleteSurvey: (surveyId: string | number) => void;
+  /** Take a live survey down (archive with a reason; answers are kept). */
+  onTakedownSurvey?: (surveyId: string | number, reason: string) => Promise<boolean> | void;
   onToggleUserStatus: (email: string, newStatus: "active" | "suspended" | "pending_approval") => void;
   onPromoteUser: (email: string, newPos: UserProfile["pos"]) => void;
+  onSendPasswordReset?: (email: string) => Promise<void>;
   onAddUser?: (user: UserProfile) => void;
   onUpdateUser?: (email: string, changes: Partial<UserProfile>) => void;
   onDeleteUser?: (email: string) => void;
@@ -100,61 +93,14 @@ interface SuperadminDashboardProps {
   /** Admin switch: survey creation open for everyone (the admin can always create). */
   surveyCreationOpen?: boolean;
   onSetSurveyCreation?: (open: boolean) => Promise<void>;
-  /** "New school year: move students up one year" (User & Role Directory). */
+  /** "New school year: move students up one year" (Users page). */
   lastYearMoveAt?: number;
   onNewSchoolYear?: () => Promise<void>;
-  initialTab?: "approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school" | "profile-requests";
+  initialTab?: ReviewTab;
   showToast?: (text: string, type?: "success" | "info") => void;
 }
 
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-
-// Helper to safely parse creation date from string or timestamp
-function parseSurveyDate(survey: Survey): {
-  dateObj: Date;
-  year: number;
-  monthIndex: number; // 0 to 11
-  monthName: string;
-  day: number;
-  isoDate: string; // YYYY-MM-DD
-  displayDate: string;
-} {
-  let dateObj: Date;
-  if (survey.createdAtTimestamp) {
-    dateObj = new Date(survey.createdAtTimestamp);
-  } else if (survey.created) {
-    const parsed = new Date(survey.created);
-    dateObj = isNaN(parsed.getTime()) ? new Date("2026-02-01") : parsed;
-  } else {
-    dateObj = new Date("2026-02-01");
-  }
-
-  const year = dateObj.getFullYear();
-  const monthIndex = dateObj.getMonth();
-  const day = dateObj.getDate();
-  const monthName = MONTH_NAMES[monthIndex] || "February";
-  const isoDate = `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  const displayDate = dateObj.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-
-  return { dateObj, year, monthIndex, monthName, day, isoDate, displayDate };
-}
+export type ReviewTab = "approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school" | "profile-requests" | "home";
 
 export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   surveys,
@@ -173,8 +119,10 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onDismissReports,
   onTakedownReported,
   onDeleteSurvey,
+  onTakedownSurvey,
   onToggleUserStatus,
   onPromoteUser,
+  onSendPasswordReset,
   onAddUser,
   onUpdateUser,
   onDeleteUser,
@@ -196,74 +144,15 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onSetSurveyCreation,
   lastYearMoveAt,
   onNewSchoolYear,
-  initialTab = "approvals",
+  initialTab = "home",
   showToast,
 }) => {
   const { confirm, confirmDialog } = useConfirm();
-  // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school" | "profile-requests">(
-    initialTab || "approvals"
-  );
-
-  // Horizontal scroll container ref & handlers for governance tabs
-  const tabsContainerRef = useRef<HTMLDivElement>(null);
-
-  const handleTabClick = (
-    tabId: "approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news",
-    e?: React.MouseEvent<HTMLButtonElement>
-  ) => {
-    setActiveTab(tabId);
-    if (e?.currentTarget) {
-      e.currentTarget.scrollIntoView({
-        behavior: "smooth",
-        inline: "nearest",
-        block: "nearest",
-      });
-    }
+  const [activeTab, setActiveTab] = useState<ReviewTab>(initialTab || "home");
+  const openTab = (tab: ReviewTab) => {
+    setActiveTab(tab);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
-
-  // Automatically ensure active tab is scrolled into view
-  useEffect(() => {
-    const activeBtn = tabsContainerRef.current?.querySelector<HTMLElement>('[data-active="true"]');
-    if (activeBtn) {
-      activeBtn.scrollIntoView({
-        behavior: "smooth",
-        inline: "nearest",
-        block: "nearest",
-      });
-    }
-  }, [activeTab]);
-
-  const scrollTabs = (direction: "left" | "right") => {
-    if (tabsContainerRef.current) {
-      tabsContainerRef.current.scrollBy({
-        left: direction === "left" ? -240 : 240,
-        behavior: "smooth",
-      });
-    }
-  };
-
-  // View presentation mode: Timeline or Table
-  const [viewMode, setViewMode] = useState<"timeline" | "table">("timeline");
-
-  // Granular Timeframe Filters (Year, Month, Date)
-  const [searchSurvey, setSearchSurvey] = useState<string>("");
-  const [filterYear, setFilterYear] = useState<string>("all");
-  const [filterMonth, setFilterMonth] = useState<string>("all"); // "1" to "12" or "all"
-  const [dateFilterMode, setDateFilterMode] = useState<"all" | "exact" | "today" | "past-7-days" | "past-30-days" | "range">("all");
-  const [exactDateInput, setExactDateInput] = useState<string>("");
-  const [dateRangeStart, setDateRangeStart] = useState<string>("");
-  const [dateRangeEnd, setDateRangeEnd] = useState<string>("");
-
-  // Academic & Status Filters
-  const [filterAcademicYear, setFilterAcademicYear] = useState<string>("all");
-  const [filterSemester, setFilterSemester] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [filterCategory, setFilterCategory] = useState<string>("all");
-  const [filterCreator, setFilterCreator] = useState<string>("all");
-
-  // Inspect Survey Modal State
-  const [selectedSurveyForPreview, setSelectedSurveyForPreview] = useState<Survey | null>(null);
 
   const pendingSurveys = useMemo(() => surveys.filter((s) => s.status === "pending"), [surveys]);
   const pendingNewsCount = (newsList || []).filter((n) => n.status === "pending").length;
@@ -273,186 +162,47 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
     [surveyReports]
   );
 
-  // Extract all unique creation years present in data
-  const availableYears = useMemo(() => {
-    const yearsSet = new Set<number>([2026, 2025, 2024]);
-    surveys.forEach((s) => {
-      const parsed = parseSurveyDate(s);
-      if (!isNaN(parsed.year)) yearsSet.add(parsed.year);
-    });
-    return Array.from(yearsSet).sort((a, b) => b - a);
-  }, [surveys]);
+  const flaggedCount = responses.filter((r) => r.review?.status === "flagged").length;
+  const profileRequestCount = profileRequests.filter((r) => r.status === "pending").length;
 
-  // Extract all unique creators
-  const uniqueCreators = useMemo(() => {
-    const map = new Map<string, string>();
-    surveys.forEach((s) => {
-      if (s.owner) map.set(s.owner, s.ownerName || s.owner);
-    });
-    return Array.from(map.entries()).map(([email, name]) => ({ email, name }));
-  }, [surveys]);
+  const menuGroups: ReviewCenterGroup<ReviewTab>[] = [
+    { title: "", items: [{ id: "home", label: "Home", icon: Home }] },
+    {
+      title: "To review",
+      items: [
+        { id: "approvals", label: "Survey approvals", icon: CheckCircle2, waiting: pendingSurveys.length },
+        { id: "news", label: "News posts", icon: Newspaper, waiting: pendingNewsCount },
+        { id: "reports", label: "Reported surveys", icon: Flag, waiting: reportedSurveyCount },
+        { id: "flagged-responses", label: "Flagged responses", icon: MessageSquareWarning, waiting: flaggedCount },
+        { id: "profile-requests", label: "Profile requests", icon: UserCog, waiting: profileRequestCount },
+      ],
+    },
+    {
+      title: "People",
+      items: [
+        { id: "users", label: "Users", icon: Users },
+        { id: "logs", label: "Activity log", icon: Activity },
+      ],
+    },
+    { title: "Surveys", items: [{ id: "surveys", label: "All surveys", icon: CalendarDays }] },
+    {
+      title: "School setup",
+      items: [
+        { id: "school", label: "School lists & categories", icon: School },
+        { id: "topics", label: "Topics", icon: Tag },
+        { id: "calendar", label: "Academic calendar", icon: CalendarRange },
+      ],
+    },
+    { title: "System", items: [{ id: "backup", label: "Backup & restore", icon: Database }] },
+  ];
 
-  // A survey's school year and semester: what was saved on it, otherwise worked out from its
-  // creation date with the academic calendar. Empty when unknown (never a made-up value).
-  const termOf = (s: Survey): { year: string; term: string } => {
-    const created = s.createdAtTimestamp || (s.created ? Date.parse(s.created) : NaN);
-    const info = Number.isFinite(created) && created > 0 ? termFor(created, academicCalendar) : null;
-    return { year: s.academicYear || info?.schoolYear || "", term: s.term || info?.term || "" };
-  };
-  const termLabel = (s: Survey) => {
-    const { year, term } = termOf(s);
-    return [year && `SY ${year}`, term].filter(Boolean).join(" · ") || "School year unknown";
-  };
-  const yearOptions = Array.from(new Set(surveys.map((s) => termOf(s).year).filter(Boolean))).sort().reverse();
-  const categoryOptions = Array.from(
-    new Set([...allCategories(schoolLists).map((c) => c.name), ...surveys.map((s) => s.cat).filter(Boolean)])
-  );
-
-  // Filter surveys strictly based on Year, Month, Date, and criteria
-  const filteredSurveys = useMemo(() => {
-    const today = new Date();
-    const todayIso = today.toISOString().slice(0, 10);
-    const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-    return surveys.filter((s) => {
-      const parsed = parseSurveyDate(s);
-
-      // 1. Year Filter
-      if (filterYear !== "all" && String(parsed.year) !== filterYear) {
-        return false;
-      }
-
-      // 2. Month Filter (1-indexed)
-      if (filterMonth !== "all" && String(parsed.monthIndex + 1) !== filterMonth) {
-        return false;
-      }
-
-      // 3. Date / Day Filter Mode
-      if (dateFilterMode === "today") {
-        if (parsed.isoDate !== todayIso) return false;
-      } else if (dateFilterMode === "past-7-days") {
-        if (parsed.isoDate < sevenDaysAgo || parsed.isoDate > todayIso) return false;
-      } else if (dateFilterMode === "past-30-days") {
-        if (parsed.isoDate < thirtyDaysAgo || parsed.isoDate > todayIso) return false;
-      } else if (dateFilterMode === "exact" && exactDateInput) {
-        if (parsed.isoDate !== exactDateInput) return false;
-      } else if (dateFilterMode === "range") {
-        if (dateRangeStart && parsed.isoDate < dateRangeStart) return false;
-        if (dateRangeEnd && parsed.isoDate > dateRangeEnd) return false;
-      }
-
-      // 4. Academic Year
-      if (filterAcademicYear !== "all") {
-        if (termOf(s).year !== filterAcademicYear) return false;
-      }
-
-      // 5. Semester / Term
-      if (filterSemester !== "all") {
-        if (termOf(s).term !== filterSemester) return false;
-      }
-
-      // 6. Category
-      if (filterCategory !== "all" && s.cat !== filterCategory) {
-        return false;
-      }
-
-      // 7. Status
-      if (filterStatus !== "all" && s.status !== filterStatus) {
-        return false;
-      }
-
-      // 8. Creator
-      if (filterCreator !== "all" && s.owner !== filterCreator) {
-        return false;
-      }
-
-      // 9. Search Query
-      if (searchSurvey.trim()) {
-        const q = searchSurvey.toLowerCase();
-        const matchesTitle = s.title.toLowerCase().includes(q);
-        const matchesDesc = s.desc.toLowerCase().includes(q);
-        const matchesOwner = (s.ownerName || "").toLowerCase().includes(q) || s.owner.toLowerCase().includes(q);
-        const matchesCat = s.cat.toLowerCase().includes(q);
-        if (!matchesTitle && !matchesDesc && !matchesOwner && !matchesCat) return false;
-      }
-
-      return true;
-    });
-  }, [
-    surveys,
-    academicCalendar,
-    filterYear,
-    filterMonth,
-    dateFilterMode,
-    exactDateInput,
-    dateRangeStart,
-    dateRangeEnd,
-    filterAcademicYear,
-    filterSemester,
-    filterCategory,
-    filterStatus,
-    filterCreator,
-    searchSurvey,
-  ]);
-
-  // Group filtered surveys by Year -> Month -> Day for Timeline view
-  const timelineGroups = useMemo(() => {
-    // Sort surveys by creation date descending
-    const sorted = [...filteredSurveys].sort((a, b) => {
-      const da = parseSurveyDate(a).dateObj.getTime();
-      const db = parseSurveyDate(b).dateObj.getTime();
-      return db - da;
-    });
-
-    const groups: Array<{
-      groupKey: string; // e.g. "February 2026"
-      year: number;
-      monthName: string;
-      surveys: Array<{ survey: Survey; parsedDate: ReturnType<typeof parseSurveyDate> }>;
-    }> = [];
-
-    sorted.forEach((s) => {
-      const p = parseSurveyDate(s);
-      const groupKey = `${p.monthName} ${p.year}`;
-      let group = groups.find((g) => g.groupKey === groupKey);
-      if (!group) {
-        group = {
-          groupKey,
-          year: p.year,
-          monthName: p.monthName,
-          surveys: [],
-        };
-        groups.push(group);
-      }
-      group.surveys.push({ survey: s, parsedDate: p });
-    });
-
-    return groups;
-  }, [filteredSurveys]);
-
-  // Timeframe stats calculation
-  const timeframeStats = useMemo(() => {
-    const total = filteredSurveys.length;
-    const totalResponses = filteredSurveys.reduce((acc, s) => acc + (s.responses || 0), 0);
-    const publishedCount = filteredSurveys.filter((s) => s.status === "published").length;
-    return { total, totalResponses, publishedCount };
-  }, [filteredSurveys]);
-
-  const handleResetFilters = () => {
-    setFilterYear("all");
-    setFilterMonth("all");
-    setDateFilterMode("all");
-    setExactDateInput("");
-    setDateRangeStart("");
-    setDateRangeEnd("");
-    setFilterAcademicYear("all");
-    setFilterSemester("all");
-    setFilterStatus("all");
-    setFilterCategory("all");
-    setFilterCreator("all");
-    setSearchSurvey("");
-  };
+  const waitingTiles: WaitingTile<ReviewTab>[] = [
+    { id: "approvals", label: "Survey approvals", noun: "surveys to approve", count: pendingSurveys.length, icon: CheckCircle2 },
+    { id: "news", label: "News posts", noun: "news posts to approve", count: pendingNewsCount, icon: Newspaper },
+    { id: "reports", label: "Reported surveys", noun: "reported surveys", count: reportedSurveyCount, icon: Flag },
+    { id: "flagged-responses", label: "Flagged responses", noun: "flagged responses", count: flaggedCount, icon: MessageSquareWarning },
+    { id: "profile-requests", label: "Profile requests", noun: "profile change requests", count: profileRequestCount, icon: UserCog },
+  ];
 
   const handleExportLogs = () => {
     const headers = ["Timestamp", "User", "Position", "Action", "Details", "IP_Address"];
@@ -475,193 +225,46 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-6">
       {confirmDialog}
-      {/* Superadmin Oversight Header */}
-      <SetupChecklist
-        schoolLists={schoolLists}
-        topics={topics}
-        academicCalendar={academicCalendar}
-        onOpen={(tab) => {
-          setActiveTab(tab);
-          // The tab's content opens under the tab row; bring the row into view.
-          tabsContainerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }}
-      />
-
-      <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-800 space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold uppercase tracking-wider border border-indigo-400/30">
-              <ShieldAlert className="w-3.5 h-3.5" />
-              <span>Superadmin Institutional Governance</span>
-            </div>
-            <h1 className="font-serif text-2xl sm:text-3xl font-extrabold tracking-tight">
-              System Administration & Macro Survey Moderation
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-3xl leading-relaxed">
-              Institutional oversight dashboard for monitoring all evaluation instruments created across years, months, and exact dates. Admin responsibilities focus on content moderation, security configuration, and macro analytics.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {onNavigateToAnalytics && (
-              <button
-                onClick={() => onNavigateToAnalytics("all")}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-all shadow-xs cursor-pointer"
-              >
-                <BarChart3 className="w-4 h-4" />
-                <span>Analytics</span>
-              </button>
-            )}
-            {onNavigateToML && (
-              <button
-                onClick={onNavigateToML}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl flex items-center gap-2 border border-slate-700 transition-all cursor-pointer"
-              >
-                <BrainCircuit className="w-4 h-4 text-emerald-400" />
-                <span>Sentiment Analysis</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Global Institutional Metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
-          <ActiveUsersCard users={users} onRefresh={onRefreshUsers} />
-          {onSetSurveyCreation && (
-            <SurveyCreationSwitch
-              open={surveyCreationOpen}
-              onChange={async (open) => {
-                if (!open) {
-                  const ok = await confirm({
-                    title: "Turn survey creation off?",
-                    message:
-                      "Students, student officers and faculty will not be able to create new surveys or send drafts for review until you turn it back on. Their drafts stay safe and live surveys keep running. You can still create surveys.",
-                    confirmLabel: "Turn off",
-                  });
-                  if (!ok) return;
-                }
-                await onSetSurveyCreation(open);
-              }}
-            />
-          )}
-
-          <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/80">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Total Surveys Authored
-            </span>
-            <div className="font-serif text-2xl font-black text-white">{surveys.length}</div>
-            <span className="text-[11px] text-slate-400">across all academic years</span>
-          </div>
-
-          <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/80">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Filter Match (Timeframe)
-            </span>
-            <div className="font-serif text-2xl font-black text-indigo-400">{filteredSurveys.length}</div>
-            <span className="text-[11px] text-indigo-300">surveys in selected timeframe</span>
-          </div>
-
-          <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/80">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Total Response Submissions
-            </span>
-            <div className="font-serif text-2xl font-black text-emerald-400">{timeframeStats.totalResponses}</div>
-            <span className="text-[11px] text-emerald-300">in filtered timeframe</span>
-          </div>
-
-          <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/80">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Reported Surveys
-            </span>
-            <div className="font-serif text-2xl font-black text-rose-400">{reportedSurveyCount}</div>
-            <span className="text-[11px] text-rose-300">with reports waiting for review</span>
-          </div>
-        </div>
-
-        {/* Governance Navigation Tabs with Horizontal Scroll Controls */}
-        <div className="pt-4 border-t border-slate-800">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => scrollTabs("left")}
-              className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 transition-colors cursor-pointer shrink-0"
-              title="Scroll tabs left"
-              aria-label="Scroll tabs left"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-
-            <div
-              ref={tabsContainerRef}
-              className="flex-1 flex items-center gap-2 overflow-x-auto scroll-smooth py-1 px-0.5"
-            >
-              {[
-                { id: "approvals", label: "Survey Approvals", count: pendingSurveys.length, icon: CheckCircle2 },
-                { id: "news", label: "News Approvals", count: pendingNewsCount, icon: Newspaper },
-                {
-                  id: "flagged-responses",
-                  label: "Flagged Responses",
-                  count: responses.filter((r) => r.review?.status === "flagged").length,
-                  icon: Flag,
-                },
-                { id: "surveys", label: "Creation Timeframe Directory", count: surveys.length, icon: CalendarDays },
-                { id: "reports", label: "Reported Surveys", count: reportedSurveyCount, icon: Flag },
-                { id: "users", label: "User & Role Directory", count: users.length, icon: Users },
-                {
-                  id: "profile-requests",
-                  label: "Profile Requests",
-                  count: profileRequests.filter((r) => r.status === "pending").length,
-                  icon: UserCog,
-                },
-                { id: "logs", label: "Activity Audit Trail", count: logs.length, icon: Activity },
-                { id: "backup", label: "Backup & Restore", icon: Database },
-                { id: "topics", label: "Survey Topics", count: topics.length, icon: Tag },
-                { id: "calendar", label: "Academic Calendar", count: academicCalendar.length, icon: CalendarRange },
-                { id: "school", label: "School Setup", count: (schoolLists?.departments || []).length, icon: School },
-              ].map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    data-active={isActive ? "true" : "false"}
-                    onClick={(e) => handleTabClick(tab.id as any, e)}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all flex items-center gap-2 shrink-0 ${
-                      isActive
-                        ? "bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400"
-                        : "bg-slate-800/90 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700/60"
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{tab.label}</span>
-                    {tab.count !== undefined && (
-                      <span
-                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
-                          isActive ? "bg-indigo-700 text-white" : "bg-slate-700 text-slate-300"
-                        }`}
-                      >
-                        {tab.count}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => scrollTabs("right")}
-              className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 transition-colors cursor-pointer shrink-0"
-              title="Scroll tabs right"
-              aria-label="Scroll tabs right"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
+      <ReviewCenterLayout<ReviewTab> groups={menuGroups} active={activeTab} onSelect={openTab}>
+      {activeTab === "home" && (
+        <ReviewCenterHome<ReviewTab>
+          waiting={waitingTiles}
+          onOpen={openTab}
+          status={
+            <>
+              <ActiveUsersCard users={users} onRefresh={onRefreshUsers} />
+              {onSetSurveyCreation && (
+                <SurveyCreationSwitch
+                  open={surveyCreationOpen}
+                  onChange={async (open) => {
+                    if (!open) {
+                      const ok = await confirm({
+                        title: "Turn survey creation off?",
+                        message:
+                          "Students, student officers and faculty will not be able to create new surveys or send drafts for review until you turn it back on. Their drafts stay safe and live surveys keep running. You can still create surveys.",
+                        confirmLabel: "Turn off",
+                      });
+                      if (!ok) return;
+                    }
+                    await onSetSurveyCreation(open);
+                  }}
+                />
+              )}
+            </>
+          }
+          numbers={[
+            { label: "Live surveys", value: surveys.filter((x) => x.status === "published" || x.status === "scheduled").length, id: "surveys" },
+            { label: "Active accounts", value: users.filter((u) => u.status === "active").length, id: "users" },
+          ]}
+          setup={
+            <SetupChecklist schoolLists={schoolLists} topics={topics} academicCalendar={academicCalendar} onOpen={openTab} />
+          }
+          onNavigateToAnalytics={onNavigateToAnalytics ? () => onNavigateToAnalytics("all") : undefined}
+          onNavigateToSentiment={onNavigateToML}
+        />
+      )}
 
       {/* TAB 0: SURVEY APPROVALS */}
       {activeTab === "approvals" && (
@@ -678,568 +281,14 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 
       {/* TAB 1: CREATION TIMEFRAME DIRECTORY (YEAR, MONTH, DATE) */}
       {activeTab === "surveys" && (
-        <div className="space-y-6">
-          {/* Detailed Timeframe Filter Controls Card */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-5">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <h2 className="font-serif text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-indigo-600" />
-                  <span>Surveys Creation Timeframe Filter (Year · Month · Date)</span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Filter and inspect all surveys created by university creators on specific years, months, and exact dates.
-                </p>
-              </div>
-
-              {/* View Mode Switcher (Timeline vs Table) */}
-              <div className="flex items-center gap-2">
-                <div className="p-1 bg-slate-100 rounded-xl flex items-center border border-slate-200">
-                  <button
-                    onClick={() => setViewMode("timeline")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                      viewMode === "timeline" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <CalendarDays className="w-3.5 h-3.5" />
-                    <span>Timeline View</span>
-                  </button>
-                  <button
-                    onClick={() => setViewMode("table")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                      viewMode === "table" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <ListFilter className="w-3.5 h-3.5" />
-                    <span>Table View</span>
-                  </button>
-                </div>
-
-                <button
-                  onClick={handleResetFilters}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                  title="Reset all filters"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reset</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Granular Multi-Tier Filter Controls Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
-              {/* Filter 1: Creation Year */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Creation Year
-                </label>
-                <select
-                  value={filterYear}
-                  onChange={(e) => setFilterYear(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
-                >
-                  <option value="all">All Years (2024–2026)</option>
-                  {availableYears.map((yr) => (
-                    <option key={yr} value={String(yr)}>
-                      Year {yr}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Filter 2: Creation Month */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Creation Month
-                </label>
-                <select
-                  value={filterMonth}
-                  onChange={(e) => setFilterMonth(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
-                >
-                  <option value="all">All Months (Jan–Dec)</option>
-                  {MONTH_NAMES.map((mName, idx) => (
-                    <option key={mName} value={String(idx + 1)}>
-                      {mName} ({String(idx + 1).padStart(2, "0")})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Filter 3: Exact Date Mode */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Date Mode / Period
-                </label>
-                <select
-                  value={dateFilterMode}
-                  onChange={(e) => setDateFilterMode(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
-                >
-                  <option value="all">All Dates</option>
-                  <option value="today">Created Today</option>
-                  <option value="past-7-days">Past 7 Days</option>
-                  <option value="past-30-days">Past 30 Days</option>
-                  <option value="exact">Specific Exact Date</option>
-                  <option value="range">Custom Date Range</option>
-                </select>
-              </div>
-
-              {/* Filter 4: Academic Year */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Academic Term
-                </label>
-                <select
-                  value={filterAcademicYear}
-                  onChange={(e) => setFilterAcademicYear(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
-                >
-                  <option value="all">All school years</option>
-                  {yearOptions.map((y) => (
-                    <option key={y} value={y}>
-                      SY {y}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Filter 5: Semester (from the academic calendar) */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Semester
-                </label>
-                <select
-                  value={filterSemester}
-                  onChange={(e) => setFilterSemester(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
-                >
-                  <option value="all">All semesters</option>
-                  <option value="1st Sem">1st Sem</option>
-                  <option value="2nd Sem">2nd Sem</option>
-                  <option value="Between terms">Between terms</option>
-                </select>
-              </div>
-
-              {/* Secondary Filter: Category */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Category
-                </label>
-                <select
-                  value={filterCategory}
-                  onChange={(e) => setFilterCategory(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
-                >
-                  <option value="all">All Categories</option>
-                  {categoryOptions.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Secondary Filter: Status */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Moderation Status
-                </label>
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
-                >
-                  <option value="all">All Statuses</option>
-                  <option value="published">Published</option>
-                  <option value="scheduled">Scheduled</option>
-                  <option value="draft">Draft</option>
-                  <option value="archived">Archived</option>
-                </select>
-              </div>
-
-              {/* Secondary Filter: Creator / Owner */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Creator
-                </label>
-                <select
-                  value={filterCreator}
-                  onChange={(e) => setFilterCreator(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden truncate"
-                >
-                  <option value="all">All Creators</option>
-                  {uniqueCreators.map((c) => (
-                    <option key={c.email} value={c.email}>
-                      {c.name} ({c.email})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Keyword Search */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Keyword Search
-                </label>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={searchSurvey}
-                    onChange={(e) => setSearchSurvey(e.target.value)}
-                    placeholder="Title, owner, keywords..."
-                    className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-hidden"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Date Pickers (Shown if exact or range selected) */}
-            {dateFilterMode === "exact" && (
-              <div className="p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 flex items-center gap-3">
-                <Calendar className="w-4 h-4 text-indigo-600" />
-                <label className="text-xs font-bold text-indigo-900">Select Specific Creation Date:</label>
-                <input
-                  type="date"
-                  value={exactDateInput}
-                  onChange={(e) => setExactDateInput(e.target.value)}
-                  className="px-3 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-indigo-950 focus:outline-hidden"
-                />
-                {exactDateInput && (
-                  <button
-                    onClick={() => setExactDateInput("")}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer underline"
-                  >
-                    Clear Date
-                  </button>
-                )}
-              </div>
-            )}
-
-            {dateFilterMode === "range" && (
-              <div className="p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 flex items-center gap-3 flex-wrap">
-                <Calendar className="w-4 h-4 text-indigo-600" />
-                <span className="text-xs font-bold text-indigo-900">From Date:</span>
-                <input
-                  type="date"
-                  value={dateRangeStart}
-                  onChange={(e) => setDateRangeStart(e.target.value)}
-                  className="px-3 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-indigo-950 focus:outline-hidden"
-                />
-                <span className="text-xs font-bold text-indigo-900">To Date:</span>
-                <input
-                  type="date"
-                  value={dateRangeEnd}
-                  onChange={(e) => setDateRangeEnd(e.target.value)}
-                  className="px-3 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-indigo-950 focus:outline-hidden"
-                />
-              </div>
-            )}
-
-            {/* Timeframe Results Header Banner */}
-            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-slate-800">
-                  Showing {filteredSurveys.length} of {surveys.length} Total Surveys
-                </span>
-                <span className="text-slate-400">·</span>
-                <span className="text-slate-600">
-                  {filterYear !== "all" ? `Year: ${filterYear}` : "All Years"} ·{" "}
-                  {filterMonth !== "all" ? `Month: ${MONTH_NAMES[parseInt(filterMonth) - 1]}` : "All Months"} ·{" "}
-                  {dateFilterMode !== "all" ? `Date Filter: ${dateFilterMode}` : "All Dates"}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3 text-slate-500 font-medium">
-                <span>{timeframeStats.publishedCount} Published</span>
-                <span>·</span>
-                <span>{timeframeStats.totalResponses} Total Responses</span>
-              </div>
-            </div>
-          </div>
-
-          {/* VIEW MODE 1: CHRONOLOGICAL TIMELINE VIEW */}
-          {viewMode === "timeline" && (
-            <div className="space-y-8">
-              {timelineGroups.length === 0 ? (
-                <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
-                    <Calendar className="w-6 h-6" />
-                  </div>
-                  <h3 className="font-serif text-base font-bold text-slate-900">
-                    No surveys found for this timeframe
-                  </h3>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    No surveys were created in the selected Year, Month, or Date combination. Adjust the timeframe selectors above to explore other dates.
-                  </p>
-                  <button
-                    onClick={handleResetFilters}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
-                  >
-                    Reset Timeframe Filters
-                  </button>
-                </div>
-              ) : (
-                timelineGroups.map((group) => (
-                  <div key={group.groupKey} className="space-y-4">
-                    {/* Month & Year Group Header */}
-                    <div className="flex items-center gap-3">
-                      <div className="px-3.5 py-1.5 bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs">
-                        <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>{group.groupKey}</span>
-                      </div>
-                      <div className="h-px bg-slate-200 flex-1"></div>
-                      <span className="text-xs font-semibold text-slate-400">
-                        {group.surveys.length} {group.surveys.length === 1 ? "survey created" : "surveys created"}
-                      </span>
-                    </div>
-
-                    {/* Timeline Cards Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {group.surveys.map(({ survey: s, parsedDate: p }) => (
-                        <div
-                          key={s.id}
-                          className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all flex flex-col justify-between space-y-4"
-                        >
-                          <div className="space-y-3">
-                            {/* Top metadata badge bar */}
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <div className="flex items-center gap-1.5">
-                                <span className="px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 text-[11px] font-bold">
-                                  {s.cat}
-                                </span>
-                                <span className="text-[11px] font-semibold text-slate-500">
-                                  {termLabel(s)}
-                                </span>
-                              </div>
-
-                              {/* Status badge */}
-                              <span
-                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                    s.status === "published"
-                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                      : s.status === "scheduled"
-                                      ? "bg-blue-50 text-blue-700 border border-blue-200"
-                                      : "bg-slate-100 text-slate-700 border border-slate-200"
-                                  }`}
-                                >
-                                  {s.status.toUpperCase()}
-                                </span>
-                            </div>
-
-                            {/* Title & Description */}
-                            <div className="space-y-1">
-                              <h3 className="font-bold text-base text-slate-900 leading-snug">
-                                {s.title}
-                              </h3>
-                              <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
-                                {s.desc}
-                              </p>
-                            </div>
-
-                            {/* Creator & Creation Date details */}
-                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1 text-xs">
-                              <div className="flex items-center justify-between text-slate-700">
-                                <span className="font-semibold">Author / Creator:</span>
-                                <span className="font-bold text-slate-900">{s.ownerName || "Faculty Member"}</span>
-                              </div>
-                              <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                                <span>Email:</span>
-                                <span className="font-mono">{s.owner}</span>
-                              </div>
-                              <div className="flex items-center justify-between text-slate-500 text-[11px] pt-1 border-t border-slate-200/60">
-                                <span className="flex items-center gap-1">
-                                  <Clock className="w-3 h-3 text-slate-400" />
-                                  <span>Creation Date:</span>
-                                </span>
-                                <span className="font-bold text-slate-800">{p.displayDate}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Footer response stats & admin moderation action buttons */}
-                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                            <div className="text-xs space-y-0.5">
-                              <div className="font-bold text-slate-900">{s.responses || 0} Submissions</div>
-                              <div className="text-[11px] text-slate-400">
-                                {s.questions?.length || 0} Questions · {s.ratingAverage ? `${s.ratingAverage} / 5.0 Avg` : "No rating"}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => setSelectedSurveyForPreview(s)}
-                                className="p-2 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-xl transition-colors cursor-pointer border border-slate-200"
-                                title="Inspect Survey Questions"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-
-                              {onNavigateToAnalytics && (
-                                <button
-                                  onClick={() => onNavigateToAnalytics(s.id)}
-                                  className="p-2 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 rounded-xl transition-colors cursor-pointer border border-slate-200"
-                                  title="View Macro Survey Analytics"
-                                >
-                                  <BarChart3 className="w-4 h-4" />
-                                </button>
-                              )}
-
-                              <button
-                                onClick={async () => {
-                                  const ok = await confirm({
-                                    title: "Delete this survey?",
-                                    message: `"${s.title}" will be permanently deleted. This cannot be undone.`,
-                                    confirmLabel: "Delete",
-                                    danger: true,
-                                  });
-                                  if (ok) onDeleteSurvey(s.id);
-                                }}
-                                className="p-2 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-xl transition-colors cursor-pointer border border-slate-200"
-                                title="Delete Survey"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {/* VIEW MODE 2: STRUCTURED TABLE VIEW */}
-          {viewMode === "table" && (
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] tracking-wider">
-                    <tr>
-                      <th className="p-4">Survey & Category</th>
-                      <th className="p-4">Created Date (Timeframe)</th>
-                      <th className="p-4">Creator / Author</th>
-                      <th className="p-4">Academic Term</th>
-                      <th className="p-4">Responses & Rating</th>
-                      <th className="p-4">Status</th>
-                      <th className="p-4 text-right">Moderation Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {filteredSurveys.length > 0 ? (
-                      filteredSurveys.map((s) => {
-                        const parsed = parseSurveyDate(s);
-                        return (
-                          <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-4 space-y-1 max-w-xs">
-                              <div className="font-bold text-slate-900 text-sm leading-snug">{s.title}</div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-[10px] border border-indigo-200">
-                                  {s.cat}
-                                </span>
-                                <span className="text-[11px] text-slate-500">
-                                  {s.questions?.length || 0} Questions
-                                </span>
-                              </div>
-                            </td>
-
-                            <td className="p-4 space-y-0.5 whitespace-nowrap">
-                              <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                                <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                                <span>{parsed.displayDate}</span>
-                              </div>
-                              <div className="text-[10px] text-slate-400 font-mono">
-                                Year {parsed.year} · {parsed.monthName}
-                              </div>
-                            </td>
-
-                            <td className="p-4 space-y-0.5">
-                              <div className="font-bold text-slate-900">{s.ownerName || "Faculty"}</div>
-                              <div className="text-[11px] text-slate-500 font-mono">{s.owner}</div>
-                            </td>
-
-                            <td className="p-4 space-y-0.5 whitespace-nowrap">
-                              <div className="font-semibold text-slate-800">
-                                {termOf(s).year ? `SY ${termOf(s).year}` : "Unknown"}
-                              </div>
-                              <div className="text-[10px] text-slate-500">{termOf(s).term || "–"}</div>
-                            </td>
-
-                            <td className="p-4 space-y-0.5 whitespace-nowrap">
-                              <div className="font-extrabold text-slate-900">
-                                {s.responses || 0} Submissions
-                              </div>
-                              <div className="text-[11px] text-amber-600 font-bold">
-                                {s.ratingAverage ? `${s.ratingAverage} / 5.0 Rating` : "No rating"}
-                              </div>
-                            </td>
-
-                            <td className="p-4">
-                              <span
-                                  className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
-                                    s.status === "published"
-                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                      : s.status === "scheduled"
-                                      ? "bg-blue-50 text-blue-700 border border-blue-200"
-                                      : "bg-slate-100 text-slate-700 border border-slate-200"
-                                  }`}
-                                >
-                                  {s.status.toUpperCase()}
-                                </span>
-                            </td>
-
-                            <td className="p-4 text-right space-x-1 whitespace-nowrap">
-                              <button
-                                onClick={() => setSelectedSurveyForPreview(s)}
-                                title="Inspect Survey Questions"
-                                className="p-1.5 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                              {onNavigateToAnalytics && (
-                                <button
-                                  onClick={() => onNavigateToAnalytics(s.id)}
-                                  title="View Analytics"
-                                  className="p-1.5 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  <BarChart3 className="w-4 h-4" />
-                                </button>
-                              )}
-                              <button
-                                onClick={async () => {
-                                  const ok = await confirm({
-                                    title: "Delete this survey?",
-                                    message: `"${s.title}" will be permanently deleted. This cannot be undone.`,
-                                    confirmLabel: "Delete",
-                                    danger: true,
-                                  });
-                                  if (ok) onDeleteSurvey(s.id);
-                                }}
-                                title="Delete Survey"
-                                className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={7} className="p-8 text-center text-slate-400">
-                          No surveys found matching the selected Year, Month, and Date filters.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
+        <AllSurveysPanel
+          surveys={surveys}
+          calendar={academicCalendar}
+          schoolLists={schoolLists}
+          onOpenAnalytics={onNavigateToAnalytics}
+          onTakedown={onTakedownSurvey}
+          onDelete={onDeleteSurvey}
+        />
       )}
 
       {activeTab === "reports" && onDismissReports && onTakedownReported && (
@@ -1263,6 +312,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           onToggleUserStatus={onToggleUserStatus}
           onApproveUser={(email) => onToggleUserStatus(email, "active")}
           onPromoteUser={onPromoteUser}
+          onSendPasswordReset={onSendPasswordReset}
           schoolLists={schoolLists}
           lastYearMoveAt={lastYearMoveAt}
           onNewSchoolYear={onNewSchoolYear}
@@ -1279,7 +329,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
             <div>
               <h2 className="font-serif text-xl font-bold text-slate-900">
-                Institutional Security & Activity Audit Trail
+                Activity log
               </h2>
               <p className="text-xs text-slate-500">
                 Real-time chronological log of administrative operations, survey creation events, and policy audits.
@@ -1365,69 +415,8 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
         <DatabaseBackupView showToast={showToast || (() => {})} />
       )}
 
-      {/* INSPECT SURVEY QUESTIONS MODAL */}
-      {selectedSurveyForPreview && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setSelectedSurveyForPreview(null)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 max-h-[85vh] overflow-y-auto space-y-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
-              <div>
-                <span className="px-2.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-xs border border-indigo-200">
-                  {selectedSurveyForPreview.cat} · {termLabel(selectedSurveyForPreview)}
-                </span>
-                <h3 className="font-serif text-xl font-bold text-slate-900 mt-2">
-                  {selectedSurveyForPreview.title}
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">{selectedSurveyForPreview.desc}</p>
-                <div className="mt-2 text-[11px] text-slate-500">
-                  Created by: <span className="font-bold text-slate-800">{selectedSurveyForPreview.ownerName}</span> ({selectedSurveyForPreview.owner}) on {selectedSurveyForPreview.created}
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedSurveyForPreview(null)}
-                className="p-1 rounded-full hover:bg-slate-100 text-slate-400 cursor-pointer"
-              >
-                <XCircle className="w-5 h-5" />
-              </button>
-            </div>
+      </ReviewCenterLayout>
 
-            <div className="space-y-4">
-              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Evaluation Instruments & Questions ({selectedSurveyForPreview.questions.length})
-              </h4>
-              <div className="space-y-3">
-                {selectedSurveyForPreview.questions.map((q, idx) => (
-                  <div key={idx} className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
-                    <div className="font-bold text-slate-900">
-                      {idx + 1}. {q.text} <span className="font-normal text-slate-500">({q.type})</span>
-                    </div>
-                    {q.labels && (
-                      <div className="text-slate-500 text-[11px]">Rating Scale: {q.labels.join(" · ")}</div>
-                    )}
-                    {q.options && (
-                      <div className="text-slate-500 text-[11px]">Options: {q.options.join(", ")}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-4 border-t border-slate-100">
-              <button
-                onClick={() => setSelectedSurveyForPreview(null)}
-                className="px-5 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl cursor-pointer"
-              >
-                Close Preview
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

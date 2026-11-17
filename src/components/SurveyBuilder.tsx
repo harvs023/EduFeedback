@@ -294,7 +294,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-12">
+    <div className="max-w-4xl mx-auto space-y-8">
       {creationClosed && (
         <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-sm text-amber-900">
           <strong>Survey creation is turned off by the admin right now.</strong> You can keep editing and save this as a

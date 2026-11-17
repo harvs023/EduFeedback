@@ -90,7 +90,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   ];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5 pb-12">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="font-serif text-2xl font-bold text-slate-900">Analytics</h1>

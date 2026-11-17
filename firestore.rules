@@ -69,6 +69,7 @@ service cloud.firestore {
     // 2) Optional narrowing: for each list that is not empty, the person's own (locked)
     //    department / program / year / section must be in it. A section target also needs
     //    a program target, so a wrong section name alone can never match.
+    // 3) The admin account is a system account, never a respondent.
     function inAudience(survey) {
       let target = survey.get('targetAudience', {});
       let type = target.get('type', 'all');
@@ -79,7 +80,8 @@ service cloud.firestore {
       let progs = target.get('programs', []);
       let years = target.get('years', []);
       let secs = target.get('sections', []);
-      return (type == 'all'
+      return me.get('role', '') != 'superadmin'
+        && (type == 'all'
           || (type == 'students' && pos in ['Student', 'Student Officer'])
           || (type == 'faculty' && pos == 'Faculty')
           || (type == 'officers' && pos == 'Student Officer')

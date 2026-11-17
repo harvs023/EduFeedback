@@ -110,6 +110,33 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ------------------------------------------------------- school setup
+    // School setup lists (departments, programs, sections). No personal data.
+    // Anyone can read it (the sign-up page needs it before login); only the admin can change it.
+    match /school_setup/{docId} {
+      allow read: if docId == 'lists';
+      allow write: if isAdmin() && docId == 'lists';
+    }
+
+    // ------------------------------------------------------- survey reports
+    // Reports from users about a live survey. One per person per survey (the id is
+    // surveyId_emailKey, so a second report is refused). Only the admin and the
+    // reporter can read it; only the admin can decide or delete it.
+    match /survey_reports/{reportId} {
+      allow create: if isActive()
+        && reportId == string(request.resource.data.surveyId) + '_' + myKey()
+        && request.resource.data.keys().hasOnly(['surveyId', 'surveyTitle', 'reasons', 'note',
+                                                 'reportedBy', 'reportedAt', 'status'])
+        && request.resource.data.reportedBy == myEmail()
+        && request.resource.data.status == 'open'
+        && request.resource.data.reportedAt is int
+        && exists(surveyPath(request.resource.data.surveyId))
+        && get(surveyPath(request.resource.data.surveyId)).data.status in ['published', 'scheduled']
+        && get(surveyPath(request.resource.data.surveyId)).data.owner != myEmail();
+      allow read: if isAdmin() || (isActive() && resource.data.reportedBy == myEmail());
+      allow update, delete: if isAdmin();
+    }
+
     // ------------------------------------------------------- evaluation results
     // Saved results of the thesis sentiment evaluation (accuracy, macro-F1, ...).
     // Only the admin can read, add or delete them. They can never be edited.

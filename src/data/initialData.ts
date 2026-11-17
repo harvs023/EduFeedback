@@ -1,5 +1,6 @@
-import { Survey, SurveyResponse, NewsAnnouncement, UserProfile, ActivityLog } from "../types";
+import { UserProfile } from "../types";
 
+/** The school's colleges and programs, used only by School Setup's "Start from the built-in list" button. */
 export const DEPARTMENTS_DATA: Record<string, string[]> = {
   "College of Computer Studies": [
     "Bachelor of Science in Computer Science",
@@ -46,8 +47,6 @@ export const DEPARTMENTS_DATA: Record<string, string[]> = {
   ],
 };
 
-export const PROGRAMS_BY_DEPARTMENT: Record<string, string[]> = DEPARTMENTS_DATA;
-
 // ==============================================================================
 // MASTER ROOT ADMINISTRATOR CONFIGURATION
 // ==============================================================================
@@ -86,27 +85,3 @@ export const MASTER_ADMIN_USER: UserProfile = {
   canCreateSurveys: true,
   canPostNews: true,
 };
-
-// Clean Default Users: ONLY the Master Root Administrator is pre-seeded
-export const DEFAULT_USERS: UserProfile[] = [MASTER_ADMIN_USER];
-
-export const SAMPLE_USERS: UserProfile[] = DEFAULT_USERS;
-
-export const INITIAL_SURVEYS: Survey[] = [];
-
-export const INITIAL_RESPONSES: SurveyResponse[] = [];
-
-export const INITIAL_NEWS: NewsAnnouncement[] = [];
-
-export const INITIAL_LOGS: ActivityLog[] = [
-  {
-    id: "log-1",
-    time: "Oct 26, 2026, 08:00 AM",
-    user: MASTER_ADMIN_EMAIL,
-    pos: "Superadmin",
-    action: "System Initialized",
-    details: "EduFeedback Production Environment initialized with clean slate",
-    ip: "127.0.0.1",
-    timestamp: Date.now(),
-  },
-];

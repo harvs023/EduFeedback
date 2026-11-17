@@ -25,7 +25,6 @@ export interface UserProfile {
 }
 
 export type SurveyStatus = "draft" | "pending" | "rejected" | "scheduled" | "published" | "archived";
-export type SurveyCategory = "Course" | "Instructor" | "Facilities" | "General" | "Student Services" | "Others";
 
 export type QuestionType = "rating" | "multiple" | "checkbox" | "paragraph";
 
@@ -90,6 +89,62 @@ export interface AcademicYearTerms {
 export type TermName = "1st Sem" | "2nd Sem" | "Between terms";
 
 /** Admin switches (Firestore `settings/app`; active users read, admin writes). */
+export type ReportReason = "offensive" | "personal_info" | "misleading" | "spam" | "other";
+
+/**
+ * A user's report about a live survey (`survey_reports/{surveyId}_{emailKey}`): one per person
+ * per survey. Only the admin and the reporter can read it; the survey owner never sees who reported.
+ */
+export interface SurveyReport {
+  id: string;
+  surveyId: string;
+  surveyTitle: string;
+  reasons: ReportReason[];
+  note: string;
+  reportedBy: string;
+  reportedAt: number;
+  status: "open" | "dismissed" | "taken_down";
+  decidedBy?: string;
+  decidedAt?: number;
+  decisionNote?: string;
+}
+
+/** One degree program. Sections are letters per year level; the section name is CODE-<year><letter>. */
+export interface SchoolProgram {
+  id: string;
+  name: string;
+  /** Short code used in section names, e.g. "CS" -> CS-1A. */
+  code: string;
+  /** 1 to 5. */
+  yearLevels: number;
+  /** Section letters per year level, keyed "1".."5", e.g. { "1": ["A", "B"] }. */
+  sections: Record<string, string[]>;
+  retired?: boolean;
+}
+
+export interface SchoolDepartment {
+  id: string;
+  name: string;
+  retired?: boolean;
+  programs: SchoolProgram[];
+}
+
+/** A survey category (Course, Faculty, ...). Surveys store the name in `Survey.cat`. */
+export interface SurveyCategory {
+  id: string;
+  name: string;
+  retired?: boolean;
+}
+
+/** `school_setup/lists`: readable by anyone (sign-up needs it), written by the admin only. No personal data. */
+export interface SchoolLists {
+  departments: SchoolDepartment[];
+  /** Missing = never saved: the built-in categories are used until the admin saves the list. */
+  categories?: SurveyCategory[];
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
 export interface AppSettings {
   /** false = nobody but the admin can create surveys or send them for review. Missing = open. */
   surveyCreationOpen: boolean;
@@ -158,6 +213,7 @@ export interface Survey {
   owner: string;
   ownerName: string;
   targetAudience?: TargetAudience;
+  /** Old admin flag (replaced by user reports in `survey_reports`); kept only so old documents still type-check. */
   flagged?: boolean;
   flagReason?: string | null;
   flaggedBy?: string | null;
@@ -327,6 +383,7 @@ export interface NotificationItem {
     | "survey_approved"
     | "survey_rejected"
     | "survey_takedown"
+    | "survey_report"
     | "approval";
   data?: Record<string, any>;
 }

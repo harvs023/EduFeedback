@@ -48,14 +48,9 @@ import {
   EvaluationRun,
   ResponseReview,
   AppSettings,
+  SchoolLists,
+  SurveyReport,
 } from "../types";
-import {
-  INITIAL_SURVEYS,
-  INITIAL_RESPONSES,
-  DEFAULT_USERS,
-  INITIAL_NEWS,
-  INITIAL_LOGS,
-} from "../data/initialData";
 import appletConfig from "../../firebase-applet-config.json";
 
 // Firebase Web Configuration loaded from applet config and environment variables
@@ -200,6 +195,8 @@ export const COLLECTIONS = {
   ACADEMIC_CALENDAR: "academic_calendar",
   EVALUATION_RUNS: "evaluation_runs",
   SETTINGS: "settings",
+  SCHOOL_SETUP: "school_setup",
+  SURVEY_REPORTS: "survey_reports",
 };
 
 /**
@@ -703,12 +700,13 @@ export const FirestoreLogsService = {
   async add(log: Omit<ActivityLog, "id" | "time"> | ActivityLog): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) throw new Error("Firestore is not initialized.");
-    const logId = ("id" in log && log.id) ? log.id : `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const now = Date.now();
+    const logId = ("id" in log && log.id) ? log.id : `log_${now}_${Math.random().toString(36).slice(2, 7)}`;
     const fullLog: ActivityLog = {
       id: logId,
-      time: ("time" in log && log.time) ? log.time : "Just now",
-      timestamp: log.timestamp || Date.now(),
       ...log,
+      timestamp: log.timestamp || now,
+      time: ("time" in log && log.time) ? log.time : new Date(log.timestamp || now).toLocaleString(),
     };
     try {
       await setDoc(doc(firestore, COLLECTIONS.LOGS, logId), fullLog);
@@ -742,7 +740,6 @@ export const FirestoreNotificationService = {
           message: d.message || "",
           read: Boolean(d.read),
           timestamp: d.timestamp || Date.now(),
-          time: d.time || "Just now",
           icon: d.icon || "🔔",
           type: d.type || "general",
           data: d.data,
@@ -821,20 +818,6 @@ export const FirestoreNotificationService = {
   },
 };
 
-export const INITIAL_TOPICS: Topic[] = [
-  { id: "topic_teaching_quality", name: "Teaching Quality", status: "active", order: 1, createdAt: Date.now() },
-  { id: "topic_course_content", name: "Course Content", status: "active", order: 2, createdAt: Date.now() },
-  { id: "topic_facilities", name: "Facilities", status: "active", order: 3, createdAt: Date.now() },
-  { id: "topic_internet_wifi", name: "Internet / Wi-Fi", status: "active", order: 4, createdAt: Date.now() },
-  { id: "topic_administration", name: "Administration", status: "active", order: 5, createdAt: Date.now() },
-  { id: "topic_schedule", name: "Schedule", status: "active", order: 6, createdAt: Date.now() },
-  { id: "topic_cleanliness", name: "Cleanliness", status: "active", order: 7, createdAt: Date.now() },
-  { id: "topic_equipment", name: "Equipment", status: "active", order: 8, createdAt: Date.now() },
-  { id: "topic_student_services", name: "Student Services", status: "active", order: 9, createdAt: Date.now() },
-  { id: "topic_general", name: "General", status: "active", order: 10, createdAt: Date.now() },
-  { id: "topic_other", name: "Other", status: "active", order: 11, createdAt: Date.now() },
-];
-
 /**
  * Academic calendar: one document per school year, written by the admin only.
  */
@@ -857,6 +840,81 @@ export const FirestoreSettingsService = {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.SETTINGS}/app`);
       throw err;
     }
+  },
+};
+
+/** School setup lists in `school_setup/lists` (anyone can read; admin writes). Missing = empty. */
+export const FirestoreSchoolService = {
+  async get(): Promise<SchoolLists> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return { departments: [] };
+    const snap = await getDoc(doc(firestore, COLLECTIONS.SCHOOL_SETUP, "lists"));
+    const data = snap.exists() ? (snap.data() as Partial<SchoolLists>) : {};
+    return { ...data, departments: Array.isArray(data.departments) ? data.departments : [] };
+  },
+
+  async save(lists: SchoolLists): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    try {
+      await setDoc(doc(firestore, COLLECTIONS.SCHOOL_SETUP, "lists"), lists);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.SCHOOL_SETUP}/lists`);
+      throw err;
+    }
+  },
+};
+
+/** Users' reports about live surveys. One per person per survey; admin decides. */
+export const FirestoreReportService = {
+  idFor(surveyId: string | number, email: string): string {
+    return `${String(surveyId)}_${email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_")}`;
+  },
+
+  async create(report: Omit<SurveyReport, "id" | "status">): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("The database is not available. Please try again.");
+    const id = FirestoreReportService.idFor(report.surveyId, report.reportedBy);
+    try {
+      await setDoc(doc(firestore, COLLECTIONS.SURVEY_REPORTS, id), { ...report, status: "open" });
+    } catch (err) {
+      console.warn("Could not save the report:", err);
+      throw new Error("Could not send your report. You may have reported this survey already, or it is no longer open.");
+    }
+  },
+
+  /** Admin: every report. */
+  async getAll(): Promise<SurveyReport[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    const snap = await getDocs(collection(firestore, COLLECTIONS.SURVEY_REPORTS));
+    return snap.docs.map((d) => ({ ...(d.data() as Omit<SurveyReport, "id">), id: d.id }));
+  },
+
+  /** The surveys this person has reported. */
+  async getMine(email: string): Promise<SurveyReport[]> {
+    const firestore = getFirebaseDb();
+    if (!firestore) return [];
+    try {
+      const q = query(
+        collection(firestore, COLLECTIONS.SURVEY_REPORTS),
+        where("reportedBy", "==", email.trim().toLowerCase())
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ ...(d.data() as Omit<SurveyReport, "id">), id: d.id }));
+    } catch (err) {
+      console.warn("Could not load your reports:", err);
+      return [];
+    }
+  },
+
+  /** Admin: record a decision on several reports at once. */
+  async decide(ids: string[], decision: Pick<SurveyReport, "status" | "decidedBy" | "decidedAt" | "decisionNote">): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    const batch = writeBatch(firestore);
+    ids.forEach((id) => batch.update(doc(firestore, COLLECTIONS.SURVEY_REPORTS, id), decision));
+    await batch.commit();
   },
 };
 
@@ -989,23 +1047,6 @@ export const FirestoreTopicService = {
     }
   },
 };
-
-/**
- * Seed Firestore with Initial Data from active datasets
- */
-export async function seedFirestoreWithInitialDemoData(): Promise<{ success: boolean; message: string }> {
-  try {
-    return seedFirestoreWithData({
-      surveys: INITIAL_SURVEYS,
-      responses: INITIAL_RESPONSES,
-      users: DEFAULT_USERS,
-      news: INITIAL_NEWS,
-      logs: INITIAL_LOGS,
-    });
-  } catch (err: any) {
-    return { success: false, message: err?.message || "Failed to load datasets for seeding." };
-  }
-}
 
 /**
  * Seed Firestore with Initial Data from seed datasets

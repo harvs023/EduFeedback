@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings } from "./types";
+import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings, SchoolLists, SurveyReport, ReportReason } from "./types";
 import { DatabaseService } from "./lib/databaseService";
 import { schoolYearFor } from "./lib/schoolYear";
-import { isFirebaseConfigured, FirebaseAuthService, FirestoreUserService, INITIAL_TOPICS } from "./lib/firebase";
+import { isFirebaseConfigured, FirebaseAuthService, FirestoreUserService } from "./lib/firebase";
 import { countEligibleUsers, getSurveyAvailability } from "./lib/surveyReview";
 import {
   analyzeResponse,
@@ -13,7 +13,8 @@ import {
   trustedResponses,
   verifySavedResults,
 } from "./lib/sentiment";
-import { MASTER_ADMIN_EMAIL, DEFAULT_SURVEY_CATEGORIES } from "./data/initialData";
+import { MASTER_ADMIN_EMAIL } from "./data/initialData";
+import { activeCategoryNames } from "./lib/schoolLists";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
 import { AnalyticsPage } from "./components/analytics/AnalyticsPage";
@@ -25,7 +26,6 @@ import { MySurveysScreen } from "./components/MySurveysScreen";
 import { SuperadminDashboard } from "./components/SuperadminDashboard";
 import { TakeSurveyModal } from "./components/TakeSurveyModal";
 import { UserProfileModal } from "./components/UserProfileModal";
-import { AuthModal } from "./components/AuthModal";
 import { StandaloneAuthPage } from "./components/StandaloneAuthPage";
 import {
   LayoutDashboard,
@@ -59,6 +59,7 @@ export default function App() {
   const [academicCalendar, setAcademicCalendar] = useState<AcademicYearTerms[]>([]);
   /** Admin switches (survey creation open/closed). Defaults to open until loaded. */
   const [appSettings, setAppSettings] = useState<AppSettings>({ surveyCreationOpen: true });
+  const [schoolLists, setSchoolLists] = useState<SchoolLists | null>(null);
   /** When surveys and responses were last loaded from the database (shown on Analytics). */
   const [dataLoadedAt, setDataLoadedAt] = useState<number | null>(null);
 
@@ -67,13 +68,14 @@ export default function App() {
   const [previewSurvey, setPreviewSurvey] = useState<Survey | null>(null);
   const [answeredSurveyIds, setAnsweredSurveyIds] = useState<string[]>([]);
   const [likedNewsIds, setLikedNewsIds] = useState<string[]>([]);
+  // Surveys this person has reported; the admin also loads every report.
+  const [myReportedSurveyIds, setMyReportedSurveyIds] = useState<string[]>([]);
+  const [surveyReports, setSurveyReports] = useState<SurveyReport[]>([]);
   // Saved sentiment results confirmed by the server's signature check (see lib/sentiment.ts).
   const [validResultKeys, setValidResultKeys] = useState<Set<string>>(new Set());
   const [signatureCheck, setSignatureCheck] = useState<"checking" | "done" | "unavailable">("done");
   const checkedResultKeys = useRef<Set<string>>(new Set());
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
-  const [authModalMode, setAuthModalMode] = useState<"login" | "register">("login");
   const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "info" } | null>(null);
 
   const showToast = (text: string, type: "success" | "info" = "success") => {
@@ -134,12 +136,6 @@ export default function App() {
       let freshTopics: Topic[] = [];
       try {
         freshTopics = await DatabaseService.getTopics();
-        if (freshTopics.length === 0 && (isAdmin || isSuperadmin)) {
-          for (const t of INITIAL_TOPICS) {
-            await DatabaseService.saveTopic(t);
-          }
-          freshTopics = await DatabaseService.getTopics();
-        }
       } catch (topicErr) {
         console.warn("Failed to load topics:", topicErr);
         freshTopics = [];
@@ -147,8 +143,13 @@ export default function App() {
       setTopics(freshTopics);
       setAcademicCalendar(await DatabaseService.getAcademicCalendar().catch(() => []));
       setAppSettings(await DatabaseService.getSettings().catch(() => ({ surveyCreationOpen: true })));
+      setSchoolLists(await DatabaseService.getSchoolLists().catch(() => null));
       setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
       setLikedNewsIds(user?.email ? await DatabaseService.getLikedNewsIds(user.email) : []);
+      setMyReportedSurveyIds(
+        user?.email ? (await DatabaseService.getMySurveyReports(user.email)).map((r) => String(r.surveyId)) : []
+      );
+      setSurveyReports(user?.role === "superadmin" ? await DatabaseService.getSurveyReports().catch(() => []) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load data from Firestore.", "info");
     }
@@ -225,6 +226,8 @@ export default function App() {
         setAcademicCalendar([]);
         setAnsweredSurveyIds([]);
         setLikedNewsIds([]);
+        setMyReportedSurveyIds([]);
+        setSurveyReports([]);
       }
     });
 
@@ -324,12 +327,6 @@ export default function App() {
       let freshTopics: Topic[] = [];
       try {
         freshTopics = await DatabaseService.getTopics();
-        if (freshTopics.length === 0 && (isAdmin || isSuperadmin)) {
-          for (const t of INITIAL_TOPICS) {
-            await DatabaseService.saveTopic(t);
-          }
-          freshTopics = await DatabaseService.getTopics();
-        }
       } catch (topicErr) {
         console.warn("Failed to load topics:", topicErr);
         freshTopics = [];
@@ -337,8 +334,13 @@ export default function App() {
       setTopics(freshTopics);
       setAcademicCalendar(await DatabaseService.getAcademicCalendar().catch(() => []));
       setAppSettings(await DatabaseService.getSettings().catch(() => ({ surveyCreationOpen: true })));
+      setSchoolLists(await DatabaseService.getSchoolLists().catch(() => null));
       setAnsweredSurveyIds(user?.email ? await DatabaseService.getAnsweredSurveyIds(user.email) : []);
       setLikedNewsIds(user?.email ? await DatabaseService.getLikedNewsIds(user.email) : []);
+      setMyReportedSurveyIds(
+        user?.email ? (await DatabaseService.getMySurveyReports(user.email)).map((r) => String(r.surveyId)) : []
+      );
+      setSurveyReports(user?.role === "superadmin" ? await DatabaseService.getSurveyReports().catch(() => []) : []);
     } catch (err: any) {
       showToast(err?.message || "Failed to load Firestore data for user.", "info");
     }
@@ -365,6 +367,8 @@ export default function App() {
     setAcademicCalendar([]);
     setAnsweredSurveyIds([]);
     setLikedNewsIds([]);
+    setMyReportedSurveyIds([]);
+    setSurveyReports([]);
     showToast("Signed out successfully.", "info");
   };
 
@@ -870,67 +874,6 @@ export default function App() {
     }
   };
 
-  // Moderation Handlers
-  const handleClearFlag = async (surveyId: string | number) => {
-    const srv = surveys.find((s) => s.id === surveyId);
-    if (!srv) return;
-    const updated = { ...srv, flagged: false, flagReason: undefined };
-    try {
-      await DatabaseService.saveSurvey(updated);
-      setSurveys((prev) => prev.map((s) => (s.id === surveyId ? updated : s)));
-
-      if (srv.owner) {
-        try {
-          await DatabaseService.addNotification({
-            to: srv.owner.toLowerCase(),
-            title: "✅ Survey Flag Cleared",
-            message: `Your survey "${srv.title}" has been reviewed and approved by administration.`,
-            icon: "✅",
-            type: "flag_cleared",
-            data: { surveyId },
-          });
-        } catch {}
-        if (currentUser?.email) {
-          const refreshed = await DatabaseService.getNotifications(currentUser.email);
-          setNotifications(refreshed);
-        }
-      }
-      showToast("Survey flag cleared and approved!", "success");
-    } catch (err: any) {
-      showToast(err.message || "Failed to clear survey flag.", "info");
-    }
-  };
-
-  const handleFlagSurvey = async (surveyId: string | number, reason: string) => {
-    const srv = surveys.find((s) => s.id === surveyId);
-    if (!srv) return;
-    const updated = { ...srv, flagged: true, flagReason: reason };
-    try {
-      await DatabaseService.saveSurvey(updated);
-      setSurveys((prev) => prev.map((s) => (s.id === surveyId ? updated : s)));
-
-      if (srv.owner) {
-        try {
-          await DatabaseService.addNotification({
-            to: srv.owner.toLowerCase(),
-            title: "⚠️ Survey Flagged for Review",
-            message: `Your survey "${srv.title}" was flagged: ${reason}`,
-            icon: "⚠️",
-            type: "flag",
-            data: { surveyId },
-          });
-        } catch {}
-        if (currentUser?.email) {
-          const refreshed = await DatabaseService.getNotifications(currentUser.email);
-          setNotifications(refreshed);
-        }
-      }
-      showToast("Survey flagged for administrative review.", "info");
-    } catch (err: any) {
-      showToast(err.message || "Failed to flag survey.", "info");
-    }
-  };
-
   const handleDeleteSurvey = async (surveyId: string | number, surveyTitle?: string) => {
     try {
       await DatabaseService.deleteSurvey(surveyId);
@@ -1101,7 +1044,7 @@ export default function App() {
     }
   };
 
-  const handleTakedownSurvey = async (surveyId: string | number, reason: string) => {
+  const handleTakedownSurvey = async (surveyId: string | number, reason: string): Promise<boolean> => {
     const isSuperadmin =
       currentUser?.role === "superadmin" ||
       currentUser?.pos === "Superadmin" ||
@@ -1109,23 +1052,23 @@ export default function App() {
 
     if (!isSuperadmin) {
       showToast("Unauthorized: Superadmin access required.", "info");
-      return;
+      return false;
     }
 
     if (!reason || reason.trim().length < 10) {
       showToast("Takedown reason must be at least 10 characters.", "info");
-      return;
+      return false;
     }
 
     const srv = surveys.find((s) => s.id === surveyId);
     if (!srv) {
       showToast("Survey not found.", "info");
-      return;
+      return false;
     }
 
     if (srv.status !== "published" && srv.status !== "scheduled") {
       showToast("Only published or scheduled surveys can be taken down.", "info");
-      return;
+      return false;
     }
 
     const now = Date.now();
@@ -1170,8 +1113,10 @@ export default function App() {
       });
 
       showToast(`Survey "${srv.title}" taken down and archived.`, "info");
+      return true;
     } catch (err: any) {
       showToast(err.message || "Failed to take down survey.", "info");
+      return false;
     }
   };
 
@@ -1263,7 +1208,6 @@ export default function App() {
       responses: 0,
       created: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       createdAtTimestamp: Date.now(),
-      flagged: false,
       isTrending: false,
       openDate: null,
       closeDate: null,
@@ -1545,6 +1489,118 @@ export default function App() {
     showToast(open ? "Survey creation is open again." : "Survey creation is now off (admin excepted).", "success");
   };
 
+  /** A user reports a live survey (once). The admin is notified; the creator is not told who. */
+  const handleReportSurvey = async (survey: Survey, reasons: ReportReason[], note: string): Promise<boolean> => {
+    if (!currentUser?.email) return false;
+    const me = currentUser.email.trim().toLowerCase();
+    try {
+      await DatabaseService.reportSurvey({
+        surveyId: String(survey.id),
+        surveyTitle: survey.title,
+        reasons,
+        note,
+        reportedBy: me,
+        reportedAt: Date.now(),
+      });
+    } catch (err: any) {
+      showToast(err.message || "Could not send your report.", "info");
+      return false;
+    }
+    setMyReportedSurveyIds((prev) => [...prev, String(survey.id)]);
+    try {
+      await DatabaseService.addNotification({
+        to: MASTER_ADMIN_EMAIL.toLowerCase(),
+        title: "🚩 Survey Reported",
+        message: `A user reported the survey "${survey.title}". Review it in Review Center > Reported Surveys.`,
+        icon: "🚩",
+        type: "survey_report",
+        data: { surveyId: String(survey.id) },
+      });
+    } catch {}
+    showToast("Thank you. The administrator will review your report.", "success");
+    return true;
+  };
+
+  /** Admin: close the open reports of one survey and tell each reporter the decision. */
+  const closeReports = async (surveyId: string, status: "dismissed" | "taken_down", note: string) => {
+    if (!currentUser?.email) return;
+    const open = surveyReports.filter((r) => String(r.surveyId) === surveyId && r.status === "open");
+    if (open.length === 0) return;
+    const decision = {
+      status,
+      decidedBy: currentUser.email.trim().toLowerCase(),
+      decidedAt: Date.now(),
+      decisionNote: note,
+    };
+    await DatabaseService.decideSurveyReports(open.map((r) => r.id), decision);
+    setSurveyReports((prev) => prev.map((r) => (open.some((o) => o.id === r.id) ? { ...r, ...decision } : r)));
+    const title = open[0].surveyTitle;
+    for (const r of open) {
+      try {
+        await DatabaseService.addNotification({
+          to: r.reportedBy.toLowerCase(),
+          title: status === "taken_down" ? "✅ Reported survey taken down" : "ℹ️ Your report was reviewed",
+          message:
+            status === "taken_down"
+              ? `Thank you. The survey "${title}" you reported was taken down.`
+              : `Thank you. The administrator reviewed "${title}" and kept it.${note ? ` Note: ${note}` : ""}`,
+          icon: status === "taken_down" ? "✅" : "ℹ️",
+          type: "survey_report",
+          data: { surveyId },
+        });
+      } catch {}
+    }
+    try {
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: status === "taken_down" ? "Reported Survey Taken Down" : "Survey Reports Dismissed",
+        details: `${open.length} report(s) on "${title}" ${status === "taken_down" ? "led to a takedown" : "dismissed"}.`,
+      });
+    } catch {}
+  };
+
+  const handleDismissReports = async (surveyId: string, note: string) => {
+    try {
+      await closeReports(surveyId, "dismissed", note);
+      showToast("Reports dismissed. The survey stays live.", "success");
+    } catch {
+      showToast("Could not save the decision. Please try again.", "info");
+    }
+  };
+
+  const handleTakedownReported = async (surveyId: string, reason: string) => {
+    const done = await handleTakedownSurvey(surveyId, reason);
+    if (!done) return;
+    try {
+      await closeReports(surveyId, "taken_down", reason);
+    } catch {
+      showToast("The survey was taken down, but the reports could not be closed. Try again.", "info");
+    }
+  };
+
+  /** Admin: save the School Setup lists (departments, programs, sections). */
+  const handleSaveSchoolLists = async (lists: SchoolLists) => {
+    if (!currentUser) return;
+    const next: SchoolLists = { ...lists, updatedAt: Date.now(), updatedBy: currentUser.email.trim().toLowerCase() };
+    try {
+      await DatabaseService.saveSchoolLists(next);
+    } catch {
+      showToast("Could not save the school lists. Please try again.", "info");
+      return;
+    }
+    setSchoolLists(next);
+    try {
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: "School Setup Updated",
+        details: `Saved ${next.departments.length} department(s) and ${next.departments.reduce((n, d) => n + d.programs.length, 0)} program(s).`,
+      });
+    } catch {}
+    showToast("School lists saved.", "success");
+  };
+
   /** Admin: reload only the user list (for the "Active users" counter). */
   const handleRefreshUsers = async () => {
     if (!currentUser) return;
@@ -1606,7 +1662,8 @@ export default function App() {
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
   // All authenticated users can author surveys (Students, Officers, Faculty, Admins)
   const canCreateSurvey = Boolean(currentUser);
-  const flaggedCount = surveys.filter((s) => s.flagged).length;
+  // Review Center badge: surveys with user reports waiting for a decision.
+  const reportedSurveyCount = new Set(surveyReports.filter((r) => r.status === "open").map((r) => String(r.surveyId))).size;
 
   const handleNavigate = (view: string) => {
     if (view !== "create") {
@@ -1638,7 +1695,7 @@ export default function App() {
           },
         ]
       : []),
-    ...(isSuperadmin ? [{ id: "admin", label: "Review Center", icon: ShieldAlert, badge: flaggedCount }] : []),
+    ...(isSuperadmin ? [{ id: "admin", label: "Review Center", icon: ShieldAlert, badge: reportedSurveyCount }] : []),
   ];
 
   // If Firebase is not configured, show a full-page message instead of running
@@ -1678,7 +1735,7 @@ export default function App() {
         )}
         <StandaloneAuthPage
           onLogin={handleLogin}
-          defaultMode={authModalMode}
+          defaultMode="login"
         />
       </>
     );
@@ -1757,21 +1814,13 @@ export default function App() {
           currentUser={currentUser}
           onSignOut={handleSignOut}
           onOpenProfile={() => setShowProfileModal(true)}
-          onOpenAuth={() => {
-            setAuthModalMode("login");
-            setShowAuthModal(true);
-          }}
-          onOpenRegister={() => {
-            setAuthModalMode("register");
-            setShowAuthModal(true);
-          }}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           selectedCategory={selectedCategory}
           onCategoryChange={setSelectedCategory}
           notifications={notifications}
           unreadNotifsCount={notifications.filter((n) => !n.read).length}
-          flaggedSurveysCount={flaggedCount}
+          flaggedSurveysCount={reportedSurveyCount}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onMarkNotificationRead={handleMarkNotificationRead}
           onClearAllNotifications={handleClearAllNotifications}
@@ -1791,6 +1840,7 @@ export default function App() {
               onNavigate={handleNavigate}
               onLikeNews={handleLikeNews}
               likedNewsIds={likedNewsIds}
+              reportedSurveyCount={reportedSurveyCount}
               onDeleteNews={handleDeleteNews}
               onAddNews={handleAddNews}
               onMarkNotificationRead={handleMarkNotificationRead}
@@ -1800,6 +1850,7 @@ export default function App() {
 
           {currentView === "take-survey" && (
             <ThemedSurveySections
+              categories={activeCategoryNames(schoolLists)}
               surveys={
                 currentUser?.email
                   ? surveys.filter(
@@ -1816,8 +1867,6 @@ export default function App() {
               selectedCategory={selectedCategory}
               onTakeSurvey={(survey) => {
                 if (!currentUser) {
-                  setAuthModalMode("login");
-                  setShowAuthModal(true);
                   showToast("Please sign in or register to take this survey.", "info");
                   return;
                 }
@@ -1838,8 +1887,6 @@ export default function App() {
               }}
               onCreateSurvey={() => {
                 if (!currentUser) {
-                  setAuthModalMode("login");
-                  setShowAuthModal(true);
                   showToast("Please sign in to author surveys.", "info");
                   return;
                 }
@@ -1850,8 +1897,6 @@ export default function App() {
               }}
               onCreateNewSurvey={() => {
                 if (!currentUser) {
-                  setAuthModalMode("login");
-                  setShowAuthModal(true);
                   showToast("Please sign in to author surveys.", "info");
                   return;
                 }
@@ -1883,8 +1928,6 @@ export default function App() {
               onPreviewSurvey={(survey) => setPreviewSurvey(survey)}
               onArchiveSurvey={handleArchiveSurvey}
               onWithdrawSurvey={handleWithdrawSurvey}
-              onFlagSurvey={handleFlagSurvey}
-              onClearFlag={handleClearFlag}
               onDuplicateSurvey={handleDuplicateSurvey}
               onTakedownSurvey={handleTakedownSurvey}
             />
@@ -1938,7 +1981,7 @@ export default function App() {
               <SurveyBuilder
                 currentUser={currentUser}
                 creationOpen={appSettings.surveyCreationOpen}
-                categories={DEFAULT_SURVEY_CATEGORIES}
+                categories={activeCategoryNames(schoolLists)}
                 topics={topics}
                 academicCalendar={academicCalendar}
                 myPendingCount={
@@ -1992,8 +2035,6 @@ export default function App() {
               newsList={newsList}
               topics={topics}
               currentUser={currentUser}
-              onClearFlag={handleClearFlag}
-              onFlagSurvey={handleFlagSurvey}
               onDeleteSurvey={handleDeleteSurvey}
               onToggleUserStatus={handleToggleUserStatus}
               onPromoteUser={handlePromoteUser}
@@ -2005,6 +2046,11 @@ export default function App() {
               onRefreshUsers={handleRefreshUsers}
               surveyCreationOpen={appSettings.surveyCreationOpen}
               onSetSurveyCreation={handleSetSurveyCreation}
+              schoolLists={schoolLists}
+              onSaveSchoolLists={handleSaveSchoolLists}
+              surveyReports={surveyReports}
+              onDismissReports={handleDismissReports}
+              onTakedownReported={handleTakedownReported}
               onSaveTopic={handleSaveTopic}
               onDeleteTopic={handleDeleteTopic}
               academicCalendar={academicCalendar}
@@ -2036,6 +2082,12 @@ export default function App() {
             )?.answers
           }
           onClose={() => setActiveSurveyForTaking(null)}
+          onReport={
+            (activeSurveyForTaking.owner || "").trim().toLowerCase() !== (currentUser?.email || "").trim().toLowerCase()
+              ? (reasons, note) => handleReportSurvey(activeSurveyForTaking, reasons, note)
+              : undefined
+          }
+          alreadyReported={myReportedSurveyIds.includes(String(activeSurveyForTaking.id))}
           onSubmit={handleSubmitSurveyResponse}
         />
       )}
@@ -2043,6 +2095,7 @@ export default function App() {
       {showProfileModal && currentUser && (
         <UserProfileModal
           currentUser={currentUser}
+          schoolLists={schoolLists}
           onClose={() => setShowProfileModal(false)}
           onUpdateProfile={handleUpdateProfile}
         />
@@ -2058,13 +2111,6 @@ export default function App() {
         />
       )}
 
-      {showAuthModal && (
-        <AuthModal
-          initialMode={authModalMode}
-          onClose={() => setShowAuthModal(false)}
-          onLogin={handleLogin}
-        />
-      )}
     </div>
   );
 }

@@ -1,9 +1,7 @@
-import React, { useState } from "react";
-import { UserProfile, Position } from "../types";
-import {
-  DEPARTMENTS_DATA,
-  PROGRAMS_BY_DEPARTMENT,
-} from "../data/initialData";
+import React, { useEffect, useState } from "react";
+import { UserProfile, Position, SchoolLists } from "../types";
+import { SchoolFieldsPicker } from "./SchoolFieldsPicker";
+import { missingSchoolField, registrationOpen, type SchoolFields } from "../lib/schoolLists";
 import { DatabaseService } from "../lib/databaseService";
 import { isFirebaseConfigured } from "../lib/firebase";
 import {
@@ -51,13 +49,20 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
   const [regPassword, setRegPassword] = useState<string>("");
   const [regConfirmPassword, setRegConfirmPassword] = useState<string>("");
   const [regPos, setRegPos] = useState<"Student" | "Student Officer" | "Faculty">("Student");
-  const [regDepartment, setRegDepartment] = useState<string>("College of Computer Studies");
-  const [regProgram, setRegProgram] = useState<string>("Bachelor of Science in Computer Science");
-  const [regYear, setRegYear] = useState<string>("3rd Year");
-  const [regSection, setRegSection] = useState<string>("CS-3A");
+  const [regSchool, setRegSchool] = useState<SchoolFields>({ department: "", program: "", year: "", section: "" });
   const [regIdNumber, setRegIdNumber] = useState<string>("");
 
-  const programsForDept = PROGRAMS_BY_DEPARTMENT[regDepartment] || [];
+  // The admin's School Setup lists (readable before login). null = still loading.
+  const [schoolLists, setSchoolLists] = useState<SchoolLists | null>(null);
+  const [schoolListsError, setSchoolListsError] = useState(false);
+  const loadSchoolLists = () => {
+    setSchoolListsError(false);
+    DatabaseService.getSchoolLists()
+      .then(setSchoolLists)
+      .catch(() => setSchoolListsError(true));
+  };
+  useEffect(loadSchoolLists, []);
+  const regIsStudent = regPos === "Student" || regPos === "Student Officer";
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,6 +120,15 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
       setError("Passwords do not match.");
       return;
     }
+    const missingSchool = missingSchoolField(regSchool, regIsStudent);
+    if (missingSchool) {
+      setError(missingSchool);
+      return;
+    }
+    if (regIsStudent && !regIdNumber.trim()) {
+      setError("Please enter your student ID.");
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -123,20 +137,20 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
 
       const newProfile: UserProfile = {
         name: regName.trim(),
-        email: regEmail.trim(),
+        email: regEmail.trim().toLowerCase(),
         pos: regPos as Position,
         role: "user", // replaced by the correct role for the position in DatabaseService.register
         status: initialStatus,
-        department: regDepartment,
-        program: regProgram,
+        department: regSchool.department,
         surveys: 0,
         joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       };
 
       if (regPos === "Student" || regPos === "Student Officer") {
-        newProfile.studentId = regIdNumber.trim() || `2026-${Math.floor(10000 + Math.random() * 90000)}`;
-        newProfile.year = regYear;
-        newProfile.section = regSection.trim() || "A";
+        newProfile.studentId = regIdNumber.trim();
+        newProfile.program = regSchool.program;
+        newProfile.year = regSchool.year;
+        newProfile.section = regSchool.section;
       }
 
       const result = await DatabaseService.register(newProfile, regPassword);
@@ -471,6 +485,21 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
               /* ======================================================== */
               /* CREATE ACCOUNT / REGISTRATION FORM */
               /* ======================================================== */
+              schoolListsError ? (
+                <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-200 space-y-2">
+                  <p>Could not load the list of colleges and programs. Please check your connection.</p>
+                  <button type="button" onClick={loadSchoolLists} className="px-3 py-1.5 rounded-lg bg-slate-800 text-white font-bold cursor-pointer">
+                    Try again
+                  </button>
+                </div>
+              ) : schoolLists === null ? (
+                <div className="p-4 text-xs text-slate-400">Loading...</div>
+              ) : !registrationOpen(schoolLists) ? (
+                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+                  Registration is not open yet. The administrator still needs to set up the list of colleges and programs.
+                  Please check back later.
+                </div>
+              ) : (
               <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
                 <div>
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
@@ -496,7 +525,6 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
                       University Email Address
                     </label>
-                    <span className="text-[10px] text-amber-400 font-medium">Case-sensitive</span>
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -565,89 +593,20 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                   </div>
                 </div>
 
-                {/* Department Dropdown */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                    College / Department
-                  </label>
-                  <select
-                    value={regDepartment}
-                    onChange={(e) => {
-                      const newDept = e.target.value;
-                      setRegDepartment(newDept);
-                      const progs = PROGRAMS_BY_DEPARTMENT[newDept] || [];
-                      if (progs.length > 0) setRegProgram(progs[0]);
-                    }}
-                    className="w-full px-3 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {Object.keys(DEPARTMENTS_DATA).map((dept) => (
-                      <option key={dept} value={dept} className="bg-slate-900 text-white">
-                        {dept}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <SchoolFieldsPicker lists={schoolLists} isStudent={regIsStudent} value={regSchool} onChange={setRegSchool} variant="dark" />
 
-                {/* Academic Program */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                    Academic Degree Program
-                  </label>
-                  <select
-                    value={regProgram}
-                    onChange={(e) => setRegProgram(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {programsForDept.map((prog) => (
-                      <option key={prog} value={prog} className="bg-slate-900 text-white">
-                        {prog}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Conditional Fields for Students & Student Officers */}
-                {(regPos === "Student" || regPos === "Student Officer") && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        Year Level
-                      </label>
-                      <select
-                        value={regYear}
-                        onChange={(e) => setRegYear(e.target.value)}
-                        className="w-full px-2 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                      >
-                        <option value="1st Year">1st Year</option>
-                        <option value="2nd Year">2nd Year</option>
-                        <option value="3rd Year">3rd Year</option>
-                        <option value="4th Year">4th Year</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        Section
-                      </label>
-                      <input
-                        type="text"
-                        value={regSection}
-                        onChange={(e) => setRegSection(e.target.value)}
-                        placeholder="CS-3A"
-                        className="w-full px-2 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        Student ID
-                      </label>
-                      <input
-                        type="text"
-                        value={regIdNumber}
-                        onChange={(e) => setRegIdNumber(e.target.value)}
-                        placeholder="2026-00123"
-                        className="w-full px-2 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
+                {regIsStudent && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Student ID
+                    </label>
+                    <input
+                      type="text"
+                      value={regIdNumber}
+                      onChange={(e) => setRegIdNumber(e.target.value)}
+                      placeholder="2026-00123"
+                      className="w-full px-3 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                    />
                   </div>
                 )}
 
@@ -669,6 +628,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                   )}
                 </button>
               </form>
+              )
             )}
             </>
             )}

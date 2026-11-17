@@ -17,7 +17,6 @@ import {
   AlertTriangle,
   ExternalLink,
   ShieldAlert,
-  Flag,
   SlidersHorizontal,
   Download,
   Check,
@@ -41,8 +40,6 @@ interface MySurveysScreenProps {
   onPreviewSurvey?: (survey: Survey) => void;
   onArchiveSurvey?: (surveyId: string | number, reason: string) => Promise<void> | void;
   onWithdrawSurvey?: (surveyId: string | number) => Promise<void> | void;
-  onFlagSurvey?: (surveyId: string | number, reason: string) => void;
-  onClearFlag?: (surveyId: string | number) => void;
   onDuplicateSurvey?: (survey: Survey) => void;
   onTakedownSurvey?: (surveyId: string | number, reason: string) => void;
 }
@@ -58,8 +55,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
   onPreviewSurvey,
   onArchiveSurvey,
   onWithdrawSurvey,
-  onFlagSurvey,
-  onClearFlag,
   onDuplicateSurvey,
   onTakedownSurvey,
 }) => {
@@ -69,18 +64,14 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
   const [takedownReason, setTakedownReason] = useState<string>("");
   const [isTakedownBusy, setIsTakedownBusy] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "published" | "draft" | "pending" | "rejected" | "scheduled" | "archived" | "flagged">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "published" | "draft" | "pending" | "rejected" | "scheduled" | "archived">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [creatorFilter, setCreatorFilter] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<"newest" | "responses" | "title" | "flagged">("newest");
+  const [sortBy, setSortBy] = useState<"newest" | "responses" | "title">("newest");
   const [copiedId, setCopiedId] = useState<string | number | null>(null);
   const [archiveSurveyId, setArchiveSurveyId] = useState<string | number | null>(null);
   const [archiveReason, setArchiveReason] = useState<string>("");
   const [isArchiveBusy, setIsArchiveBusy] = useState<boolean>(false);
-
-  // Moderation Flag Modal State
-  const [flagModalSurvey, setFlagModalSurvey] = useState<{ id: string | number; title: string } | null>(null);
-  const [flagReasonInput, setFlagReasonInput] = useState<string>("");
 
   // Scope: For Admin, show all campus surveys (Campus Survey Management).
   // For standard users, show only surveys authored by currentUser (My Surveys).
@@ -108,11 +99,10 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
     const archived = visibleSurveys.filter((s) => s.status === "archived").length;
     const pending = visibleSurveys.filter((s) => s.status === "pending").length;
     const rejected = visibleSurveys.filter((s) => s.status === "rejected").length;
-    const flagged = visibleSurveys.filter((s) => s.flagged).length;
     const totalResponses = visibleSurveys.reduce((acc, curr) => acc + (curr.responses || 0), 0);
     const avgResponses = total > 0 ? (totalResponses / total).toFixed(1) : "0";
 
-    return { total, published, drafts, scheduled, archived, pending, rejected, flagged, totalResponses, avgResponses };
+    return { total, published, drafts, scheduled, archived, pending, rejected, totalResponses, avgResponses };
   }, [visibleSurveys]);
 
   // Unique categories
@@ -140,9 +130,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
     return visibleSurveys
       .filter((s) => {
         // Status filter
-        if (statusFilter === "flagged") {
-          if (!s.flagged) return false;
-        } else if (statusFilter !== "all" && s.status !== statusFilter) {
+        if (statusFilter !== "all" && s.status !== statusFilter) {
           return false;
         }
 
@@ -171,10 +159,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
       .sort((a, b) => {
         if (sortBy === "responses") return (b.responses || 0) - (a.responses || 0);
         if (sortBy === "title") return a.title.localeCompare(b.title);
-        if (sortBy === "flagged") {
-          if (a.flagged && !b.flagged) return -1;
-          if (!a.flagged && b.flagged) return 1;
-        }
         // default newest
         return String(b.id).localeCompare(String(a.id));
       });
@@ -201,8 +185,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
       "Creator Email",
       "Academic Year",
       "Date Created",
-      "Flagged Status",
-      "Flag Reason",
     ];
 
     const rows = filteredSurveys.map((s) => [
@@ -216,8 +198,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
       `"${(s.owner || "").replace(/"/g, '""')}"`,
       `"${s.academicYear || "2025-2026"}"`,
       `"${s.created || ""}"`,
-      s.flagged ? "Flagged" : "Normal",
-      `"${(s.flagReason || "").replace(/"/g, '""')}"`,
     ]);
 
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
@@ -285,7 +265,7 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
       </div>
 
       {/* Aggregate Statistics Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
           <p className="text-xs text-slate-500 font-medium">{isAdmin ? "Campus Surveys" : "Total Authored"}</p>
           <p className="text-2xl font-black text-slate-900 mt-1">{stats.total}</p>
@@ -311,28 +291,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
           </p>
         </div>
 
-        <div
-          onClick={() => setStatusFilter("flagged")}
-          className={`p-4 rounded-2xl border shadow-xs cursor-pointer transition-all ${
-            stats.flagged > 0
-              ? "bg-rose-50/60 border-rose-200 hover:bg-rose-100/60"
-              : "bg-white border-slate-200"
-          }`}
-          title="Filter by flagged surveys"
-        >
-          <div className="flex items-center justify-between">
-            <p className={`text-xs font-medium ${stats.flagged > 0 ? "text-rose-700" : "text-slate-500"}`}>
-              Under Review / Flagged
-            </p>
-            {stats.flagged > 0 && <ShieldAlert className="w-4 h-4 text-rose-600" />}
-          </div>
-          <p className={`text-2xl font-black mt-1 ${stats.flagged > 0 ? "text-rose-600" : "text-slate-700"}`}>
-            {stats.flagged}
-          </p>
-          <p className="text-[11px] text-slate-400 mt-0.5">
-            {stats.flagged > 0 ? "Pending moderation check" : "Zero active flags"}
-          </p>
-        </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs col-span-2 sm:col-span-1">
           <p className="text-xs text-slate-500 font-medium">Drafts & Scheduled</p>
@@ -423,19 +381,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
             >
               Archived ({stats.archived})
             </button>
-            <button
-              onClick={() => setStatusFilter("flagged")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1 ${
-                statusFilter === "flagged"
-                  ? "bg-rose-600 text-white shadow-xs font-semibold"
-                  : stats.flagged > 0
-                  ? "text-rose-600 hover:bg-rose-50"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <Flag className="w-3 h-3" />
-              <span>Flagged ({stats.flagged})</span>
-            </button>
           </div>
         </div>
 
@@ -490,7 +435,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
               <option value="newest">Newest First</option>
               <option value="responses">Most Submissions</option>
               <option value="title">Alphabetical (A-Z)</option>
-              <option value="flagged">Flagged / Moderation Priority</option>
             </select>
           </div>
         </div>
@@ -560,17 +504,12 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
             const isConfirmingArchive = archiveSurveyId === survey.id;
             const canWithdraw = isOwner && isPending && Boolean(onWithdrawSurvey);
 
-            const isFlagged = Boolean(survey.flagged);
             const availability = getSurveyAvailability(survey);
 
             return (
               <div
                 key={survey.id}
-                className={`bg-white rounded-3xl border transition-all p-5 flex flex-col justify-between space-y-4 shadow-xs relative ${
-                  isFlagged
-                    ? "border-rose-300 ring-2 ring-rose-100/50"
-                    : "border-slate-200 hover:border-indigo-300 hover:shadow-md"
-                }`}
+                className="bg-white rounded-3xl border transition-all p-5 flex flex-col justify-between space-y-4 shadow-xs relative border-slate-200 hover:border-indigo-300 hover:shadow-md"
               >
                 <div className="space-y-3">
                   {/* Top Row: Category, Mandatory Badge & Status Pill */}
@@ -649,31 +588,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                   {isPending && (
                     <div className="p-2.5 bg-orange-50 border border-orange-200 rounded-xl text-[11px] text-orange-800">
                       Waiting for the administrator to review this survey. It is locked until a decision is made.
-                    </div>
-                  )}
-
-                  {/* Flagged Alert Banner (if flagged) */}
-                  {isFlagged && (
-                    <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold flex items-center gap-1 text-[11px] text-rose-700">
-                          <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-                          <span>Flagged for Review</span>
-                        </span>
-                        {isAdmin && onClearFlag && (
-                          <button
-                            onClick={() => onClearFlag(survey.id)}
-                            className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold cursor-pointer transition-colors"
-                          >
-                            Approve / Clear
-                          </button>
-                        )}
-                      </div>
-                      {survey.flagReason && (
-                        <p className="text-[11px] text-rose-600 italic">
-                          "{survey.flagReason}"
-                        </p>
-                      )}
                     </div>
                   )}
 
@@ -970,19 +884,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
                       </button>
                     )}
 
-                    {isAdmin && onFlagSurvey && !isFlagged && (
-                      <button
-                        onClick={() => {
-                          setFlagModalSurvey({ id: survey.id, title: survey.title });
-                          setFlagReasonInput("");
-                        }}
-                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
-                        title="Flag survey for review"
-                      >
-                        <Flag className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-
                     {canDelete && (
                       <button
                         onClick={async () => {
@@ -1009,65 +910,6 @@ export const MySurveysScreen: React.FC<MySurveysScreenProps> = ({
       )}
 
       {/* Flag / Moderation Reason Modal */}
-      {flagModalSurvey && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setFlagModalSurvey(null)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-rose-600">
-                <ShieldAlert className="w-5 h-5" />
-                <h3 className="font-bold text-base text-slate-900">Flag Survey for Moderation</h3>
-              </div>
-              <button
-                onClick={() => setFlagModalSurvey(null)}
-                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-600">
-              Flagging <strong className="text-slate-900">"{flagModalSurvey.title}"</strong> marks it for urgent administrative review and alerts university stakeholders.
-            </p>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700">Reason for Flagging:</label>
-              <textarea
-                value={flagReasonInput}
-                onChange={(e) => setFlagReasonInput(e.target.value)}
-                placeholder="e.g., Inappropriate content, offensive language, duplicate survey, or non-compliant rating format..."
-                rows={3}
-                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-hidden focus:border-rose-500 focus:ring-1 focus:ring-rose-500 bg-slate-50"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                onClick={() => setFlagModalSurvey(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (onFlagSurvey && flagModalSurvey) {
-                    onFlagSurvey(flagModalSurvey.id, flagReasonInput || "Administrative review requested");
-                    setFlagModalSurvey(null);
-                  }
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs"
-              >
-                Confirm Flag
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

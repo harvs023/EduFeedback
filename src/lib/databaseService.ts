@@ -18,6 +18,8 @@ import {
   FirestoreAcademicCalendarService,
   FirestoreEvaluationService,
   FirestoreSettingsService,
+  FirestoreSchoolService,
+  FirestoreReportService,
   FirebaseAuthService,
   isFirebaseConfigured,
   seedFirestoreWithData,
@@ -36,6 +38,8 @@ import {
   EvaluationRun,
   ResponseReview,
   AppSettings,
+  SchoolLists,
+  SurveyReport,
 } from "../types";
 import {
   MASTER_ADMIN_EMAIL,
@@ -301,6 +305,33 @@ export class DatabaseService {
   // ==========================================
   // USERS
   // ==========================================
+  static async reportSurvey(report: Omit<SurveyReport, "id" | "status">): Promise<void> {
+    await FirestoreReportService.create(report);
+  }
+
+  static async getSurveyReports(): Promise<SurveyReport[]> {
+    return await FirestoreReportService.getAll();
+  }
+
+  static async getMySurveyReports(email: string): Promise<SurveyReport[]> {
+    return await FirestoreReportService.getMine(email);
+  }
+
+  static async decideSurveyReports(
+    ids: string[],
+    decision: Pick<SurveyReport, "status" | "decidedBy" | "decidedAt" | "decisionNote">
+  ): Promise<void> {
+    await FirestoreReportService.decide(ids, decision);
+  }
+
+  static async getSchoolLists(): Promise<SchoolLists> {
+    return await FirestoreSchoolService.get();
+  }
+
+  static async saveSchoolLists(lists: SchoolLists): Promise<void> {
+    await FirestoreSchoolService.save(lists);
+  }
+
   static async getSettings(): Promise<AppSettings> {
     return await FirestoreSettingsService.get();
   }

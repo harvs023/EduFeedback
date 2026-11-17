@@ -1,3 +1,4 @@
+import { timeAgo } from "../lib/timeAgo";
 import React, { useState } from "react";
 import { UserProfile, NotificationItem } from "../types";
 import {
@@ -27,8 +28,6 @@ interface NavbarProps {
   currentUser: UserProfile | null;
   onSignOut?: () => void;
   onOpenProfile: () => void;
-  onOpenAuth: () => void;
-  onOpenRegister?: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   selectedCategory?: string;
@@ -47,8 +46,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onSignOut,
   onOpenProfile,
-  onOpenAuth,
-  onOpenRegister,
   searchQuery,
   onSearchChange,
   notifications = [],
@@ -262,7 +259,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                               </div>
                               <p className="text-xs text-slate-600 line-clamp-2 mt-0.5">{n.message}</p>
                               <span className="text-[10px] text-slate-400 mt-1 block">
-                                {n.displayTime || n.time}
+                                {timeAgo(n.timestamp)}
                               </span>
                             </div>
                           </div>
@@ -358,8 +355,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <button
                       onClick={() => {
                         setShowUserMenu(false);
-                        if (onSignOut) onSignOut();
-                        else onOpenAuth();
+                        onSignOut?.();
                       }}
                       className="w-full px-4 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer transition-colors"
                     >
@@ -370,22 +366,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               )}
             </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onOpenAuth}
-                className="px-3.5 py-1.5 text-slate-700 hover:text-indigo-600 hover:bg-slate-100 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                Sign In
-              </button>
-              <button
-                onClick={onOpenRegister || onOpenAuth}
-                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
-              >
-                Register
-              </button>
-            </div>
-          )}
+          ) : null}
         </div>
       </header>
 
@@ -428,29 +409,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span>Exit</span>
                 </button>
               </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    onOpenAuth();
-                  }}
-                  className="flex-1 py-2 text-center text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-100"
-                >
-                  Sign In
-                </button>
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    if (onOpenRegister) onOpenRegister();
-                    else onOpenAuth();
-                  }}
-                  className="flex-1 py-2 text-center text-xs font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 shadow-xs"
-                >
-                  Register
-                </button>
-              </div>
-            )}
+            ) : null}
           </div>
 
           <div className="space-y-1">

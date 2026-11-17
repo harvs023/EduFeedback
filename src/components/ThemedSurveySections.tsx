@@ -2,7 +2,6 @@ import React, { useState, useMemo } from "react";
 import { useConfirm } from "./ConfirmDialog";
 import { Survey, UserProfile, SurveyResponse } from "../types";
 import { getSurveyAvailability, isInAudience } from "../lib/surveyReview";
-import { DEFAULT_SURVEY_CATEGORIES } from "../data/initialData";
 import {
   Flame,
   Star,
@@ -89,7 +88,7 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   onDeleteSurvey,
   searchQuery = "",
   selectedCategory = "all",
-  categories = DEFAULT_SURVEY_CATEGORIES,
+  categories = [],
 }) => {
   const { confirm, confirmDialog } = useConfirm();
   const [performanceFilter, setPerformanceFilter] = useState<"all" | "trending" | "top-rated">("all");
@@ -153,7 +152,8 @@ export const ThemedSurveySections: React.FC<ThemedSurveySectionsProps> = ({
   const categoryTabs = useMemo(() => {
     return [
       { id: "all", label: "All", count: eligibleSurveys.length },
-      ...categories.map((c) => ({
+      // The admin's active categories, plus any older category a live survey still uses.
+      ...Array.from(new Set([...categories, ...eligibleSurveys.map((s) => s.cat).filter(Boolean)])).map((c) => ({
         id: c,
         label: c,
         count: eligibleSurveys.filter((s) => s.cat === c).length,

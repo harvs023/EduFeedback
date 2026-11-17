@@ -362,9 +362,9 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
                 onChange={(e) => setCat(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-800"
               >
-                {categories.map((c) => (
+                {(cat && !categories.includes(cat) ? [...categories, cat] : categories).map((c) => (
                   <option key={c} value={c}>
-                    {c}
+                    {categories.includes(c) ? c : `${c} (no longer offered)`}
                   </option>
                 ))}
               </select>

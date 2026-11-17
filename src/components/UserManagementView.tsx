@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
-import { UserProfile, Survey } from "../types";
-import { DEPARTMENTS_DATA } from "../data/initialData";
+import { UserProfile, Survey, SchoolLists } from "../types";
+import { SchoolFieldsPicker } from "./SchoolFieldsPicker";
+import { activeDepartments, missingSchoolField } from "../lib/schoolLists";
 import {
   Users,
   UserPlus,
@@ -30,6 +31,7 @@ interface UserManagementViewProps {
   onToggleUserStatus: (email: string, status: "active" | "suspended" | "pending_approval") => void;
   onApproveUser?: (email: string) => void;
   onPromoteUser: (email: string, newPos: UserProfile["pos"]) => void;
+  schoolLists?: SchoolLists | null;
 }
 
 export const UserManagementView: React.FC<UserManagementViewProps> = ({
@@ -42,6 +44,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   onToggleUserStatus,
   onApproveUser,
   onPromoteUser,
+  schoolLists = null,
 }) => {
   const countAuthoredSurveys = (email: string) => {
     const clean = (email || "").trim().toLowerCase();
@@ -66,15 +69,16 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     name: "",
     email: "",
     pos: "Student" as UserProfile["pos"],
-    department: "College of Computer Studies",
-    program: "Bachelor of Science in Computer Science",
-    year: "1st Year",
-    section: "A",
+    department: "",
+    program: "",
+    year: "",
+    section: "",
     studentId: "",
     status: "active" as UserProfile["status"],
   });
 
   const [formError, setFormError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Metrics
   const stats = useMemo(() => {
@@ -181,14 +185,21 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       return;
     }
 
-    const cleanEmail = addForm.email.trim();
-    if (users.some((u) => u.email === cleanEmail)) {
+    // Emails are always saved in lowercase.
+    const cleanEmail = addForm.email.trim().toLowerCase();
+    if (users.some((u) => u.email.trim().toLowerCase() === cleanEmail)) {
       setFormError(`An account with email "${cleanEmail}" is already registered.`);
       return;
     }
-    const caseMismatch = users.find((u) => u.email.toLowerCase() === cleanEmail.toLowerCase());
-    if (caseMismatch) {
-      setFormError(`An account with email "${caseMismatch.email}" is already registered with different capitalization. Emails are case-sensitive.`);
+
+    const addIsStudent = addForm.pos === "Student" || addForm.pos === "Student Officer";
+    const missing = addForm.pos === "Superadmin" ? null : missingSchoolField(addForm, addIsStudent);
+    if (missing) {
+      setFormError(missing);
+      return;
+    }
+    if (addIsStudent && !addForm.studentId.trim()) {
+      setFormError("Please enter the student ID.");
       return;
     }
 
@@ -196,12 +207,17 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       name: addForm.name.trim(),
       email: cleanEmail,
       pos: addForm.pos,
-      role: addForm.pos === "Superadmin" ? "superadmin" : "user",
+      role:
+        addForm.pos === "Superadmin"
+          ? "superadmin"
+          : addForm.pos === "Faculty"
+          ? "faculty"
+          : addForm.pos === "Student Officer"
+          ? "officer"
+          : "user",
       status: addForm.status,
       department: addForm.department,
-      program: addForm.program,
-      year: addForm.year,
-      section: addForm.section,
+      ...(addIsStudent ? { program: addForm.program, year: addForm.year, section: addForm.section } : {}),
       studentId: addForm.studentId.trim() || undefined,
       joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       surveys: 0,
@@ -214,10 +230,10 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
         name: "",
         email: "",
         pos: "Student",
-        department: "College of Computer Studies",
-        program: "Bachelor of Science in Computer Science",
-        year: "1st Year",
-        section: "A",
+        department: "",
+        program: "",
+        year: "",
+        section: "",
         studentId: "",
         status: "active",
       });
@@ -393,7 +409,12 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden"
             >
               <option value="all">All Academic Colleges</option>
-              {Object.keys(DEPARTMENTS_DATA).map((dept) => (
+              {Array.from(
+                new Set([
+                  ...activeDepartments(schoolLists).map((d) => d.name),
+                  ...users.map((u) => u.department || "").filter(Boolean),
+                ])
+              ).map((dept) => (
                 <option key={dept} value={dept}>
                   {dept}
                 </option>
@@ -636,7 +657,10 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
 
                         {/* Edit User Button */}
                         <button
-                          onClick={() => setEditingUser(u)}
+                          onClick={() => {
+                            setEditError(null);
+                            setEditingUser(u);
+                          }}
                           className="p-1.5 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition-colors cursor-pointer"
                           title="Edit Account Details"
                         >
@@ -761,7 +785,6 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block font-bold text-slate-700">Institutional Email *</label>
-                  <span className="text-[10px] text-amber-600 font-medium">Case-sensitive</span>
                 </div>
                 <input
                   type="email"
@@ -801,75 +824,14 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 </div>
               </div>
 
-              {/* Department */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Academic Department / College</label>
-                <select
-                  value={addForm.department}
-                  onChange={(e) => {
-                    const dept = e.target.value;
-                    const progs = DEPARTMENTS_DATA[dept] || [];
-                    setAddForm({
-                      ...addForm,
-                      department: dept,
-                      program: progs[0] || "",
-                    });
-                  }}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:bg-white focus:outline-hidden"
-                >
-                  {Object.keys(DEPARTMENTS_DATA).map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Program */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Academic Degree Program</label>
-                <select
-                  value={addForm.program}
-                  onChange={(e) => setAddForm({ ...addForm, program: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:bg-white focus:outline-hidden"
-                >
-                  {(DEPARTMENTS_DATA[addForm.department] || []).map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Year & Section */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Year Level</label>
-                  <select
-                    value={addForm.year}
-                    onChange={(e) => setAddForm({ ...addForm, year: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:bg-white focus:outline-hidden"
-                  >
-                    <option value="1st Year">1st Year</option>
-                    <option value="2nd Year">2nd Year</option>
-                    <option value="3rd Year">3rd Year</option>
-                    <option value="4th Year">4th Year</option>
-                    <option value="Graduate School">Graduate School</option>
-                    <option value="N/A">N/A (Faculty/Admin)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Section</label>
-                  <input
-                    type="text"
-                    value={addForm.section}
-                    onChange={(e) => setAddForm({ ...addForm, section: e.target.value })}
-                    placeholder="e.g. A, CS-3A"
-                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 focus:bg-white focus:outline-hidden"
-                  />
-                </div>
-              </div>
+              {addForm.pos !== "Superadmin" && (
+                <SchoolFieldsPicker
+                  lists={schoolLists}
+                  isStudent={addForm.pos === "Student" || addForm.pos === "Student Officer"}
+                  value={addForm}
+                  onChange={(v) => setAddForm({ ...addForm, ...v })}
+                />
+              )}
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button
@@ -922,6 +884,33 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                const editIsStudent = editingUser.pos === "Student" || editingUser.pos === "Student Officer";
+                const missing =
+                  editingUser.pos === "Superadmin"
+                    ? null
+                    : missingSchoolField(
+                        {
+                          department: editingUser.department || "",
+                          program: editingUser.program || "",
+                          year: editingUser.year || "",
+                          section: editingUser.section || "",
+                        },
+                        editIsStudent
+                      );
+                if (missing) {
+                  setEditError(missing);
+                  return;
+                }
+                if (editIsStudent && !(editingUser.studentId || "").trim()) {
+                  setEditError("Please enter the student ID.");
+                  return;
+                }
+                const creationOff = editingUser.canCreateSurveys === false;
+                if (creationOff && (editingUser.restrictionReason || "").trim().length < 10) {
+                  setEditError("Please give a reason (at least 10 characters) for turning off survey creation. The person will see it.");
+                  return;
+                }
+                setEditError(null);
                 onUpdateUser(editingUser.email, {
                   name: editingUser.name,
                   pos: editingUser.pos,
@@ -941,6 +930,8 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   studentId: editingUser.studentId,
                   status: editingUser.status,
                   canPostNews: editingUser.canPostNews !== false,
+                  canCreateSurveys: !creationOff,
+                  restrictionReason: creationOff ? (editingUser.restrictionReason || "").trim() : "",
                 });
                 setEditingUser(null);
               }}
@@ -996,50 +987,61 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Department</label>
-                <select
-                  value={editingUser.department || "College of Computer Studies"}
-                  onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
-                >
-                  {Object.keys(DEPARTMENTS_DATA).map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Program</label>
-                <input
-                  type="text"
-                  value={editingUser.program || ""}
-                  onChange={(e) => setEditingUser({ ...editingUser, program: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
+              {editingUser.pos !== "Superadmin" && (
+                <SchoolFieldsPicker
+                  lists={schoolLists}
+                  isStudent={editingUser.pos === "Student" || editingUser.pos === "Student Officer"}
+                  value={{
+                    department: editingUser.department || "",
+                    program: editingUser.program || "",
+                    year: editingUser.year || "",
+                    section: editingUser.section || "",
+                  }}
+                  onChange={(v) => setEditingUser({ ...editingUser, ...v })}
                 />
-              </div>
+              )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Year Level</label>
-                  <input
-                    type="text"
-                    value={editingUser.year || ""}
-                    onChange={(e) => setEditingUser({ ...editingUser, year: e.target.value })}
-                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
-                  />
+              {editError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{editError}</span>
                 </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Section</label>
+              )}
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <label className="flex items-start gap-2.5 cursor-pointer">
                   <input
-                    type="text"
-                    value={editingUser.section || ""}
-                    onChange={(e) => setEditingUser({ ...editingUser, section: e.target.value })}
-                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900"
+                    type="checkbox"
+                    checked={editingUser.canCreateSurveys !== false}
+                    onChange={(e) =>
+                      setEditingUser({
+                        ...editingUser,
+                        canCreateSurveys: e.target.checked,
+                        restrictionReason: e.target.checked ? "" : editingUser.restrictionReason || "",
+                      })
+                    }
+                    className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
                   />
-                </div>
+                  <span>
+                    <span className="block font-bold text-slate-800">Can create surveys</span>
+                    <span className="block text-[11px] text-slate-500">
+                      Surveys still need your approval. Turn this off if the person misuses it; their drafts stay, but they
+                      cannot create new surveys or send any for review.
+                    </span>
+                  </span>
+                </label>
+                {editingUser.canCreateSurveys === false && (
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Reason (shown to the person)</label>
+                    <textarea
+                      value={editingUser.restrictionReason || ""}
+                      onChange={(e) => setEditingUser({ ...editingUser, restrictionReason: e.target.value })}
+                      rows={2}
+                      placeholder="e.g. Repeated surveys that did not follow the survey criteria."
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-semibold text-slate-900"
+                    />
+                  </div>
+                )}
               </div>
 
               <label className="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">

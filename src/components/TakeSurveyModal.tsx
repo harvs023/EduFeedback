@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Survey, UserProfile, Answer } from "../types";
+import { Survey, UserProfile, Answer, ReportReason } from "../types";
+import { ReportSurveyDialog } from "./ReportSurveyDialog";
 import confetti from "canvas-confetti";
 import {
   X,
@@ -11,6 +12,7 @@ import {
   UserCheck,
   ArrowRight,
   AlertTriangle,
+  Flag,
 } from "lucide-react";
 
 interface TakeSurveyModalProps {
@@ -21,6 +23,10 @@ interface TakeSurveyModalProps {
   previewOnly?: boolean;
   onClose: () => void;
   onSubmit: (answers: Answer[], isAnonymous?: boolean) => Promise<void>;
+  /** Report this survey to the admin. Not given for previews or one's own surveys. */
+  onReport?: (reasons: ReportReason[], note: string) => Promise<boolean>;
+  /** This person has already reported the survey. */
+  alreadyReported?: boolean;
 }
 
 export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
@@ -30,7 +36,10 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
   previewOnly = false,
   onClose,
   onSubmit,
+  onReport,
+  alreadyReported = false,
 }) => {
+  const [showReport, setShowReport] = useState(false);
   const isReadOnly = Boolean(existingAnswers && existingAnswers.length > 0);
 
   // Topic blocks become section headings. Questions are saved in block order by the builder.
@@ -272,6 +281,21 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
               {survey.title}
             </h2>
             <p className="text-xs text-slate-500">{survey.desc}</p>
+            {onReport && !previewOnly && (
+              alreadyReported ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400">
+                  <Flag className="w-3 h-3" /> You reported this survey
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowReport(true)}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer"
+                >
+                  <Flag className="w-3 h-3" /> Report this survey
+                </button>
+              )
+            )}
           </div>
           <button
             onClick={onClose}
@@ -549,6 +573,10 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
           </div>
         </form>
         </>
+        )}
+
+        {showReport && onReport && (
+          <ReportSurveyDialog surveyTitle={survey.title} onClose={() => setShowReport(false)} onSubmit={onReport} />
         )}
 
         {/* CONFIRMATION MODAL OVERLAY */}

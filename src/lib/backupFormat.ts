@@ -18,6 +18,8 @@ export const TOP_COLLECTIONS = [
   "academic_calendar",
   "settings",
   "evaluation_runs",
+  "school_setup",
+  "survey_reports",
 ] as const;
 
 /** Private per-person lists stored under each user profile. */
@@ -40,6 +42,8 @@ export const BACKUP_GROUPS = [
   "academic_calendar",
   "settings",
   "evaluation_runs",
+  "school_setup",
+  "survey_reports",
 ] as const;
 
 export type BackupGroup = (typeof BACKUP_GROUPS)[number];
@@ -57,6 +61,8 @@ export const BACKUP_GROUP_LABELS: Record<BackupGroup, string> = {
   academic_calendar: "School years (calendar)",
   settings: "App settings",
   evaluation_runs: "Saved evaluation results",
+  school_setup: "School setup lists",
+  survey_reports: "Survey reports",
 };
 
 export const MAX_BACKUP_DOCUMENTS = 200_000;
@@ -149,7 +155,8 @@ export function checkBackup(raw: unknown): BackupCheck {
     return { ok: false, error: "The backup has no user profiles, so it is probably incomplete." };
   }
   for (const group of BACKUP_GROUPS) {
-    if (b.counts?.[group] !== counts[group]) {
+    // Groups added later (e.g. school_setup) are simply absent from older files: count them as 0.
+    if ((b.counts?.[group] ?? 0) !== counts[group]) {
       return {
         ok: false,
         error: "The numbers recorded in the backup do not match its contents. The file may be incomplete or edited.",

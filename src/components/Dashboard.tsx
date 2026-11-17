@@ -1,3 +1,4 @@
+import { timeAgo } from "../lib/timeAgo";
 import React, { useState } from "react";
 import {
   Survey,
@@ -34,6 +35,8 @@ interface DashboardProps {
   onNavigate: (view: string) => void;
   onLikeNews: (id: string) => void;
   likedNewsIds?: string[];
+  /** Admin: surveys with user reports waiting for a decision. */
+  reportedSurveyCount?: number;
   onDeleteNews?: (id: string) => Promise<void> | void;
   onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => Promise<boolean>;
   onMarkNotificationRead?: (id: string) => void;
@@ -51,6 +54,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigate,
   onLikeNews,
   likedNewsIds = [],
+  reportedSurveyCount = 0,
   onDeleteNews,
   onAddNews,
   onMarkNotificationRead,
@@ -106,7 +110,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalSurveys = surveys.length;
   const totalResponses = responses.length;
   const totalUsers = users.length;
-  const flaggedSurveys = surveys.filter((s) => s.flagged).length;
+  const flaggedSurveys = reportedSurveyCount;
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto pb-12">
@@ -437,7 +441,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </span>
                   </div>
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    Flagged Surveys
+                    Reported Surveys
                   </p>
                   <p
                     className={`text-2xl sm:text-3xl font-serif font-extrabold mt-1 ${
@@ -448,8 +452,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
                     {flaggedSurveys > 0
-                      ? "Surveys reported for inappropriate content."
-                      : "No surveys currently flagged."}
+                      ? "Surveys reported by users, waiting for your decision."
+                      : "No reports waiting."}
                   </p>
                 </div>
                 <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-rose-600 group-hover:translate-x-0.5 transition-transform">
@@ -638,7 +642,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       {notif.message}
                     </p>
                     <span className="text-[10px] text-slate-400 mt-2 block">
-                      {notif.displayTime || notif.time || "Recently"}
+                      {timeAgo(notif.timestamp)}
                     </span>
                   </div>
                 ))

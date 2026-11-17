@@ -1,3 +1,4 @@
+import { formatDateTime } from "../lib/timeAgo";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useConfirm } from "./ConfirmDialog";
 import {
@@ -8,11 +9,15 @@ import {
   NewsAnnouncement,
   Topic,
   AcademicYearTerms,
+  SchoolLists,
+  SurveyReport,
 } from "../types";
 import { UserManagementView } from "./UserManagementView";
 import { DatabaseBackupView } from "./DatabaseBackupView";
 import { TopicsManager } from "./TopicsManager";
 import { AcademicCalendarManager } from "./AcademicCalendarManager";
+import { SchoolSetupManager } from "./SchoolSetupManager";
+import { ReportedSurveysPanel } from "./ReportedSurveysPanel";
 import { SurveyApprovalsPanel } from "./SurveyApprovalsPanel";
 import { NewsApprovalsPanel } from "./NewsApprovalsPanel";
 import { FlaggedResponsesPanel, FlagDecision } from "./FlaggedResponsesPanel";
@@ -42,6 +47,7 @@ import {
   Tag,
   CalendarRange,
   Newspaper,
+  School,
 } from "lucide-react";
 
 interface SuperadminDashboardProps {
@@ -52,8 +58,9 @@ interface SuperadminDashboardProps {
   newsList?: NewsAnnouncement[];
   topics?: Topic[];
   currentUser?: UserProfile | null;
-  onClearFlag: (surveyId: string | number) => void;
-  onFlagSurvey: (surveyId: string | number, reason: string) => void;
+  surveyReports?: SurveyReport[];
+  onDismissReports?: (surveyId: string, note: string) => Promise<void>;
+  onTakedownReported?: (surveyId: string, reason: string) => Promise<void>;
   onDeleteSurvey: (surveyId: string | number) => void;
   onToggleUserStatus: (email: string, newStatus: "active" | "suspended" | "pending_approval") => void;
   onPromoteUser: (email: string, newPos: UserProfile["pos"]) => void;
@@ -65,6 +72,8 @@ interface SuperadminDashboardProps {
   onSaveTopic?: (topic: Topic) => Promise<void> | void;
   onDeleteTopic?: (topicId: string) => Promise<void> | void;
   academicCalendar?: AcademicYearTerms[];
+  schoolLists?: SchoolLists | null;
+  onSaveSchoolLists?: (lists: SchoolLists) => Promise<void>;
   onSaveAcademicYear?: (terms: AcademicYearTerms) => Promise<void>;
   onDeleteAcademicYear?: (schoolYear: string) => Promise<void>;
   onApproveSurvey?: (surveyId: string | number) => void;
@@ -76,7 +85,7 @@ interface SuperadminDashboardProps {
   /** Admin switch: survey creation open for everyone (the admin can always create). */
   surveyCreationOpen?: boolean;
   onSetSurveyCreation?: (open: boolean) => Promise<void>;
-  initialTab?: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses";
+  initialTab?: "approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school";
   showToast?: (text: string, type?: "success" | "info") => void;
 }
 
@@ -137,8 +146,9 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   newsList = [],
   topics = [],
   currentUser = null,
-  onClearFlag,
-  onFlagSurvey,
+  surveyReports = [],
+  onDismissReports,
+  onTakedownReported,
   onDeleteSurvey,
   onToggleUserStatus,
   onPromoteUser,
@@ -151,6 +161,8 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onDeleteTopic,
   academicCalendar = [],
   onSaveAcademicYear,
+  schoolLists = null,
+  onSaveSchoolLists,
   onDeleteAcademicYear,
   onApproveSurvey,
   onRejectSurvey,
@@ -164,7 +176,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 }) => {
   const { confirm, confirmDialog } = useConfirm();
   // Tabs: survey approvals, surveys timeline directory, flagged moderation queue, users, logs, backup, ml-supervision
-  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses">(
+  const [activeTab, setActiveTab] = useState<"approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news" | "calendar" | "flagged-responses" | "school">(
     initialTab || "approvals"
   );
 
@@ -172,7 +184,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   const tabsContainerRef = useRef<HTMLDivElement>(null);
 
   const handleTabClick = (
-    tabId: "approvals" | "surveys" | "flagged" | "users" | "logs" | "backup" | "topics" | "news",
+    tabId: "approvals" | "surveys" | "reports" | "users" | "logs" | "backup" | "topics" | "news",
     e?: React.MouseEvent<HTMLButtonElement>
   ) => {
     setActiveTab(tabId);
@@ -228,13 +240,13 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   // Inspect Survey Modal State
   const [selectedSurveyForPreview, setSelectedSurveyForPreview] = useState<Survey | null>(null);
 
-  // Flag Reason Modal State
-  const [flagReasonModal, setFlagReasonModal] = useState<{ surveyId: string | number; title: string } | null>(null);
-  const [flagReasonInput, setFlagReasonInput] = useState<string>("");
-
   const pendingSurveys = useMemo(() => surveys.filter((s) => s.status === "pending"), [surveys]);
   const pendingNewsCount = (newsList || []).filter((n) => n.status === "pending").length;
-  const flaggedSurveys = useMemo(() => surveys.filter((s) => s.flagged), [surveys]);
+  // Surveys with at least one report waiting for a decision.
+  const reportedSurveyCount = useMemo(
+    () => new Set(surveyReports.filter((r) => r.status === "open").map((r) => String(r.surveyId))).size,
+    [surveyReports]
+  );
 
   // Extract all unique creation years present in data
   const availableYears = useMemo(() => {
@@ -307,12 +319,8 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
       }
 
       // 7. Status
-      if (filterStatus !== "all") {
-        if (filterStatus === "flagged") {
-          if (!s.flagged) return false;
-        } else if (s.status !== filterStatus) {
-          return false;
-        }
+      if (filterStatus !== "all" && s.status !== filterStatus) {
+        return false;
       }
 
       // 8. Creator
@@ -388,8 +396,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
     const total = filteredSurveys.length;
     const totalResponses = filteredSurveys.reduce((acc, s) => acc + (s.responses || 0), 0);
     const publishedCount = filteredSurveys.filter((s) => s.status === "published").length;
-    const flaggedCount = filteredSurveys.filter((s) => s.flagged).length;
-    return { total, totalResponses, publishedCount, flaggedCount };
+    return { total, totalResponses, publishedCount };
   }, [filteredSurveys]);
 
   const handleResetFilters = () => {
@@ -410,7 +417,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   const handleExportLogs = () => {
     const headers = ["Timestamp", "User", "Position", "Action", "Details", "IP_Address"];
     const rows = logs.map((l) => [
-      `"${l.time}"`,
+      `"${l.timestamp ? formatDateTime(l.timestamp) : l.time}"`,
       `"${l.user}"`,
       `"${l.pos}"`,
       `"${l.action}"`,
@@ -515,10 +522,10 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
 
           <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/80">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Pending Policy Flags
+              Reported Surveys
             </span>
-            <div className="font-serif text-2xl font-black text-rose-400">{flaggedSurveys.length}</div>
-            <span className="text-[11px] text-rose-300">require administrator review</span>
+            <div className="font-serif text-2xl font-black text-rose-400">{reportedSurveyCount}</div>
+            <span className="text-[11px] text-rose-300">with reports waiting for review</span>
           </div>
         </div>
 
@@ -549,12 +556,13 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                   icon: Flag,
                 },
                 { id: "surveys", label: "Creation Timeframe Directory", count: surveys.length, icon: CalendarDays },
-                { id: "flagged", label: "Flagged Surveys Queue", count: flaggedSurveys.length, icon: Flag },
+                { id: "reports", label: "Reported Surveys", count: reportedSurveyCount, icon: Flag },
                 { id: "users", label: "User & Role Directory", count: users.length, icon: Users },
                 { id: "logs", label: "Activity Audit Trail", count: logs.length, icon: Activity },
                 { id: "backup", label: "Backup & Restore", icon: Database },
                 { id: "topics", label: "Survey Topics", count: topics.length, icon: Tag },
                 { id: "calendar", label: "Academic Calendar", count: academicCalendar.length, icon: CalendarRange },
+                { id: "school", label: "School Setup", count: (schoolLists?.departments || []).length, icon: School },
               ].map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -770,7 +778,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                   <option value="published">Published</option>
                   <option value="scheduled">Scheduled</option>
                   <option value="draft">Draft</option>
-                  <option value="flagged">Flagged Only</option>
                   <option value="archived">Archived</option>
                 </select>
               </div>
@@ -872,11 +879,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                 <span>{timeframeStats.publishedCount} Published</span>
                 <span>·</span>
                 <span>{timeframeStats.totalResponses} Total Responses</span>
-                {timeframeStats.flaggedCount > 0 && (
-                  <span className="text-rose-600 font-bold">
-                    · {timeframeStats.flaggedCount} Flagged
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -937,13 +939,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                               </div>
 
                               {/* Status badge */}
-                              {s.flagged ? (
-                                <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold flex items-center gap-1">
-                                  <Flag className="w-3 h-3" />
-                                  <span>Flagged</span>
-                                </span>
-                              ) : (
-                                <span
+                              <span
                                   className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
                                     s.status === "published"
                                       ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
@@ -954,7 +950,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                                 >
                                   {s.status.toUpperCase()}
                                 </span>
-                              )}
                             </div>
 
                             {/* Title & Description */}
@@ -1012,24 +1007,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                                   title="View Macro Survey Analytics"
                                 >
                                   <BarChart3 className="w-4 h-4" />
-                                </button>
-                              )}
-
-                              {s.flagged ? (
-                                <button
-                                  onClick={() => onClearFlag(s.id)}
-                                  className="p-2 hover:bg-emerald-50 text-emerald-600 rounded-xl transition-colors cursor-pointer border border-emerald-200"
-                                  title="Clear Flag & Approve"
-                                >
-                                  <CheckCircle2 className="w-4 h-4" />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => setFlagReasonModal({ surveyId: s.id, title: s.title })}
-                                  className="p-2 hover:bg-amber-50 text-slate-500 hover:text-amber-600 rounded-xl transition-colors cursor-pointer border border-slate-200"
-                                  title="Flag for Policy Review"
-                                >
-                                  <Flag className="w-4 h-4" />
                                 </button>
                               )}
 
@@ -1125,13 +1102,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                             </td>
 
                             <td className="p-4">
-                              {s.flagged ? (
-                                <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 font-bold text-[10px] flex items-center gap-1 w-fit">
-                                  <Flag className="w-3 h-3" />
-                                  <span>Flagged</span>
-                                </span>
-                              ) : (
-                                <span
+                              <span
                                   className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
                                     s.status === "published"
                                       ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
@@ -1142,7 +1113,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                                 >
                                   {s.status.toUpperCase()}
                                 </span>
-                              )}
                             </td>
 
                             <td className="p-4 text-right space-x-1 whitespace-nowrap">
@@ -1160,23 +1130,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                                   className="p-1.5 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 rounded-lg transition-colors cursor-pointer"
                                 >
                                   <BarChart3 className="w-4 h-4" />
-                                </button>
-                              )}
-                              {s.flagged ? (
-                                <button
-                                  onClick={() => onClearFlag(s.id)}
-                                  title="Clear Flag"
-                                  className="p-1.5 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  <CheckCircle2 className="w-4 h-4" />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => setFlagReasonModal({ surveyId: s.id, title: s.title })}
-                                  title="Flag Survey for Review"
-                                  className="p-1.5 hover:bg-amber-50 text-slate-400 hover:text-amber-600 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  <Flag className="w-4 h-4" />
                                 </button>
                               )}
                               <button
@@ -1213,76 +1166,13 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
         </div>
       )}
 
-      {/* TAB 2: FLAGGED SURVEYS MODERATION QUEUE */}
-      {activeTab === "flagged" && (
-        <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
-          <div className="border-b border-slate-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h2 className="font-serif text-xl font-bold text-slate-900">
-                Flagged Surveys Moderation Queue ({flaggedSurveys.length})
-              </h2>
-              <p className="text-xs text-slate-500">
-                Surveys reported for inappropriate question design, campus evaluation policy non-compliance, or misleading content.
-              </p>
-            </div>
-          </div>
-
-          {flaggedSurveys.length > 0 ? (
-            <div className="space-y-4">
-              {flaggedSurveys.map((s) => (
-                <div
-                  key={s.id}
-                  className="p-5 rounded-2xl bg-rose-50/50 border border-rose-200 flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  <div className="space-y-1.5 max-w-2xl">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 font-bold text-[10px] border border-rose-300">
-                        Flagged
-                      </span>
-                      <span className="text-xs font-semibold text-slate-500">
-                        {s.cat} · {s.academicYear || "AY 2025-2026"}
-                      </span>
-                    </div>
-                    <h3 className="font-bold text-base text-slate-900">{s.title}</h3>
-                    <p className="text-xs text-rose-800 font-medium">
-                      Reported Reason: {s.flagReason || "Violates campus evaluation content policies"}
-                    </p>
-                    <div className="text-[11px] text-slate-500">
-                      Created by: {s.ownerName} ({s.owner}) on {s.created}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={() => setSelectedSurveyForPreview(s)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
-                    >
-                      Inspect Questions
-                    </button>
-                    <button
-                      onClick={() => onClearFlag(s.id)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl cursor-pointer"
-                    >
-                      Clear Flag
-                    </button>
-                    <button
-                      onClick={() => onDeleteSurvey(s.id)}
-                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl cursor-pointer"
-                    >
-                      Delete Survey
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-10 text-center text-slate-400 border border-dashed border-slate-200 rounded-2xl space-y-2">
-              <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
-              <div className="text-sm font-bold text-slate-700">Flagged Queue is Clean</div>
-              <p className="text-xs text-slate-400">All institutional surveys meet university standards and policies.</p>
-            </div>
-          )}
-        </div>
+      {activeTab === "reports" && onDismissReports && onTakedownReported && (
+        <ReportedSurveysPanel
+          reports={surveyReports}
+          surveys={surveys}
+          onDismiss={onDismissReports}
+          onTakedown={onTakedownReported}
+        />
       )}
 
       {/* TAB 3: USER & ROLE DIRECTORY */}
@@ -1297,6 +1187,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           onToggleUserStatus={onToggleUserStatus}
           onApproveUser={(email) => onToggleUserStatus(email, "active")}
           onPromoteUser={onPromoteUser}
+          schoolLists={schoolLists}
         />
       )}
 
@@ -1335,7 +1226,9 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
               <tbody className="divide-y divide-slate-100 text-slate-700 font-mono text-[11px]">
                 {logs.map((log, idx) => (
                   <tr key={log.id || idx} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-3.5 text-slate-500 whitespace-nowrap">{log.time}</td>
+                    <td className="p-3.5 text-slate-500 whitespace-nowrap">
+                      {log.timestamp ? formatDateTime(log.timestamp) : log.time}
+                    </td>
                     <td className="p-3.5">
                       <span className="font-bold text-slate-900 font-sans">{log.user}</span>
                       <span className="text-[10px] text-slate-500 block">({log.pos})</span>
@@ -1375,6 +1268,10 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           onSave={onSaveAcademicYear}
           onDelete={onDeleteAcademicYear}
         />
+      )}
+
+      {activeTab === "school" && onSaveSchoolLists && (
+        <SchoolSetupManager lists={schoolLists} users={users} surveys={surveys} onSave={onSaveSchoolLists} />
       )}
 
       {/* TAB 5: BACKUP & DATA SNAPSHOTS */}
@@ -1440,51 +1337,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                 className="px-5 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl cursor-pointer"
               >
                 Close Preview
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FLAG REASON MODAL */}
-      {flagReasonModal && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setFlagReasonModal(null)}
-        >
-          <div
-            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="font-serif text-lg font-bold text-slate-900">
-              Flag Survey for Policy Review
-            </h3>
-            <p className="text-xs text-slate-600">
-              Enter the reason why survey "{flagReasonModal.title}" is being flagged:
-            </p>
-            <textarea
-              rows={3}
-              value={flagReasonInput}
-              onChange={(e) => setFlagReasonInput(e.target.value)}
-              placeholder="e.g. Inappropriate question design or misleading instructions..."
-              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-hidden"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setFlagReasonModal(null)}
-                className="px-4 py-2 bg-slate-100 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  onFlagSurvey(flagReasonModal.surveyId, flagReasonInput || "Administrative Policy Flag");
-                  setFlagReasonModal(null);
-                  setFlagReasonInput("");
-                }}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl cursor-pointer"
-              >
-                Confirm Flag
               </button>
             </div>
           </div>

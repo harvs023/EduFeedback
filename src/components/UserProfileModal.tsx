@@ -1,39 +1,58 @@
 import React, { useState } from "react";
-import { UserProfile } from "../types";
-import { DEPARTMENTS_DATA, PROGRAMS_BY_DEPARTMENT } from "../data/initialData";
+import { SchoolLists, UserProfile } from "../types";
 import { X, CheckCircle2, Shield } from "lucide-react";
+import { SchoolFieldsPicker } from "./SchoolFieldsPicker";
+import { missingSchoolField, type SchoolFields } from "../lib/schoolLists";
 
 interface UserProfileModalProps {
   currentUser: UserProfile;
+  schoolLists: SchoolLists | null;
   onClose: () => void;
   onUpdateProfile: (updated: Partial<UserProfile>) => void;
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   currentUser,
+  schoolLists,
   onClose,
   onUpdateProfile,
 }) => {
   const [name, setName] = useState<string>(currentUser.name);
-  const [department, setDepartment] = useState<string>(currentUser.department || "College of Computer Studies");
-  const [program, setProgram] = useState<string>(currentUser.program || "BS Computer Science");
-  const [year, setYear] = useState<string>(currentUser.year || "3rd Year");
-  const [section, setSection] = useState<string>(currentUser.section || "CS-3A");
-  const [studentId, setStudentId] = useState<string>(currentUser.studentId || "2023-10492");
-  const [newPassword, setNewPassword] = useState<string>("");
+  const [school, setSchool] = useState<SchoolFields>({
+    department: currentUser.department || "",
+    program: currentUser.program || "",
+    year: currentUser.year || "",
+    section: currentUser.section || "",
+  });
+  const [studentId, setStudentId] = useState<string>(currentUser.studentId || "");
+  const [error, setError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
-  const availablePrograms = PROGRAMS_BY_DEPARTMENT[department] || ["General Studies"];
+  const isStudent = currentUser.pos === "Student" || currentUser.pos === "Student Officer";
+  const needsSchool = isStudent || currentUser.pos === "Faculty";
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim()) {
+      setError("Please enter your name.");
+      return;
+    }
+    const missing = needsSchool ? missingSchoolField(school, isStudent) : null;
+    if (missing) {
+      setError(missing);
+      return;
+    }
+    if (isStudent && !studentId.trim()) {
+      setError("Please enter your student ID.");
+      return;
+    }
+    setError(null);
     onUpdateProfile({
-      name,
-      department,
-      program,
-      year,
-      section,
-      studentId,
+      name: name.trim(),
+      department: school.department,
+      ...(isStudent
+        ? { program: school.program, year: school.year, section: school.section, studentId: studentId.trim() }
+        : {}),
     });
     setSavedSuccess(true);
     setTimeout(() => {
@@ -93,69 +112,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">College / Dept</label>
-              <select
-                value={department}
-                onChange={(e) => {
-                  setDepartment(e.target.value);
-                  setProgram(PROGRAMS_BY_DEPARTMENT[e.target.value]?.[0] || "General");
-                }}
-                className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-              >
-                {Object.keys(DEPARTMENTS_DATA).map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <SchoolFieldsPicker lists={schoolLists} isStudent={isStudent} value={school} onChange={setSchool} />
 
+          {isStudent && (
             <div>
-              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Academic Program</label>
-              <select
-                value={program}
-                onChange={(e) => setProgram(e.target.value)}
-                className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-              >
-                {availablePrograms.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Year Level</label>
-              <select
-                value={year}
-                onChange={(e) => setYear(e.target.value)}
-                className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-              >
-                <option value="1st Year">1st Year</option>
-                <option value="2nd Year">2nd Year</option>
-                <option value="3rd Year">3rd Year</option>
-                <option value="4th Year">4th Year</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Section</label>
-              <input
-                type="text"
-                value={section}
-                onChange={(e) => setSection(e.target.value)}
-                placeholder="e.g. CS-3A"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-              />
-            </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Student / Emp ID</label>
+              <label className="block font-bold text-slate-700 mb-1">Student ID</label>
               <input
                 type="text"
                 value={studentId}
@@ -163,20 +124,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
               />
             </div>
-          </div>
+          )}
 
-          <div className="pt-2 border-t border-slate-100">
-            <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Change Password (Optional)
-            </label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Enter new password to update..."
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-            />
-          </div>
+          {error && (
+            <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 text-xs font-semibold text-rose-700">{error}</div>
+          )}
 
           <div className="pt-4 flex justify-end gap-2">
             <button

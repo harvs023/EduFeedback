@@ -1,13 +1,21 @@
 import React, { useMemo, useState } from "react";
 import { useConfirm } from "./ConfirmDialog";
-import { Tag, Plus, Pencil, Check, X, Archive, RotateCcw, Trash2 } from "lucide-react";
-import { Survey, Topic } from "../types";
+import { Tag, Plus, Pencil, Check, X, Archive, RotateCcw, Trash2, FolderOpen, Undo2, Lock } from "lucide-react";
+import { ActivityLog, Survey, Topic, TopicBlockMove, TopicMoveRecord } from "../types";
+import { OTHER_TOPIC_ID, sortTopics } from "../lib/topicBlocks";
+import { TopicRequestsPanel, type TopicDecision } from "./TopicRequestsPanel";
+import { TopicBlocksBrowser } from "./TopicBlocksBrowser";
+import { formatDateTime } from "../lib/timeAgo";
 
 interface TopicsManagerProps {
   topics: Topic[];
   surveys: Survey[];
   onSaveTopic?: (topic: Topic) => Promise<void> | void;
   onDeleteTopic?: (topicId: string) => Promise<void> | void;
+  logs?: ActivityLog[];
+  onMoveBlocks?: (moves: TopicBlockMove[], kind: "move" | "merge", retireTopicId?: string) => Promise<void>;
+  onUndoMove?: (logId: string, record: TopicMoveRecord) => Promise<void>;
+  onDecideRequest?: (surveyId: string, blockId: string, decision: TopicDecision, note: string) => Promise<void>;
 }
 
 const MIN_LEN = 2;
@@ -25,8 +33,36 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
   surveys,
   onSaveTopic,
   onDeleteTopic,
+  logs = [],
+  onMoveBlocks,
+  onUndoMove,
+  onDecideRequest,
 }) => {
   const { confirm, confirmDialog } = useConfirm();
+  const [openTopicId, setOpenTopicId] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState(false);
+
+  // The most recent bulk move or merge, if it has not been undone yet.
+  const lastMove = useMemo(() => {
+    const moves = logs.filter((l) => l.topicMove && l.id).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    return moves[0] && !moves[0].topicMove!.undone ? moves[0] : null;
+  }, [logs]);
+
+  const handleUndo = async () => {
+    if (!lastMove || !onUndoMove) return;
+    const ok = await confirm({
+      title: "Undo the last topic change?",
+      message: `${lastMove.details} Blocks that were changed again since then are left as they are.`,
+      confirmLabel: "Undo",
+    });
+    if (!ok) return;
+    setUndoing(true);
+    try {
+      await onUndoMove(lastMove.id!, lastMove.topicMove!);
+    } finally {
+      setUndoing(false);
+    }
+  };
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -48,10 +84,7 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
     return map;
   }, [surveys]);
 
-  const sortedTopics = useMemo(
-    () => [...topics].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-    [topics]
-  );
+  const sortedTopics = useMemo(() => sortTopics(topics), [topics]);
 
   const activeCount = sortedTopics.filter((t) => t.status === "active").length;
   const retiredCount = sortedTopics.length - activeCount;
@@ -87,7 +120,7 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
     }
     if (!onSaveTopic) return;
     const name = newName.trim();
-    const maxOrder = topics.reduce((m, t) => Math.max(m, t.order ?? 0), 0);
+    const maxOrder = topics.reduce((m, t) => (t.id === OTHER_TOPIC_ID ? m : Math.max(m, t.order ?? 0)), 0);
     const topic: Topic = {
       id: `topic_${slugify(name) || "new"}_${Date.now().toString(36)}`,
       name,
@@ -158,8 +191,9 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
             Survey Topics ({sortedTopics.length})
           </h2>
           <p className="text-xs text-slate-500">
-            Topics group questions inside a survey. Renaming a topic updates it everywhere. A topic
-            already used by a survey can only be retired, never deleted, so old reports stay intact.
+            Topics group questions inside a survey, and Analytics combines results by topic across surveys.
+            Renaming a topic updates it everywhere. A topic already used by a survey can only be retired, never
+            deleted. "Other" is a fixed topic for questions that fit nowhere. Use Open to move blocks between topics.
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs font-semibold">
@@ -171,6 +205,39 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
           </span>
         </div>
       </div>
+
+      {lastMove && onUndoMove && (
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 flex flex-wrap items-center justify-between gap-2">
+          <span>
+            <strong>Last topic change</strong> ({lastMove.timestamp ? formatDateTime(lastMove.timestamp) : lastMove.time}):{" "}
+            {lastMove.details}
+          </span>
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={undoing}
+            className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 font-bold rounded-lg flex items-center gap-1 cursor-pointer disabled:opacity-50"
+          >
+            <Undo2 className="w-3.5 h-3.5" /> Undo
+          </button>
+        </div>
+      )}
+
+      {onDecideRequest && (
+        <div className="p-4 rounded-2xl border border-slate-200">
+          <TopicRequestsPanel surveys={surveys} topics={topics} onDecide={onDecideRequest} />
+        </div>
+      )}
+
+      {openTopicId && onMoveBlocks && topics.find((t) => t.id === openTopicId) && (
+        <TopicBlocksBrowser
+          topic={topics.find((t) => t.id === openTopicId)!}
+          topics={topics}
+          surveys={surveys}
+          onMove={onMoveBlocks}
+          onClose={() => setOpenTopicId(null)}
+        />
+      )}
 
       {/* Add topic */}
       <div className="flex flex-col sm:flex-row gap-2">
@@ -218,6 +285,7 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
             const isEditing = editingId === t.id;
             const isBusy = busyId === t.id;
             const retired = t.status === "retired";
+            const isSystem = t.id === OTHER_TOPIC_ID;
             return (
               <li
                 key={t.id}
@@ -257,6 +325,11 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
                       </p>
                     </div>
                   )}
+                  {!isEditing && isSystem && (
+                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-slate-100 text-slate-600 border-slate-200 flex items-center gap-1">
+                      <Lock className="w-3 h-3" /> System
+                    </span>
+                  )}
                   {!isEditing && (
                     <span
                       className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
@@ -293,6 +366,18 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
                     </>
                   ) : (
                     <>
+                      {onMoveBlocks && (
+                        <button
+                          type="button"
+                          onClick={() => setOpenTopicId(openTopicId === t.id ? null : t.id)}
+                          title="Open: see its blocks, move or merge"
+                          className="px-2.5 py-1.5 rounded-lg text-indigo-700 hover:bg-indigo-50 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <FolderOpen className="w-4 h-4" /> Open
+                        </button>
+                      )}
+                      {!isSystem && (
+                      <>
                       <button
                         type="button"
                         onClick={() => startEdit(t)}
@@ -324,6 +409,8 @@ export const TopicsManager: React.FC<TopicsManagerProps> = ({
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      </>
+                      )}
                     </>
                   )}
                 </div>

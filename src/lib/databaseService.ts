@@ -40,6 +40,8 @@ import {
   AppSettings,
   SchoolLists,
   SurveyReport,
+  SurveyTopicBlock,
+  TopicMoveRecord,
 } from "../types";
 import {
   MASTER_ADMIN_EMAIL,
@@ -224,6 +226,10 @@ export class DatabaseService {
     return await FirestoreSurveyService.getSurveys(currentUser);
   }
 
+  static async updateTopicBlocks(surveyId: string | number, topicBlocks: SurveyTopicBlock[]): Promise<void> {
+    await FirestoreSurveyService.updateTopicBlocks(surveyId, topicBlocks);
+  }
+
   static async saveSurvey(survey: Survey): Promise<void> {
     const normalizedSurvey: Survey = {
       ...survey,
@@ -396,6 +402,10 @@ export class DatabaseService {
       return [];
     }
     return await FirestoreLogsService.getAll();
+  }
+
+  static async markTopicMoveUndone(logId: string, record: TopicMoveRecord): Promise<void> {
+    await FirestoreLogsService.markTopicMoveUndone(logId, record);
   }
 
   static async addLog(log: Omit<ActivityLog, "id" | "time"> | ActivityLog): Promise<void> {

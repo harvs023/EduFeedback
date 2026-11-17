@@ -1,16 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { BarChart3, ClipboardList, Columns2, LayoutList, Plus, RefreshCw } from "lucide-react";
-import { AcademicYearTerms, Survey, SurveyResponse, UserProfile } from "../../types";
+import { BarChart3, ClipboardList, Columns2, LayoutList, Plus, RefreshCw, Tags } from "lucide-react";
+import { AcademicYearTerms, Survey, SurveyResponse, Topic, UserProfile } from "../../types";
 import { analyzableSurveys } from "../../lib/analytics";
 import { OverviewTab } from "./OverviewTab";
 import { SurveyAnalyticsTab } from "./SurveyAnalyticsTab";
 import { CompareTab } from "./CompareTab";
+import { TopicOverviewTab } from "./TopicOverviewTab";
 
 interface AnalyticsPageProps {
   surveys: Survey[];
   /** Trusted responses only (unconfirmed sentiment results already removed). */
   responses: SurveyResponse[];
   academicCalendar: AcademicYearTerms[];
+  /** Used by the "By topic" view and the summary page. */
+  topics?: Topic[];
   /** A survey id to open directly, or "all" for the overview. */
   initialSurveyId?: string | number | "all";
   isAdmin: boolean;
@@ -25,12 +28,13 @@ interface AnalyticsPageProps {
   onCreateSurvey?: () => void;
 }
 
-type Tab = "overview" | "survey" | "compare";
+type Tab = "overview" | "topics" | "survey" | "compare";
 
 export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   surveys,
   responses: allResponses,
   academicCalendar,
+  topics = [],
   initialSurveyId,
   isAdmin,
   currentUser,
@@ -80,8 +84,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   const tabs: { id: Tab; label: string; icon: typeof BarChart3 }[] = [
     { id: "overview", label: "Overview", icon: LayoutList },
+    { id: "topics", label: "By topic", icon: Tags },
     { id: "survey", label: "One survey", icon: BarChart3 },
-    { id: "compare", label: "Compare surveys", icon: Columns2 },
+    { id: "compare", label: "Compare two surveys", icon: Columns2 },
   ];
 
   return (
@@ -135,7 +140,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         </div>
       ) : (
         <>
-          <div className="flex gap-1.5 border-b border-slate-200 overflow-x-auto">
+          <div className="flex gap-1.5 border-b border-slate-200 overflow-x-auto overflow-y-hidden">
             {tabs.map((t) => {
               const Icon = t.icon;
               const active = tab === t.id;
@@ -144,7 +149,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   key={t.id}
                   type="button"
                   onClick={() => setTab(t.id)}
-                  className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px cursor-pointer whitespace-nowrap shrink-0 ${
+                  className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 cursor-pointer whitespace-nowrap shrink-0 ${
                     active ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-800"
                   }`}
                 >
@@ -159,6 +164,22 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             <OverviewTab
               surveys={visible}
               responses={responses}
+              topics={topics}
+              calendar={academicCalendar}
+              users={isAdmin ? users : []}
+              isAdmin={isAdmin}
+              onOpenSurvey={(id) => {
+                setSurveyId(id);
+                setTab("survey");
+              }}
+              onOpenTopics={() => setTab("topics")}
+            />
+          ) : tab === "topics" ? (
+            <TopicOverviewTab
+              surveys={visible}
+              responses={responses}
+              topics={topics}
+              calendar={academicCalendar}
               onOpenSurvey={(id) => {
                 setSurveyId(id);
                 setTab("survey");

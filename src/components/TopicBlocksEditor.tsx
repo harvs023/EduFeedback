@@ -6,13 +6,18 @@ import {
   createBlock,
   createQuestion,
   orderQuestionsByBlock,
+  OTHER_TOPIC_ID,
+  sortTopics,
 } from "../lib/topicBlocks";
+import { TopicRequestBox } from "./TopicRequestBox";
 import { Trash2, Star, CheckSquare, ListFilter, AlignLeft, ChevronUp, ChevronDown, Plus, Layers } from "lucide-react";
 
 interface TopicBlocksEditorProps {
   questions: Question[];
   blocks: SurveyTopicBlock[];
   topics: Topic[];
+  /** The creator's email, saved with a topic suggestion. */
+  requesterEmail?: string;
   onChange: (questions: Question[], blocks: SurveyTopicBlock[]) => void;
 }
 
@@ -50,7 +55,7 @@ const ADD_BUTTONS: Array<{ type: QuestionType; label: string; icon: React.ReactN
   },
 ];
 
-export const TopicBlocksEditor: React.FC<TopicBlocksEditorProps> = ({ questions, blocks, topics, onChange }) => {
+export const TopicBlocksEditor: React.FC<TopicBlocksEditorProps> = ({ questions, blocks, topics, requesterEmail = "", onChange }) => {
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
   const atBlockLimit = blocks.length >= MAX_BLOCKS;
@@ -78,7 +83,21 @@ export const TopicBlocksEditor: React.FC<TopicBlocksEditorProps> = ({ questions,
     const newName = topics.find((t) => t.id === topicId)?.name || "";
     // Follow the topic name unless the user already typed their own title.
     const keepTitle = block.title.trim() !== "" && block.title.trim() !== oldName;
-    updateBlock(block.id, { topicId, title: keepTitle ? block.title : newName });
+    // A pending suggestion only belongs to a block under "Other".
+    const dropRequest = topicId !== OTHER_TOPIC_ID && block.topicRequest?.status === "pending";
+    commit(
+      questions,
+      blocks.map((b) => {
+        if (b.id !== block.id) return b;
+        const { topicRequest, ...rest } = b;
+        return {
+          ...rest,
+          topicId,
+          title: keepTitle ? block.title : newName,
+          ...(topicRequest && !dropRequest ? { topicRequest } : {}),
+        };
+      })
+    );
   };
 
   const moveBlock = (index: number, direction: -1 | 1) => {
@@ -150,7 +169,7 @@ export const TopicBlocksEditor: React.FC<TopicBlocksEditorProps> = ({ questions,
 
   // Topics that can be picked: all active ones, plus a retired one if a block already uses it.
   const topicOptionsFor = (block: SurveyTopicBlock) =>
-    topics.filter((t) => t.status === "active" || t.id === block.topicId);
+    sortTopics(topics.filter((t) => t.status === "active" || t.id === block.topicId));
 
   return (
     <div className="space-y-5">
@@ -257,10 +276,10 @@ export const TopicBlocksEditor: React.FC<TopicBlocksEditorProps> = ({ questions,
                   >
                     <option value="">Choose a topic…</option>
                     {topicOptionsFor(block).map((t) => (
-                      <option key={t.id} value={t.id} disabled={usedByOthers.has(t.id)}>
+                      <option key={t.id} value={t.id} disabled={usedByOthers.has(t.id) && t.id !== OTHER_TOPIC_ID}>
                         {t.name}
                         {t.status === "retired" ? " (retired)" : ""}
-                        {usedByOthers.has(t.id) ? " (used in another block)" : ""}
+                        {usedByOthers.has(t.id) && t.id !== OTHER_TOPIC_ID ? " (used in another block)" : ""}
                       </option>
                     ))}
                   </select>
@@ -279,6 +298,21 @@ export const TopicBlocksEditor: React.FC<TopicBlocksEditorProps> = ({ questions,
                   />
                 </div>
               </div>
+              <TopicRequestBox
+                block={block}
+                topics={topics}
+                requesterEmail={requesterEmail}
+                onChange={(request) =>
+                  commit(
+                    questions,
+                    blocks.map((b) => {
+                      if (b.id !== block.id) return b;
+                      const { topicRequest: _old, ...rest } = b;
+                      return request ? { ...rest, topicRequest: request } : rest;
+                    })
+                  )
+                }
+              />
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Short description <span className="normal-case font-medium text-slate-400">(optional)</span>

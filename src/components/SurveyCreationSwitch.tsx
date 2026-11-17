@@ -23,7 +23,7 @@ export const SurveyCreationSwitch: React.FC<{ open: boolean; onChange: (open: bo
           type="button"
           role="switch"
           aria-checked={open}
-          aria-label="Survey creation for faculty and officers"
+          aria-label="Survey creation for everyone except the admin"
           onClick={toggle}
           disabled={busy}
           className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${open ? "bg-emerald-500" : "bg-slate-600"}`}

@@ -11,7 +11,10 @@ import {
   AcademicYearTerms,
   SchoolLists,
   SurveyReport,
+  TopicBlockMove,
+  TopicMoveRecord,
 } from "../types";
+import type { TopicDecision } from "./TopicRequestsPanel";
 import { UserManagementView } from "./UserManagementView";
 import { DatabaseBackupView } from "./DatabaseBackupView";
 import { TopicsManager } from "./TopicsManager";
@@ -59,6 +62,9 @@ interface SuperadminDashboardProps {
   topics?: Topic[];
   currentUser?: UserProfile | null;
   surveyReports?: SurveyReport[];
+  onMoveTopicBlocks?: (moves: TopicBlockMove[], kind: "move" | "merge", retireTopicId?: string) => Promise<void>;
+  onUndoTopicMove?: (logId: string, record: TopicMoveRecord) => Promise<void>;
+  onDecideTopicRequest?: (surveyId: string, blockId: string, decision: TopicDecision, note: string) => Promise<void>;
   onDismissReports?: (surveyId: string, note: string) => Promise<void>;
   onTakedownReported?: (surveyId: string, reason: string) => Promise<void>;
   onDeleteSurvey: (surveyId: string | number) => void;
@@ -147,6 +153,9 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   topics = [],
   currentUser = null,
   surveyReports = [],
+  onMoveTopicBlocks,
+  onUndoTopicMove,
+  onDecideTopicRequest,
   onDismissReports,
   onTakedownReported,
   onDeleteSurvey,
@@ -486,7 +495,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
                   const ok = await confirm({
                     title: "Turn survey creation off?",
                     message:
-                      "Faculty and officers will not be able to create new surveys or send drafts for review until you turn it back on. Their drafts stay safe and live surveys keep running. You can still create surveys.",
+                      "Students, student officers and faculty will not be able to create new surveys or send drafts for review until you turn it back on. Their drafts stay safe and live surveys keep running. You can still create surveys.",
                     confirmLabel: "Turn off",
                   });
                   if (!ok) return;
@@ -785,7 +794,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
               {/* Secondary Filter: Creator / Owner */}
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
-                  Creator (Faculty / Officer)
+                  Creator
                 </label>
                 <select
                   value={filterCreator}
@@ -1258,6 +1267,10 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           surveys={surveys}
           onSaveTopic={onSaveTopic}
           onDeleteTopic={onDeleteTopic}
+          logs={logs}
+          onMoveBlocks={onMoveTopicBlocks}
+          onUndoMove={onUndoTopicMove}
+          onDecideRequest={onDecideTopicRequest}
         />
       )}
 

@@ -189,11 +189,45 @@ export interface EvaluationRun {
   files: { answerKey: string; finalSheet: string };
 }
 
+/**
+ * A creator's suggestion for a new topic, kept on the block that uses "Other".
+ * The admin approves it (new topic), maps it to an existing topic, or keeps the block under Other.
+ */
+export interface TopicRequest {
+  name: string;
+  reason: string;
+  requestedBy: string;
+  requestedAt: number;
+  status: "pending" | "approved" | "mapped" | "kept_other";
+  decidedBy?: string;
+  decidedAt?: number;
+  decisionNote?: string;
+  /** The topic the block was put under (approved or mapped). */
+  resultTopicId?: string;
+}
+
 export interface SurveyTopicBlock {
   id: string;
   topicId: string;
   title: string;
   description?: string;
+  topicRequest?: TopicRequest;
+}
+
+/** One block moved from one topic to another (kept in the activity log so a bulk move can be undone). */
+export interface TopicBlockMove {
+  surveyId: string;
+  blockId: string;
+  from: string;
+  to: string;
+}
+
+export interface TopicMoveRecord {
+  kind: "move" | "merge";
+  moves: TopicBlockMove[];
+  /** Merge only: the topic that was retired. */
+  retiredTopicId?: string;
+  undone?: boolean;
 }
 
 export interface Survey {
@@ -239,7 +273,7 @@ export interface Survey {
   archivedAt?: number;
   archivedBy?: string;
   archiveReason?: string;
-  topicBlocks?: Array<{ id: string; topicId: string; title: string; description?: string }>;
+  topicBlocks?: SurveyTopicBlock[];
   /** True = no closing date; the survey runs until the owner or admin archives it. */
   openEnded?: boolean;
 }
@@ -397,6 +431,8 @@ export interface ActivityLog {
   details: string;
   ip?: string;
   timestamp?: number;
+  /** Set on "Topic Blocks Moved" / "Topics Merged" entries; used by Undo. */
+  topicMove?: TopicMoveRecord;
 }
 
 export interface NewsAnnouncement {

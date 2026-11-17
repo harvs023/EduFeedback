@@ -628,6 +628,7 @@ export const SurveyBuilder: React.FC<SurveyBuilderProps> = ({
             questions={questions}
             blocks={topicBlocks}
             topics={topics}
+            requesterEmail={currentUser?.email || ""}
             onChange={(nextQuestions, nextBlocks) => setBuilder({ questions: nextQuestions, blocks: nextBlocks })}
           />
         </div>

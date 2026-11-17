@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings, SchoolLists, SurveyReport, ReportReason } from "./types";
+import { Survey, SurveyStatus, SurveyResponse, UserProfile, NewsAnnouncement, ActivityLog, NotificationItem, Topic, AcademicYearTerms, ResponseReview, AppSettings, SchoolLists, SurveyReport, ReportReason, TopicBlockMove, TopicMoveRecord } from "./types";
 import { DatabaseService } from "./lib/databaseService";
 import { schoolYearFor } from "./lib/schoolYear";
 import { isFirebaseConfigured, FirebaseAuthService, FirestoreUserService } from "./lib/firebase";
@@ -15,6 +15,8 @@ import {
 } from "./lib/sentiment";
 import { MASTER_ADMIN_EMAIL } from "./data/initialData";
 import { activeCategoryNames } from "./lib/schoolLists";
+import { OTHER_TOPIC_ID, OTHER_TOPIC_NAME } from "./lib/topicBlocks";
+import { applicableCount, applyMoves } from "./lib/topicMoves";
 import { Navbar } from "./components/Navbar";
 import { ThemedSurveySections } from "./components/ThemedSurveySections";
 import { AnalyticsPage } from "./components/analytics/AnalyticsPage";
@@ -136,6 +138,11 @@ export default function App() {
       let freshTopics: Topic[] = [];
       try {
         freshTopics = await DatabaseService.getTopics();
+        if (user?.role === "superadmin" && !freshTopics.some((t) => t.id === OTHER_TOPIC_ID)) {
+          const other: Topic = { id: OTHER_TOPIC_ID, name: OTHER_TOPIC_NAME, status: "active", order: 9999, createdAt: Date.now() };
+          await DatabaseService.saveTopic(other);
+          freshTopics = [...freshTopics, other];
+        }
       } catch (topicErr) {
         console.warn("Failed to load topics:", topicErr);
         freshTopics = [];
@@ -327,6 +334,11 @@ export default function App() {
       let freshTopics: Topic[] = [];
       try {
         freshTopics = await DatabaseService.getTopics();
+        if (user?.role === "superadmin" && !freshTopics.some((t) => t.id === OTHER_TOPIC_ID)) {
+          const other: Topic = { id: OTHER_TOPIC_ID, name: OTHER_TOPIC_NAME, status: "active", order: 9999, createdAt: Date.now() };
+          await DatabaseService.saveTopic(other);
+          freshTopics = [...freshTopics, other];
+        }
       } catch (topicErr) {
         console.warn("Failed to load topics:", topicErr);
         freshTopics = [];
@@ -1369,6 +1381,194 @@ export default function App() {
     }
   };
 
+  /** Tell each affected creator once about blocks the admin moved. */
+  const notifyMovedOwners = async (moves: TopicBlockMove[], text: (count: number, title: string) => string) => {
+    const bySurvey = new Map<string, number>();
+    moves.forEach((m) => bySurvey.set(m.surveyId, (bySurvey.get(m.surveyId) || 0) + 1));
+    const byOwner = new Map<string, string[]>();
+    bySurvey.forEach((count, surveyId) => {
+      const s = surveys.find((x) => String(x.id) === surveyId);
+      const owner = (s?.owner || "").trim().toLowerCase();
+      if (!s || !owner) return;
+      byOwner.set(owner, [...(byOwner.get(owner) || []), text(count, s.title)]);
+    });
+    for (const [owner, lines] of byOwner) {
+      try {
+        await DatabaseService.addNotification({
+          to: owner,
+          title: "🏷️ Topics updated in your surveys",
+          message: lines.join(" "),
+          icon: "🏷️",
+          type: "general",
+        });
+      } catch {}
+    }
+  };
+
+  /** Admin: write the new topic blocks of each changed survey. Returns how many blocks really moved. */
+  const writeMoves = async (moves: TopicBlockMove[], reverse = false): Promise<number> => {
+    const changed = applyMoves(surveys, moves, reverse);
+    const count = applicableCount(surveys, moves, reverse);
+    for (const [surveyId, blocks] of changed) {
+      await DatabaseService.updateTopicBlocks(surveyId, blocks);
+    }
+    setSurveys((prev) => prev.map((s) => (changed.has(String(s.id)) ? { ...s, topicBlocks: changed.get(String(s.id)) } : s)));
+    return count;
+  };
+
+  const topicName = (id: string) => topics.find((t) => t.id === id)?.name || id;
+
+  /** Admin: move blocks to another topic (a "merge" also retires the old topic). Only the topic changes. */
+  const handleMoveTopicBlocks = async (moves: TopicBlockMove[], kind: "move" | "merge", retireTopicId?: string) => {
+    if (!currentUser || moves.length === 0) return;
+    const to = moves[0].to;
+    try {
+      const moved = await writeMoves(moves);
+      if (kind === "merge" && retireTopicId) {
+        const old = topics.find((t) => t.id === retireTopicId);
+        if (old) {
+          const retired: Topic = { ...old, status: "retired" };
+          await DatabaseService.saveTopic(retired);
+          setTopics((prev) => prev.map((t) => (t.id === retired.id ? retired : t)));
+        }
+      }
+      const surveysCount = new Set(moves.map((m) => m.surveyId)).size;
+      const record: TopicMoveRecord = { kind, moves, ...(kind === "merge" && retireTopicId ? { retiredTopicId: retireTopicId } : {}) };
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: kind === "merge" ? "Topics Merged" : "Topic Blocks Moved",
+        details:
+          kind === "merge" && retireTopicId
+            ? `Merged "${topicName(retireTopicId)}" into "${topicName(to)}": ${moved} block(s) from ${surveysCount} survey(s); "${topicName(retireTopicId)}" retired.`
+            : `Moved ${moved} block(s) from ${surveysCount} survey(s) to "${topicName(to)}".`,
+        topicMove: record,
+      });
+      await notifyMovedOwners(moves, (n, title) => `The administrator moved ${n} question block(s) in "${title}" to the topic "${topicName(to)}". Your questions did not change.`);
+      showToast(`Moved ${moved} block(s) to "${topicName(to)}".`, "success");
+    } catch (err: any) {
+      showToast(err.message || "Could not move the blocks. Some may have moved; check and try again.", "info");
+    }
+  };
+
+  /** Admin: undo the last bulk move or merge (blocks changed since then are left alone). */
+  const handleUndoTopicMove = async (logId: string, record: TopicMoveRecord) => {
+    if (!currentUser) return;
+    try {
+      const moved = await writeMoves(record.moves, true);
+      if (record.retiredTopicId) {
+        const old = topics.find((t) => t.id === record.retiredTopicId);
+        if (old && old.status === "retired") {
+          const back: Topic = { ...old, status: "active" };
+          await DatabaseService.saveTopic(back);
+          setTopics((prev) => prev.map((t) => (t.id === back.id ? back : t)));
+        }
+      }
+      await DatabaseService.markTopicMoveUndone(logId, record);
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: "Topic Move Undone",
+        details: `Undid a ${record.kind}: ${moved} of ${record.moves.length} block(s) moved back.`,
+      });
+      await notifyMovedOwners(record.moves, (n, title) => `The administrator undid a topic change for ${n} question block(s) in "${title}".`);
+      const skipped = record.moves.length - moved;
+      showToast(
+        skipped > 0 ? `Undone. ${skipped} block(s) had changed since and were left as they are.` : "Undone.",
+        "success"
+      );
+    } catch (err: any) {
+      showToast(err.message || "Could not undo. Please try again.", "info");
+    }
+  };
+
+  /**
+   * Admin: decide a creator's topic suggestion. approve = create the topic (name may be adjusted)
+   * and use it; map = use an existing topic; keep = stay under Other.
+   */
+  const handleDecideTopicRequest = async (
+    surveyId: string,
+    blockId: string,
+    decision: { kind: "approve"; name: string } | { kind: "map"; topicId: string } | { kind: "keep" },
+    note: string
+  ) => {
+    if (!currentUser) return;
+    const survey = surveys.find((s) => String(s.id) === surveyId);
+    const block = survey?.topicBlocks?.find((b) => b.id === blockId);
+    if (!survey || !block?.topicRequest) {
+      showToast("This suggestion is no longer there. Refresh and try again.", "info");
+      return;
+    }
+    try {
+      let resultTopicId: string | undefined;
+      if (decision.kind === "approve") {
+        const name = decision.name.trim();
+        if (topics.some((t) => t.name.trim().toLowerCase() === name.toLowerCase())) {
+          showToast(`A topic named "${name}" already exists. Use "Put under an existing topic" instead.`, "info");
+          return;
+        }
+        const topic: Topic = {
+          id: `topic_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "new"}_${Date.now().toString(36)}`,
+          name,
+          status: "active",
+          order: topics.reduce((m, t) => Math.max(m, t.id === OTHER_TOPIC_ID ? 0 : t.order ?? 0), 0) + 1,
+          createdAt: Date.now(),
+        };
+        await DatabaseService.saveTopic(topic);
+        setTopics((prev) => [...prev, topic]);
+        resultTopicId = topic.id;
+      } else if (decision.kind === "map") {
+        resultTopicId = decision.topicId;
+      }
+      const status = decision.kind === "approve" ? "approved" : decision.kind === "map" ? "mapped" : "kept_other";
+      const blocks = (survey.topicBlocks || []).map((b) =>
+        b.id !== blockId
+          ? b
+          : {
+              ...b,
+              topicId: resultTopicId || b.topicId,
+              topicRequest: {
+                ...block.topicRequest!,
+                status: status as "approved" | "mapped" | "kept_other",
+                decidedBy: currentUser.email.trim().toLowerCase(),
+                decidedAt: Date.now(),
+                ...(note.trim() ? { decisionNote: note.trim() } : {}),
+                ...(resultTopicId ? { resultTopicId } : {}),
+              },
+            }
+      );
+      await DatabaseService.updateTopicBlocks(surveyId, blocks);
+      setSurveys((prev) => prev.map((s) => (String(s.id) === surveyId ? { ...s, topicBlocks: blocks } : s)));
+
+      const req = block.topicRequest;
+      const message =
+        status === "approved"
+          ? `Your suggested topic "${req.name}" was approved as "${decision.kind === "approve" ? decision.name.trim() : ""}" and is used in "${survey.title}".`
+          : status === "mapped"
+          ? `For "${survey.title}", the administrator used the existing topic "${topicName(resultTopicId!)}" instead of "${req.name}".`
+          : `For "${survey.title}", the administrator kept the block under "Other" instead of adding "${req.name}".`;
+      try {
+        await DatabaseService.addNotification({
+          to: req.requestedBy.trim().toLowerCase(),
+          title: "🏷️ Topic suggestion reviewed",
+          message: note.trim() ? `${message} Note: ${note.trim()}` : message,
+          icon: "🏷️",
+          type: "general",
+          data: { surveyId },
+        });
+      } catch {}
+      await logActivityAndRefresh({
+        user: currentUser.name,
+        pos: currentUser.pos,
+        action: "Topic Suggestion Decided",
+        details: `"${req.name}" in "${survey.title}": ${status.replace("_", " ")}${resultTopicId ? ` (${topicName(resultTopicId)})` : ""}.`,
+      });
+      showToast("Decision saved and the creator was notified.", "success");
+    } catch (err: any) {
+      showToast(err.message || "Could not save the decision.", "info");
+    }
+  };
+
   const handleDeleteTopic = async (topicId: string) => {
     try {
       await DatabaseService.deleteTopic(topicId);
@@ -1938,6 +2138,7 @@ export default function App() {
               surveys={surveys}
               responses={trustedResponseList}
               academicCalendar={academicCalendar}
+              topics={topics}
               users={users}
               dataLoadedAt={dataLoadedAt}
               onRefresh={handleRefreshAnalytics}
@@ -2049,6 +2250,9 @@ export default function App() {
               schoolLists={schoolLists}
               onSaveSchoolLists={handleSaveSchoolLists}
               surveyReports={surveyReports}
+              onMoveTopicBlocks={handleMoveTopicBlocks}
+              onUndoTopicMove={handleUndoTopicMove}
+              onDecideTopicRequest={handleDecideTopicRequest}
               onDismissReports={handleDismissReports}
               onTakedownReported={handleTakedownReported}
               onSaveTopic={handleSaveTopic}

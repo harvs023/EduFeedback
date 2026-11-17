@@ -1,6 +1,19 @@
 import { Question, QuestionType, SurveyTopicBlock, Topic } from "../types";
 
 export const MAX_BLOCKS = 8;
+
+/** The fixed "Other" topic for questions that fit no topic. It cannot be renamed, retired or deleted. */
+export const OTHER_TOPIC_ID = "topic_other";
+export const OTHER_TOPIC_NAME = "Other";
+
+/** Topics in their saved order, with "Other" always last. */
+export function sortTopics<T extends Topic>(topics: T[]): T[] {
+  return [...topics].sort((a, b) => {
+    if (a.id === OTHER_TOPIC_ID) return 1;
+    if (b.id === OTHER_TOPIC_ID) return -1;
+    return (a.order ?? 0) - (b.order ?? 0);
+  });
+}
 export const MAX_QUESTIONS = 30;
 
 export const makeId = (prefix: string) =>
@@ -71,8 +84,15 @@ export function validateBlocks(questions: Question[], blocks: SurveyTopicBlock[]
       errors.push(`${label}: choose a topic.`);
     } else if (topic && topic.status === "retired") {
       errors.push(`${label}: the topic "${topic.name}" was retired by the administrator. Choose another topic.`);
-    } else if (usedTopics.has(b.topicId)) {
+    } else if (
+      usedTopics.has(b.topicId) &&
+      b.topicId !== OTHER_TOPIC_ID &&
+      !(b.topicRequest && b.topicRequest.status !== "pending") // the admin put it there
+    ) {
       errors.push(`${label}: uses the same topic as an earlier block. Each block needs a different topic.`);
+    }
+    if (b.topicRequest?.status === "pending" && b.topicRequest.name.trim().length < 2) {
+      errors.push(`${label}: the suggested topic needs a name, or remove the suggestion.`);
     }
     usedTopics.add(b.topicId);
     if (b.title.trim().length < 3) errors.push(`${label}: enter a title (at least 3 characters).`);
@@ -87,11 +107,18 @@ export function validateBlocks(questions: Question[], blocks: SurveyTopicBlock[]
 export function cleanBlocks(blocks: SurveyTopicBlock[]): SurveyTopicBlock[] {
   return blocks.map((b) => {
     const description = (b.description || "").trim();
+    const r = b.topicRequest;
+    const topicRequest = r
+      ? (Object.fromEntries(
+          Object.entries({ ...r, name: r.name.trim(), reason: r.reason.trim() }).filter(([, v]) => v !== undefined)
+        ) as unknown as SurveyTopicBlock["topicRequest"])
+      : undefined;
     return {
       id: b.id,
       topicId: b.topicId,
       title: b.title.trim(),
       ...(description ? { description } : {}),
+      ...(topicRequest ? { topicRequest } : {}),
     };
   });
 }

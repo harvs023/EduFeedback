@@ -50,6 +50,8 @@ import {
   AppSettings,
   SchoolLists,
   SurveyReport,
+  SurveyTopicBlock,
+  TopicMoveRecord,
 } from "../types";
 import appletConfig from "../../firebase-applet-config.json";
 
@@ -311,6 +313,13 @@ export const FirestoreSurveyService = {
 
   async getAll(currentUser?: UserProfile | null): Promise<Survey[]> {
     return this.getSurveys(currentUser);
+  },
+
+  /** Admin: change only the topic blocks of a survey (topics and topic requests). Questions stay untouched. */
+  async updateTopicBlocks(surveyId: string | number, topicBlocks: SurveyTopicBlock[]): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    await updateDoc(doc(firestore, COLLECTIONS.SURVEYS, String(surveyId)), { topicBlocks });
   },
 
   async save(survey: Survey): Promise<void> {
@@ -695,6 +704,13 @@ export const FirestoreLogsService = {
       handleFirestoreError(err, OperationType.LIST, COLLECTIONS.LOGS);
       return [];
     }
+  },
+
+  /** Admin: mark a topic move in the log as undone. */
+  async markTopicMoveUndone(logId: string, record: TopicMoveRecord): Promise<void> {
+    const firestore = getFirebaseDb();
+    if (!firestore) throw new Error("Firestore is not initialized.");
+    await updateDoc(doc(firestore, COLLECTIONS.LOGS, logId), { topicMove: { ...record, undone: true } });
   },
 
   async add(log: Omit<ActivityLog, "id" | "time"> | ActivityLog): Promise<void> {

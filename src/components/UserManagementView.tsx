@@ -264,7 +264,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               User & Permission Directory
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Supervise student respondents, faculty survey creators, student council officers, and system administrator privileges.
+              Manage student, student officer, faculty and administrator accounts. Everyone except the admin has the same features.
             </p>
           </div>
 
@@ -380,9 +380,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-hidden cursor-pointer"
             >
               <option value="all">All Roles & Positions</option>
-              <option value="Student">Student (Creator & Respondent)</option>
-              <option value="Student Officer">Student Officer (Creator)</option>
-              <option value="Faculty">Faculty (Creator)</option>
+              <option value="Student">Student</option>
+              <option value="Student Officer">Student Officer</option>
+              <option value="Faculty">Faculty</option>
               <option value="Superadmin">Superadmin (Administrator)</option>
             </select>
           </div>
@@ -479,7 +479,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-amber-800 mt-0.5">
-                Faculty and Student Council Officers must be verified by System Administration before they can author surveys.
+                Faculty and Student Officer accounts must be approved by the administrator before they can sign in.
               </p>
             </div>
           </div>
@@ -582,9 +582,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                           onChange={(e) => onPromoteUser(u.email, e.target.value as any)}
                           className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-colors focus:outline-hidden ${roleBadgeColor}`}
                         >
-                          <option value="Student">Student (Creator & Respondent)</option>
-                          <option value="Student Officer">Student Officer (Creator)</option>
-                          <option value="Faculty">Faculty (Creator)</option>
+                          <option value="Student">Student</option>
+                          <option value="Student Officer">Student Officer</option>
+                          <option value="Faculty">Faculty</option>
                           <option value="Superadmin">Superadmin (Admin)</option>
                         </select>
                       </td>
@@ -749,7 +749,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   Add / Invite University User
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Register a student respondent, faculty creator, or administrative account.
+                  Add a student, student officer, faculty or administrator account.
                 </p>
               </div>
               <button
@@ -805,9 +805,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                     onChange={(e) => setAddForm({ ...addForm, pos: e.target.value as any })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:bg-white focus:outline-hidden"
                   >
-                    <option value="Student">Student (Creator & Respondent)</option>
-                    <option value="Student Officer">Student Officer (Creator)</option>
-                    <option value="Faculty">Faculty (Creator)</option>
+                    <option value="Student">Student</option>
+                    <option value="Student Officer">Student Officer</option>
+                    <option value="Faculty">Faculty</option>
                     <option value="Superadmin">Superadmin (Admin)</option>
                   </select>
                 </div>
@@ -956,9 +956,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                     onChange={(e) => setEditingUser({ ...editingUser, pos: e.target.value as any })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
                   >
-                    <option value="Student">Student (Creator & Respondent)</option>
-                    <option value="Student Officer">Student Officer (Creator)</option>
-                    <option value="Faculty">Faculty (Creator)</option>
+                    <option value="Student">Student</option>
+                    <option value="Student Officer">Student Officer</option>
+                    <option value="Faculty">Faculty</option>
                     <option value="Superadmin">Superadmin (Admin)</option>
                   </select>
                 </div>

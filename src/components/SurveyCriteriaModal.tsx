@@ -38,8 +38,12 @@ export const SurveyCriteriaModal: React.FC<SurveyCriteriaModalProps> = ({ onAcce
       role="dialog"
       aria-modal="true"
       aria-labelledby="criteria-title"
+      onClick={onCancel}
     >
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 sm:p-8 space-y-5">
+      <div
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 sm:p-8 space-y-5"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">

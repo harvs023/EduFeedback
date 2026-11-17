@@ -1,8 +1,8 @@
-import { formatDateTime } from "../lib/timeAgo";
 import React, { useState, useMemo } from "react";
 import { useConfirm } from "./ConfirmDialog";
 import SetupChecklist from "./SetupChecklist";
 import { AllSurveysPanel } from "./reviewCenter/AllSurveysPanel";
+import { ActivityLogPanel } from "./reviewCenter/ActivityLogPanel";
 import { ReviewCenterLayout, type ReviewCenterGroup } from "./ReviewCenterLayout";
 import { ReviewCenterHome, type WaitingTile } from "./ReviewCenterHome";
 import {
@@ -37,7 +37,6 @@ import {
   Activity,
   Database,
   CheckCircle2,
-  Download,
   Flag,
   CalendarDays,
   Tag,
@@ -204,26 +203,6 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
     { id: "profile-requests", label: "Profile requests", noun: "profile change requests", count: profileRequestCount, icon: UserCog },
   ];
 
-  const handleExportLogs = () => {
-    const headers = ["Timestamp", "User", "Position", "Action", "Details", "IP_Address"];
-    const rows = logs.map((l) => [
-      `"${l.timestamp ? formatDateTime(l.timestamp) : l.time}"`,
-      `"${l.user}"`,
-      `"${l.pos}"`,
-      `"${l.action}"`,
-      `"${l.details.replace(/"/g, '""')}"`,
-      `"${l.ip || "10.0.1.1"}"`,
-    ]);
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `EduFeedback_Audit_Logs_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   return (
     <div className="space-y-6">
       {confirmDialog}
@@ -319,63 +298,12 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
         />
       )}
 
-      {/* TAB 4: ACTIVITY AUDIT TRAIL */}
       {activeTab === "profile-requests" && onDecideProfileRequest && (
         <ProfileRequestsPanel requests={profileRequests} users={users} onDecide={onDecideProfileRequest} />
       )}
 
-      {activeTab === "logs" && (
-        <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-            <div>
-              <h2 className="font-serif text-xl font-bold text-slate-900">
-                Activity log
-              </h2>
-              <p className="text-xs text-slate-500">
-                Real-time chronological log of administrative operations, survey creation events, and policy audits.
-              </p>
-            </div>
+      {activeTab === "logs" && <ActivityLogPanel logs={logs} />}
 
-            <button
-              onClick={handleExportLogs}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Export CSV Logs</span>
-            </button>
-          </div>
-
-          <div className="border border-slate-200 rounded-2xl overflow-hidden max-h-96 overflow-y-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] tracking-wider sticky top-0">
-                <tr>
-                  <th className="p-3.5">Timestamp</th>
-                  <th className="p-3.5">User & Position</th>
-                  <th className="p-3.5">Action Event</th>
-                  <th className="p-3.5">Activity Details</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700 font-mono text-[11px]">
-                {logs.map((log, idx) => (
-                  <tr key={log.id || idx} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-3.5 text-slate-500 whitespace-nowrap">
-                      {log.timestamp ? formatDateTime(log.timestamp) : log.time}
-                    </td>
-                    <td className="p-3.5">
-                      <span className="font-bold text-slate-900 font-sans">{log.user}</span>
-                      <span className="text-[10px] text-slate-500 block">({log.pos})</span>
-                    </td>
-                    <td className="p-3.5 font-bold text-indigo-700">{log.action}</td>
-                    <td className="p-3.5 text-slate-700 font-sans">{log.details}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 6: SURVEY TOPICS */}
       {activeTab === "flagged-responses" && onDecideFlag && (
         <FlaggedResponsesPanel responses={responses} surveys={surveys} onDecide={onDecideFlag} />
       )}

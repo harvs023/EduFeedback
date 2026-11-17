@@ -33,8 +33,8 @@ export const FlagResponseDialog: React.FC<Props> = ({ suggested, onCancel, onSub
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-5 space-y-4">
+    <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4" role="dialog" aria-modal="true" onClick={onCancel}>
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">

@@ -26,8 +26,13 @@ export function SectionPickPrompt({
   const [busy, setBusy] = useState(false);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-sm" role="dialog" aria-label="Choose your new section">
+    <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4" onClick={onLater}>
+      <div
+        className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-sm"
+        role="dialog"
+        aria-label="Choose your new section"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center gap-2">
           <GraduationCap className="w-6 h-6 text-indigo-600" />
           <h2 className="text-lg font-bold text-slate-900">Welcome to the new school year</h2>

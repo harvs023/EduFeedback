@@ -448,6 +448,8 @@ export interface NotificationItem {
     | "survey_rejected"
     | "survey_takedown"
     | "survey_report"
+    | "profile_request"
+    | "school_year"
     | "approval";
   data?: Record<string, any>;
 }

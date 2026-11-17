@@ -1,5 +1,6 @@
 import { timeAgo } from "../lib/timeAgo";
-import React, { useState } from "react";
+import { notificationTarget } from "../lib/notificationTarget";
+import React, { useEffect, useRef, useState } from "react";
 import { UserProfile, NotificationItem } from "../types";
 import {
   LayoutDashboard,
@@ -38,6 +39,8 @@ interface NavbarProps {
   onMarkAllNotificationsRead?: () => void;
   onMarkNotificationRead?: (id: string) => void;
   onClearAllNotifications?: () => void;
+  /** Marks the notification read and opens the page it is about. */
+  onOpenNotification?: (n: NotificationItem) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -54,10 +57,35 @@ export const Navbar: React.FC<NavbarProps> = ({
   onMarkAllNotificationsRead,
   onMarkNotificationRead,
   onClearAllNotifications,
+  onOpenNotification,
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Close the bell and profile menus when clicking anywhere else or pressing Escape.
+  const notifRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showNotifMenu && !showUserMenu) return;
+    const onPointer = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (showNotifMenu && notifRef.current && !notifRef.current.contains(t)) setShowNotifMenu(false);
+      if (showUserMenu && userMenuRef.current && !userMenuRef.current.contains(t)) setShowUserMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowNotifMenu(false);
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [showNotifMenu, showUserMenu]);
 
   const isSuperadmin = currentUser?.role === "superadmin" || currentUser?.pos === "Superadmin";
   // All authenticated users can author surveys (Students, Officers, Faculty, Admins)
@@ -156,7 +184,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {/* Notifications Bell */}
-          <div className="relative">
+          <div className="relative" ref={notifRef}>
             <button
               onClick={() => {
                 setShowNotifMenu(!showNotifMenu);
@@ -211,15 +239,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ) : (
                     notifications.map((n) => {
                       const isUnread = !n.read;
+                      const target = notificationTarget(n, isSuperadmin);
                       return (
                         <div
                           key={n.id}
+                          role="button"
+                          tabIndex={0}
                           onClick={() => {
-                            onMarkNotificationRead?.(n.id);
-                            setShowNotifMenu(false);
-                            if (n.type === "news") onNavigate("dashboard");
-                            else if (n.type === "response") onNavigate("analytics");
-                            else onNavigate("take-survey");
+                            if (onOpenNotification) onOpenNotification(n);
+                            else onMarkNotificationRead?.(n.id);
+                            if (target) setShowNotifMenu(false);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.currentTarget as HTMLDivElement).click();
                           }}
                           className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors ${
                             isUnread ? "bg-indigo-50/30" : ""
@@ -259,8 +291,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                                 )}
                               </div>
                               <p className="text-xs text-slate-600 line-clamp-2 mt-0.5">{n.message}</p>
-                              <span className="text-[10px] text-slate-400 mt-1 block">
-                                {timeAgo(n.timestamp)}
+                              <span className="text-[10px] text-slate-400 mt-1 flex items-center justify-between gap-2">
+                                <span>{timeAgo(n.timestamp)}</span>
+                                {target && <span className="font-semibold text-indigo-600">{target.label} →</span>}
                               </span>
                             </div>
                           </div>
@@ -277,7 +310,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     }}
                     className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
                   >
-                    View Campus Dashboard →
+                    Go to Dashboard →
                   </button>
                 </div>
               </div>
@@ -286,7 +319,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* User Profile Pill / Menu */}
           {currentUser ? (
-            <div className="relative">
+            <div className="relative" ref={userMenuRef}>
               <button
                 onClick={() => {
                   setShowUserMenu(!showUserMenu);

@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { Survey, UserProfile, Answer, ReportReason } from "../types";
 import { ReportSurveyDialog } from "./ReportSurveyDialog";
+import { useConfirm } from "./ConfirmDialog";
 import confetti from "canvas-confetti";
 import {
   X,
@@ -65,6 +66,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
   const requiresName = survey.allowAnonymous === false;
   const [isAnonymous, setIsAnonymous] = useState<boolean>(!requiresName);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+  const { confirm, confirmDialog } = useConfirm();
   const [submittedReceipt, setSubmittedReceipt] = useState<{
     timestamp: string;
     isAnonymous: boolean;
@@ -206,15 +208,37 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
     }
   };
 
+  // Clicking outside, the X or Cancel: ask first if answers would be lost.
+  const hasUnsavedAnswers =
+    !submittedReceipt &&
+    !isReadOnly &&
+    !previewOnly &&
+    Object.values(answersState).some((v) => (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && String(v).trim() !== ""));
+  const requestClose = async () => {
+    if (submitting) return;
+    if (hasUnsavedAnswers) {
+      const ok = await confirm({
+        title: "Leave this survey?",
+        message: "Your answers are not submitted yet. If you leave now, they will be lost.",
+        confirmLabel: "Leave",
+        cancelLabel: "Keep answering",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    onClose();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <div
         className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 my-8 space-y-6 relative max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
+        {confirmDialog}
         {/* SUCCESS RECEIPT WINDOW */}
         {submittedReceipt ? (
           <div className="py-6 text-center space-y-6 animate-in fade-in zoom-in-95">
@@ -306,7 +330,8 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
             )}
           </div>
           <button
-            onClick={onClose}
+            onClick={requestClose}
+            aria-label="Close"
             className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
@@ -597,7 +622,7 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
           <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
             >
               {previewOnly ? "Close Preview" : isReadOnly ? "Close View" : "Cancel"}
@@ -624,8 +649,14 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
 
         {/* CONFIRMATION MODAL OVERLAY */}
         {showConfirmModal && (
-          <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
+          <div
+            className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => !submitting && setShowConfirmModal(false)}
+          >
+            <div
+              className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
                 <ShieldCheck className="w-6 h-6" />
               </div>

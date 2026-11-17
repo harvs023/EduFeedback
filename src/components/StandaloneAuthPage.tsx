@@ -4,6 +4,7 @@ import { SchoolFieldsPicker } from "./SchoolFieldsPicker";
 import { missingSchoolField, registrationOpen, type SchoolFields } from "../lib/schoolLists";
 import { DatabaseService } from "../lib/databaseService";
 import { isFirebaseConfigured } from "../lib/firebase";
+import { ForgotPasswordForm } from "./ForgotPasswordForm";
 import {
   ShieldCheck,
   Sparkles,
@@ -41,7 +42,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
   // Sign In Form States
   const [loginEmail, setLoginEmail] = useState<string>("");
   const [loginPassword, setLoginPassword] = useState<string>("");
-  const [rememberMe, setRememberMe] = useState<boolean>(true);
+  const [resetOpen, setResetOpen] = useState(false);
 
   // Registration Form States
   const [regName, setRegName] = useState<string>("");
@@ -333,6 +334,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                 type="button"
                 onClick={() => {
                   setMode("login");
+                  setResetOpen(false);
                   setError(null);
                 }}
                 className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -348,6 +350,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                 type="button"
                 onClick={() => {
                   setMode("register");
+                  setResetOpen(false);
                   setError(null);
                 }}
                 className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -362,7 +365,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
             </div>
 
             {/* Error Banner */}
-            {error && (
+            {error && !(mode === "login" && resetOpen) && (
               <div className="mb-5 p-3.5 rounded-xl bg-rose-950/60 border border-rose-800/80 text-rose-300 text-xs flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
@@ -389,7 +392,9 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
             {/* ======================================================== */}
             {/* SIGN IN FORM */}
             {/* ======================================================== */}
-            {mode === "login" ? (
+            {mode === "login" && resetOpen ? (
+              <ForgotPasswordForm initialEmail={loginEmail} onBack={() => setResetOpen(false)} />
+            ) : mode === "login" ? (
               <form onSubmit={handleLoginSubmit} className="space-y-4">
 
                 <div>
@@ -443,17 +448,17 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-950"
-                    />
-                    <span>Remember this session</span>
-                  </label>
-                  <span className="text-[11px] text-slate-500">Institutional Single Sign-On</span>
+                <div className="flex justify-end -mt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      setResetOpen(true);
+                    }}
+                    className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 hover:underline cursor-pointer"
+                  >
+                    Forgot password?
+                  </button>
                 </div>
 
                 <button

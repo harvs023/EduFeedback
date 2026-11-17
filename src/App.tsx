@@ -32,6 +32,7 @@ import { SuperadminDashboard, type ReviewTab } from "./components/SuperadminDash
 import { TakeSurveyModal } from "./components/TakeSurveyModal";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { StandaloneAuthPage } from "./components/StandaloneAuthPage";
+import { notificationTarget } from "./lib/notificationTarget";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -58,6 +59,8 @@ export default function App() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  // True until Firebase says whether someone is still signed in (avoids flashing the login page on reload).
+  const [authChecking, setAuthChecking] = useState<boolean>(isFirebaseConfigured());
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [academicCalendar, setAcademicCalendar] = useState<AcademicYearTerms[]>([]);
@@ -201,6 +204,14 @@ export default function App() {
     if (!isFirebaseConfigured()) return;
 
     const unsubscribe = FirebaseAuthService.onAuthChanged(async (fbUser) => {
+      try {
+        await syncAuthUser(fbUser);
+      } finally {
+        setAuthChecking(false);
+      }
+    });
+
+    async function syncAuthUser(fbUser: Parameters<Parameters<typeof FirebaseAuthService.onAuthChanged>[0]>[0]) {
       // During sign-up the profile is not saved yet; the sign-up screen finishes the login itself.
       if (DatabaseService.isRegistering) return;
       if (fbUser && fbUser.email) {
@@ -254,7 +265,7 @@ export default function App() {
         setProfileRequests([]);
         setSectionPickLater(false);
       }
-    });
+    }
 
     return () => {
       unsubscribe();
@@ -2163,6 +2174,20 @@ export default function App() {
     setCurrentView("admin");
   };
 
+  /** A notification was clicked: mark it read and open the page it is about. */
+  const handleOpenNotification = (n: NotificationItem) => {
+    if (!n.read) handleMarkNotificationRead(n.id);
+    const target = notificationTarget(n, isSuperadmin);
+    if (!target) return;
+    if (target.kind === "review") handleOpenReviewCenter(target.tab);
+    else if (target.kind === "analytics") {
+      setAnalyticsTargetSurveyId(target.surveyId);
+      setEditingSurvey(null);
+      setCurrentView("analytics");
+    } else if (target.kind === "profile") handleOpenProfile();
+    else handleNavigate(target.view);
+  };
+
   const handleNavigate = (view: string) => {
     if (view === "take-survey" && isSuperadmin) view = "admin";
     if (view === "admin") {
@@ -2214,6 +2239,16 @@ export default function App() {
             The application requires a configured Firebase connection to operate.
           </p>
         </div>
+      </div>
+    );
+  }
+
+  // Still checking a saved login (page reload): show a short loading screen, not the login page.
+  if (authChecking && !currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-4 text-slate-300" role="status">
+        <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-400 rounded-full animate-spin" />
+        <p className="text-sm">Loading EduFeedback...</p>
       </div>
     );
   }
@@ -2327,6 +2362,7 @@ export default function App() {
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onMarkNotificationRead={handleMarkNotificationRead}
           onClearAllNotifications={handleClearAllNotifications}
+          onOpenNotification={handleOpenNotification}
         />
 
         {/* View Router */}
@@ -2353,6 +2389,7 @@ export default function App() {
               onAddNews={handleAddNews}
               onMarkNotificationRead={handleMarkNotificationRead}
               onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+              onOpenNotification={handleOpenNotification}
             />
           )}
 

@@ -1,4 +1,5 @@
 import { timeAgo } from "../lib/timeAgo";
+import { notificationTarget } from "../lib/notificationTarget";
 import React, { useState } from "react";
 import {
   Survey,
@@ -131,6 +132,8 @@ interface DashboardProps {
   onAddNews: (news: Omit<NewsAnnouncement, "id" | "likesCount">) => Promise<boolean>;
   onMarkNotificationRead?: (id: string) => void;
   onMarkAllNotificationsRead?: () => void;
+  /** Marks the notification read and opens the page it is about. */
+  onOpenNotification?: (n: NotificationItem) => void;
   /** The admin's academic calendar (school year and semester in the welcome banner). */
   academicCalendar?: AcademicYearTerms[];
   /** Opens a survey to answer (from the Trending list). */
@@ -154,6 +157,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onAddNews,
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
+  onOpenNotification,
   onTakeSurvey,
   academicCalendar = [],
 }) => {
@@ -394,10 +398,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </p>
                 </div>
               ) : (
-                notifications.map((notif) => (
+                notifications.map((notif) => {
+                  const target = notificationTarget(notif, isSuperadmin);
+                  return (
                   <div
                     key={notif.id}
-                    onClick={() => onMarkNotificationRead?.(notif.id)}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      if (onOpenNotification) onOpenNotification(notif);
+                      else onMarkNotificationRead?.(notif.id);
+                      if (target) setShowNotificationModal(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.currentTarget as HTMLDivElement).click();
+                    }}
                     className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
                       notif.read
                         ? "bg-slate-50/60 border-slate-200 text-slate-600"
@@ -413,11 +428,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                       {notif.message}
                     </p>
-                    <span className="text-[10px] text-slate-400 mt-2 block">
-                      {timeAgo(notif.timestamp)}
+                    <span className="text-[10px] text-slate-400 mt-2 flex items-center justify-between gap-2">
+                      <span>{timeAgo(notif.timestamp)}</span>
+                      {target && <span className="font-semibold text-indigo-600">{target.label} →</span>}
                     </span>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
 

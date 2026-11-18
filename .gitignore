@@ -9,3 +9,6 @@ coverage/
 # Firebase service account keys (server secrets)
 *-firebase-adminsdk-*.json
 serviceAccount*.json
+
+# Demo data (generated backup file, script and real login emails): never commit
+demo/

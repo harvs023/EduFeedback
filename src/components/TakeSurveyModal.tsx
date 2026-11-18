@@ -692,8 +692,8 @@ export const TakeSurveyModal: React.FC<TakeSurveyModalProps> = ({
                 </div>
                 {survey.questions.some((q) => q.type === "paragraph") && (
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-500">Comment analysis:</span>
-                    <span className="font-bold text-blue-700">Sentiment (Google Gemini)</span>
+                    <span className="text-slate-500">Comments:</span>
+                    <span className="font-bold text-blue-700">Sentiment analysis</span>
                   </div>
                 )}
               </div>

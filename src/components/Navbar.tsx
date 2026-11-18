@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Flag,
   SlidersHorizontal,
+  ShieldCheck,
 } from "lucide-react";
 
 interface NavbarProps {
@@ -29,6 +30,7 @@ interface NavbarProps {
   currentUser: UserProfile | null;
   onSignOut?: () => void;
   onOpenProfile: () => void;
+  onOpenPrivacy?: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   selectedCategory?: string;
@@ -49,6 +51,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onSignOut,
   onOpenProfile,
+  onOpenPrivacy,
   searchQuery,
   onSearchChange,
   notifications = [],
@@ -384,6 +387,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <BarChart3 className="w-4 h-4 text-slate-400" />
                       <span>View Analytics Dashboard</span>
                     </button>
+                    {onOpenPrivacy && (
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onOpenPrivacy();
+                        }}
+                        className="w-full px-4 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-slate-400" />
+                        <span>Privacy Notice</span>
+                      </button>
+                    )}
                   </div>
                   <div className="border-t border-slate-100 pt-1">
                     <button

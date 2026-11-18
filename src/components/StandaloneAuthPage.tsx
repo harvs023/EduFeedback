@@ -5,6 +5,7 @@ import { missingSchoolField, registrationOpen, type SchoolFields } from "../lib/
 import { DatabaseService } from "../lib/databaseService";
 import { isFirebaseConfigured } from "../lib/firebase";
 import { ForgotPasswordForm } from "./ForgotPasswordForm";
+import { PrivacyNoticeModal, PRIVACY_NOTICE_VERSION, SCHOOL_NAME } from "./PrivacyNotice";
 import {
   ShieldCheck,
   Sparkles,
@@ -52,6 +53,8 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
   const [regPos, setRegPos] = useState<"Student" | "Student Officer" | "Faculty">("Student");
   const [regSchool, setRegSchool] = useState<SchoolFields>({ department: "", program: "", year: "", section: "" });
   const [regIdNumber, setRegIdNumber] = useState<string>("");
+  const [regAgreed, setRegAgreed] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   // The admin's School Setup lists (readable before login). null = still loading.
   const [schoolLists, setSchoolLists] = useState<SchoolLists | null>(null);
@@ -130,6 +133,10 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
       setError("Please enter your student ID.");
       return;
     }
+    if (!regAgreed) {
+      setError("Please read the Privacy Notice and tick the box to agree.");
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -145,6 +152,8 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
         department: regSchool.department,
         surveys: 0,
         joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        privacyAcceptedAt: Date.now(),
+        privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
       };
 
       if (regPos === "Student" || regPos === "Student Officer") {
@@ -238,7 +247,7 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                 </div>
                 <h3 className="text-sm font-bold text-white">Tagalog &amp; Taglish NLP</h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Reads comments in Tagalog, English and Taglish and sorts them as Positive, Neutral or Negative using Google Gemini.
+                  Reads comments in Tagalog, English and Taglish and sorts them as Positive, Neutral or Negative.
                 </p>
               </div>
 
@@ -312,7 +321,11 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                   </div>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
-                  To safeguard institutional integrity, Faculty and Student Council Officer accounts require verification and approval by the System Administrator before signing in. An alert has been forwarded to the admin desk.
+                  Faculty and Student Officer accounts need the System Administrator's approval before signing in. Your
+                  account now appears in the administrator's list of accounts waiting for approval.
+                </p>
+                <p className="text-xs text-indigo-300 leading-relaxed max-w-sm mx-auto">
+                  We also sent a verification link to your email. Open it, so you can sign in once you are approved.
                 </p>
                 <button
                   type="button"
@@ -615,6 +628,29 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
                   </div>
                 )}
 
+                <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer select-none pt-1">
+                  <input
+                    type="checkbox"
+                    checked={regAgreed}
+                    onChange={(e) => setRegAgreed(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-slate-600 text-indigo-600 focus:ring-indigo-500 bg-slate-950 shrink-0"
+                  />
+                  <span>
+                    I have read and agree to the{" "}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setShowPrivacy(true);
+                      }}
+                      className="font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer"
+                    >
+                      Privacy Notice
+                    </button>
+                    .
+                  </span>
+                </label>
+
                 <button
                   type="submit"
                   disabled={isLoading}
@@ -644,14 +680,17 @@ export const StandaloneAuthPage: React.FC<StandaloneAuthPageProps> = ({
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-950/80 px-6 py-4 text-xs text-slate-500 text-center">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>&copy; 2026 Institutional Quality Assurance Office. All rights reserved.</span>
-          <div className="flex items-center gap-4">
-            <span className="hover:text-slate-400 transition-colors">Privacy & Student Protection Policy</span>
-            <span>•</span>
-            <span className="hover:text-slate-400 transition-colors">CHED / DepEd QA Guidelines</span>
-          </div>
+          <span>&copy; 2026 EduFeedback · {SCHOOL_NAME}</span>
+          <button
+            type="button"
+            onClick={() => setShowPrivacy(true)}
+            className="hover:text-slate-300 underline-offset-2 hover:underline cursor-pointer"
+          >
+            Privacy Notice
+          </button>
         </div>
       </footer>
+      {showPrivacy && <PrivacyNoticeModal mode="read" onClose={() => setShowPrivacy(false)} />}
     </div>
   );
 };

@@ -23,10 +23,15 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(myKey());
     }
 
+    // Active = signed in, profile active, and the email is verified (clicked the link Firebase sent),
+    // or the admin marked it as checked (people who cannot receive email). The admin is never locked out.
     function isActive() {
       return signedIn()
         && exists(myProfilePath())
-        && get(myProfilePath()).data.status == 'active';
+        && get(myProfilePath()).data.status == 'active'
+        && (request.auth.token.email_verified == true
+            || get(myProfilePath()).data.get('emailCheckWaived', false) == true
+            || get(myProfilePath()).data.role == 'superadmin');
     }
 
     function myRole() {
@@ -198,6 +203,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && userId.lower() == myKey()
         && request.resource.data.email.lower() == myEmail()
+        && !('emailCheckWaived' in request.resource.data)
         && (
           (request.resource.data.pos == 'Student'
             && request.resource.data.role in ['user', 'student']
@@ -222,7 +228,7 @@ service cloud.firestore {
              .hasAny(['role', 'pos', 'status', 'email', 'joined',
                       'canCreateSurveys', 'canPostNews', 'restrictionReason',
                       'department', 'program', 'year', 'section', 'studentId',
-                      'sectionPickNeeded'])
+                      'sectionPickNeeded', 'emailCheckWaived'])
           ||
           // One-time section pick after the admin moved this student up a year.
           (resource.data.get('sectionPickNeeded', false) == true

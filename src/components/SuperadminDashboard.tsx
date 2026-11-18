@@ -95,6 +95,7 @@ interface SuperadminDashboardProps {
   /** "New school year: move students up one year" (Users page). */
   lastYearMoveAt?: number;
   onNewSchoolYear?: () => Promise<void>;
+  onMarkEmailsChecked?: (emails: string[]) => Promise<void>;
   initialTab?: ReviewTab;
   showToast?: (text: string, type?: "success" | "info") => void;
 }
@@ -143,6 +144,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
   onSetSurveyCreation,
   lastYearMoveAt,
   onNewSchoolYear,
+  onMarkEmailsChecked,
   initialTab = "home",
   showToast,
 }) => {
@@ -295,6 +297,7 @@ export const SuperadminDashboard: React.FC<SuperadminDashboardProps> = ({
           schoolLists={schoolLists}
           lastYearMoveAt={lastYearMoveAt}
           onNewSchoolYear={onNewSchoolYear}
+          onMarkEmailsChecked={onMarkEmailsChecked}
         />
       )}
 

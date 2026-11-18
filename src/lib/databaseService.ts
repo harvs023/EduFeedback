@@ -197,6 +197,11 @@ export class DatabaseService {
         throw saveErr;
       }
 
+      // Every new account must verify its email (the security rules check it).
+      if (!FirebaseAuthService.isEmailVerified()) {
+        await FirebaseAuthService.sendVerificationEmail().catch((e) => console.warn("Verification email not sent:", e));
+      }
+
       // Accounts waiting for approval must not stay signed in.
       if (initialStatus !== "active") await FirebaseAuthService.signOut();
       return { success: true, user: newUser };
@@ -367,6 +372,28 @@ export class DatabaseService {
   /** Remembers that the person has seen the decision on their last change request. */
   static async markProfileRequestSeen(email: string, decidedAt: number): Promise<void> {
     await FirestoreUserService.updateOwnFields(email, { profileRequestSeenAt: decidedAt });
+  }
+
+  static isEmailVerified(): boolean {
+    return FirebaseAuthService.isEmailVerified();
+  }
+
+  static async sendVerificationEmail(): Promise<void> {
+    await FirebaseAuthService.sendVerificationEmail();
+  }
+
+  static async refreshEmailVerified(): Promise<boolean> {
+    return FirebaseAuthService.refreshEmailVerified();
+  }
+
+  /** Notes on the person's own profile that their email is verified (shown in the admin's user list). */
+  static async markEmailVerified(email: string, at: number): Promise<void> {
+    await FirestoreUserService.updateOwnFields(email, { emailVerifiedAt: at });
+  }
+
+  /** Records that the person agreed to this version of the Privacy Notice. */
+  static async acceptPrivacyNotice(email: string, version: string, at: number): Promise<void> {
+    await FirestoreUserService.updateOwnFields(email, { privacyAcceptedAt: at, privacyNoticeVersion: version });
   }
 
   /** The one-time section pick after the admin moved this student up a year. */

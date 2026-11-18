@@ -28,6 +28,13 @@ export interface UserProfile {
   sectionPickNeeded?: boolean;
   /** Set when the "New school year" move found the student in their program's last year (account suspended). */
   graduatedAt?: number;
+  /** When the person agreed to the Privacy Notice, and which version (see PrivacyNotice.tsx). */
+  privacyAcceptedAt?: number;
+  privacyNoticeVersion?: string;
+  /** Set by the admin: this account may use the app without a verified email (locked by the rules). */
+  emailCheckWaived?: boolean;
+  /** When the person's email was seen as verified (written by the app, for the admin's list only). */
+  emailVerifiedAt?: number;
 }
 
 export type SurveyStatus = "draft" | "pending" | "rejected" | "scheduled" | "published" | "archived";

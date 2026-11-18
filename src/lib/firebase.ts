@@ -35,6 +35,7 @@ import {
   onAuthStateChanged,
   deleteUser,
   sendPasswordResetEmail,
+  sendEmailVerification,
   User as FirebaseUser,
 } from "firebase/auth";
 import {
@@ -233,6 +234,38 @@ export const FirebaseAuthService = {
     const authInstance = getFirebaseAuth();
     if (!authInstance) throw new Error("Sign-in is not available.");
     await sendPasswordResetEmail(authInstance, email.trim().toLowerCase());
+  },
+
+  /** True when the signed-in person has clicked the verification link Firebase emailed them. */
+  isEmailVerified(): boolean {
+    return getFirebaseAuth()?.currentUser?.emailVerified === true;
+  },
+
+  /** Emails the signed-in person a link to verify their address (opens this app afterwards). */
+  async sendVerificationEmail(): Promise<void> {
+    const user = getFirebaseAuth()?.currentUser;
+    if (!user) throw new Error("Please sign in again.");
+    try {
+      await sendEmailVerification(user, { url: window.location.origin });
+    } catch (err: any) {
+      // The app's address may not be on Firebase's list of allowed sites: send the plain link instead.
+      if (String(err?.code || "").includes("unauthorized-continue-uri") || String(err?.code || "").includes("invalid-continue-uri")) {
+        await sendEmailVerification(user);
+      } else {
+        throw err;
+      }
+    }
+  },
+
+  /** Asks Firebase again and refreshes the sign-in token, so the security rules see the new state. */
+  async refreshEmailVerified(): Promise<boolean> {
+    const user = getFirebaseAuth()?.currentUser;
+    if (!user) return false;
+    await user.reload();
+    const fresh = getFirebaseAuth()?.currentUser;
+    if (!fresh?.emailVerified) return false;
+    await fresh.getIdToken(true);
+    return true;
   },
 
   /** Removes the login that was just created (used when saving the profile fails). */
@@ -603,7 +636,7 @@ export const FirestoreUserService = {
    */
   async updateOwnFields(
     email: string,
-    fields: Partial<Pick<UserProfile, "name" | "profileRequestSeenAt" | "section" | "sectionPickNeeded">>
+    fields: Partial<Pick<UserProfile, "name" | "profileRequestSeenAt" | "section" | "sectionPickNeeded" | "privacyAcceptedAt" | "privacyNoticeVersion" | "emailVerifiedAt">>
   ): Promise<void> {
     const firestore = getFirebaseDb();
     if (!firestore) throw new Error("The database is not available. Please try again.");

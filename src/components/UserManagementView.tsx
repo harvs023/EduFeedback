@@ -38,6 +38,8 @@ interface UserManagementViewProps {
   /** Last "New school year" move, and the action itself (admin). */
   lastYearMoveAt?: number;
   onNewSchoolYear?: () => Promise<void>;
+  /** Admin: accounts that may sign in without a verified email. */
+  onMarkEmailsChecked?: (emails: string[]) => Promise<void>;
 }
 
 export const UserManagementView: React.FC<UserManagementViewProps> = ({
@@ -54,6 +56,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   schoolLists = null,
   lastYearMoveAt,
   onNewSchoolYear,
+  onMarkEmailsChecked,
 }) => {
   const countAuthoredSurveys = (email: string) => {
     const clean = (email || "").trim().toLowerCase();
@@ -83,6 +86,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     section: "",
     studentId: "",
     status: "active" as UserProfile["status"],
+    emailChecked: true,
   });
 
   const [formError, setFormError] = useState<string | null>(null);
@@ -229,6 +233,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       studentId: addForm.studentId.trim() || undefined,
       joined: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       surveys: 0,
+      ...(addForm.emailChecked ? { emailCheckWaived: true } : {}),
     };
 
     try {
@@ -244,6 +249,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
         section: "",
         studentId: "",
         status: "active",
+        emailChecked: true,
       });
     } catch (err: any) {
       setFormError(err.message || "Failed to create user account.");
@@ -276,6 +282,19 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     if (ok) onPromoteUser(user.email, pos);
   };
 
+  // Accounts that have neither verified their email nor been marked as checked by the admin.
+  const unverifiedUsers = users.filter((u) => u.role !== "superadmin" && !u.emailCheckWaived && !u.emailVerifiedAt);
+  const handleMarkAllEmailsChecked = async () => {
+    if (!onMarkEmailsChecked) return;
+    const ok = await confirm({
+      title: `Mark ${unverifiedUsers.length} emails as checked?`,
+      message:
+        "These accounts have not verified their email in EduFeedback. Marking them as checked lets them sign in without verifying. Only do this if you know these emails belong to these people (for example, accounts made before email verification was added). New sign-ups still have to verify.",
+      confirmLabel: "Mark as checked",
+    });
+    if (ok) await onMarkEmailsChecked(unverifiedUsers.map((u) => u.email));
+  };
+
   const approveAll = async () => {
     const pendingUsers = users.filter((u) => u.status === "pending_approval");
     const ok = await confirm({
@@ -301,6 +320,15 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           {onNewSchoolYear && (
             <NewSchoolYearMove users={users} lists={schoolLists} lastMoveAt={lastYearMoveAt} onConfirm={onNewSchoolYear} />
+          )}
+          {onMarkEmailsChecked && unverifiedUsers.length > 0 && (
+            <button
+              onClick={handleMarkAllEmailsChecked}
+              className="px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold text-sm rounded-xl flex items-center gap-2 cursor-pointer border border-amber-200"
+              title="Let accounts that have not verified their email sign in anyway"
+            >
+              <span>Mark emails checked ({unverifiedUsers.length})</span>
+            </button>
           )}
           <button
             onClick={handleExportCSV}
@@ -565,6 +593,15 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                             <span>{u.status === "suspended" && u.graduatedAt ? "GRADUATED" : u.status.toUpperCase()}</span>
                           </span>
                         )}
+                        {u.role !== "superadmin" && (
+                          <span
+                            className={`block mt-1 text-[10px] font-semibold ${
+                              u.emailCheckWaived || u.emailVerifiedAt ? "text-slate-500" : "text-amber-700"
+                            }`}
+                          >
+                            {u.emailCheckWaived ? "Email checked by admin" : u.emailVerifiedAt ? "Email verified" : "Email not verified yet"}
+                          </span>
+                        )}
                       </td>
 
                       {/* Administrative Actions */}
@@ -766,6 +803,24 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 />
               )}
 
+              {addForm.pos !== "Superadmin" && (
+                <label className="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={addForm.emailChecked}
+                    onChange={(e) => setAddForm({ ...addForm, emailChecked: e.target.checked })}
+                    className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  />
+                  <span>
+                    <span className="block font-bold text-slate-800">Email checked by admin</span>
+                    <span className="block text-[11px] text-slate-500">
+                      You know this email belongs to this person, so they do not need to verify it. Untick to make them
+                      click the verification link like everyone else.
+                    </span>
+                  </span>
+                </label>
+              )}
+
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button
                   type="button"
@@ -863,6 +918,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   studentId: editingUser.studentId,
                   status: editingUser.status,
                   canPostNews: editingUser.canPostNews !== false,
+                  emailCheckWaived: editingUser.emailCheckWaived === true,
                   canCreateSurveys: !creationOff,
                   restrictionReason: creationOff ? (editingUser.restrictionReason || "").trim() : "",
                 });
@@ -991,6 +1047,26 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   </span>
                 </span>
               </label>
+
+              {editingUser.pos !== "Superadmin" && (
+                <label className="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingUser.emailCheckWaived === true}
+                    onChange={(e) => setEditingUser({ ...editingUser, emailCheckWaived: e.target.checked })}
+                    className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  />
+                  <span>
+                    <span className="block font-bold text-slate-800">Email checked by admin</span>
+                    <span className="block text-[11px] text-slate-500">
+                      {editingUser.emailVerifiedAt
+                        ? "This person already verified their email. "
+                        : "This person has not verified their email yet. "}
+                      Tick this if they cannot receive the verification email and you know the email is theirs.
+                    </span>
+                  </span>
+                </label>
+              )}
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button

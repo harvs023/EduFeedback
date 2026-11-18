@@ -33,6 +33,8 @@ import { TakeSurveyModal } from "./components/TakeSurveyModal";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { StandaloneAuthPage } from "./components/StandaloneAuthPage";
 import { notificationTarget } from "./lib/notificationTarget";
+import { PrivacyNoticeModal, PRIVACY_NOTICE_VERSION } from "./components/PrivacyNotice";
+import { VerifyEmailScreen } from "./components/VerifyEmailScreen";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -59,6 +61,8 @@ export default function App() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  // Signed in, but the email is not verified yet: only the "Verify your email" screen is shown.
+  const [verifyUser, setVerifyUser] = useState<UserProfile | null>(null);
   // True until Firebase says whether someone is still signed in (avoids flashing the login page on reload).
   const [authChecking, setAuthChecking] = useState<boolean>(isFirebaseConfigured());
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -87,6 +91,7 @@ export default function App() {
   const [reviewOpenCount, setReviewOpenCount] = useState(0);
   // The one-time section pick after a "New school year" move; "Later" hides it until the next login.
   const [sectionPickLater, setSectionPickLater] = useState(false);
+  const [showPrivacyNotice, setShowPrivacyNotice] = useState(false);
   // Saved sentiment results confirmed by the server's signature check (see lib/sentiment.ts).
   const [validResultKeys, setValidResultKeys] = useState<Set<string>>(new Set());
   const [signatureCheck, setSignatureCheck] = useState<"checking" | "done" | "unavailable">("done");
@@ -199,6 +204,18 @@ export default function App() {
     };
   }, [currentUser?.email, currentUser?.status]);
 
+  /** The admin is never asked; others need a verified email unless the admin marked it as checked. */
+  function needsEmailCheck(profile: UserProfile): boolean {
+    if (profile.role === "superadmin" || profile.emailCheckWaived) return false;
+    return !DatabaseService.isEmailVerified();
+  }
+
+  /** Remembers on the profile that the email is verified (shown in the admin's user list). */
+  function noteEmailVerified(profile: UserProfile) {
+    if (profile.emailVerifiedAt || !DatabaseService.isEmailVerified()) return;
+    DatabaseService.markEmailVerified(profile.email, Date.now()).catch(() => {});
+  }
+
   // Firebase Auth State Listener & Profile Synchronization
   useEffect(() => {
     if (!isFirebaseConfigured()) return;
@@ -239,6 +256,13 @@ export default function App() {
             );
             return;
           }
+          if (needsEmailCheck(profile)) {
+            setVerifyUser(profile);
+            setCurrentUser(null);
+            return;
+          }
+          setVerifyUser(null);
+          noteEmailVerified(profile);
           setCurrentUser(profile);
           const userNotifs = await DatabaseService.getNotifications(cleanEmail);
           setNotifications(userNotifs);
@@ -264,6 +288,7 @@ export default function App() {
         setMyProfileRequest(null);
         setProfileRequests([]);
         setSectionPickLater(false);
+        setVerifyUser(null);
       }
     }
 
@@ -324,6 +349,11 @@ export default function App() {
   }, [surveys, currentUser]);
 
   const handleLogin = async (user: UserProfile) => {
+    if (needsEmailCheck(user)) {
+      setVerifyUser(user);
+      return;
+    }
+    setVerifyUser(null);
     setCurrentUser(user);
     setCurrentView("dashboard");
     const isAdmin = user.role === "superadmin" || user.pos === "Superadmin";
@@ -387,6 +417,24 @@ export default function App() {
     } catch (err: any) {
       showToast(err?.message || "Failed to load Firestore data for user.", "info");
     }
+  };
+
+  /** Pressed "I've verified it": ask Firebase again, then continue into the app. */
+  const handleCheckVerified = async (): Promise<boolean> => {
+    if (!verifyUser) return false;
+    const ok = await DatabaseService.refreshEmailVerified();
+    if (!ok) return false;
+    const at = Date.now();
+    await DatabaseService.markEmailVerified(verifyUser.email, at).catch(() => {});
+    await handleLogin({ ...verifyUser, emailVerifiedAt: at });
+    return true;
+  };
+
+  const handleAcceptPrivacy = async () => {
+    if (!currentUser) return;
+    const at = Date.now();
+    await DatabaseService.acceptPrivacyNotice(currentUser.email, PRIVACY_NOTICE_VERSION, at);
+    setCurrentUser({ ...currentUser, privacyAcceptedAt: at, privacyNoticeVersion: PRIVACY_NOTICE_VERSION });
   };
 
   const handleSignOut = async () => {
@@ -1355,6 +1403,25 @@ export default function App() {
     }
   };
 
+  /** Admin: let these accounts use the app without a verified email (e.g. they cannot receive email). */
+  const handleMarkEmailsChecked = async (emails: string[]) => {
+    if (emails.length === 0) return;
+    try {
+      await DatabaseService.updateUsersFields(emails.map((email) => ({ email, fields: { emailCheckWaived: true } })));
+      const set = new Set(emails.map((e) => e.toLowerCase()));
+      setUsers((prev) => prev.map((u) => (set.has(u.email.toLowerCase()) ? { ...u, emailCheckWaived: true } : u)));
+      await logActivityAndRefresh({
+        user: currentUser?.name || "Admin",
+        pos: "Superadmin",
+        action: "User Updated",
+        details: `Marked the email of ${emails.length} account${emails.length === 1 ? "" : "s"} as checked by the admin.`,
+      });
+      showToast(`${emails.length} account${emails.length === 1 ? "" : "s"} can now sign in without verifying their email.`, "success");
+    } catch (err: any) {
+      showToast(err.message || "Could not update the accounts.", "info");
+    }
+  };
+
   const handleAddUser = async (newUser: UserProfile) => {
     try {
       await DatabaseService.saveUser(newUser);
@@ -2253,6 +2320,20 @@ export default function App() {
     );
   }
 
+  if (verifyUser && !currentUser) {
+    return (
+      <VerifyEmailScreen
+        email={verifyUser.email}
+        onCheck={handleCheckVerified}
+        onResend={() => DatabaseService.sendVerificationEmail()}
+        onSignOut={async () => {
+          setVerifyUser(null);
+          await DatabaseService.signOut();
+        }}
+      />
+    );
+  }
+
   // If no user is logged in, show the standalone sign in / registration page as the first screen!
   if (!currentUser) {
     return (
@@ -2352,6 +2433,7 @@ export default function App() {
           currentUser={currentUser}
           onSignOut={handleSignOut}
           onOpenProfile={handleOpenProfile}
+          onOpenPrivacy={() => setShowPrivacyNotice(true)}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           selectedCategory={selectedCategory}
@@ -2582,6 +2664,7 @@ export default function App() {
               onSetSurveyCreation={handleSetSurveyCreation}
               lastYearMoveAt={appSettings.lastYearMoveAt}
               onNewSchoolYear={handleNewSchoolYear}
+              onMarkEmailsChecked={handleMarkEmailsChecked}
               schoolLists={schoolLists}
               onSaveSchoolLists={handleSaveSchoolLists}
               surveyReports={surveyReports}
@@ -2647,7 +2730,16 @@ export default function App() {
         />
       )}
 
-      {currentUser?.sectionPickNeeded && !sectionPickLater && !showProfileModal && (
+      {/* Everyone agrees to the current Privacy Notice once (accounts made before it existed too). */}
+      {currentUser && currentUser.privacyNoticeVersion !== PRIVACY_NOTICE_VERSION && (
+        <PrivacyNoticeModal mode="agree" onAgree={handleAcceptPrivacy} onSignOut={handleSignOut} />
+      )}
+      {showPrivacyNotice && <PrivacyNoticeModal mode="read" onClose={() => setShowPrivacyNotice(false)} />}
+
+      {currentUser?.sectionPickNeeded &&
+        currentUser.privacyNoticeVersion === PRIVACY_NOTICE_VERSION &&
+        !sectionPickLater &&
+        !showProfileModal && (
         <SectionPickPrompt
           user={currentUser}
           lists={schoolLists}
